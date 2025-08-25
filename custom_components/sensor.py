@@ -67,8 +67,7 @@ class CarburanteSensor(CoordinatorEntity, SensorEntity):
         service_type = "Self" if fuel_data.get("is_self") else "Servito"
         self._attr_name = f"{station_name} {fuel_name} {service_type}"
         
-        # Imposta classe dispositivo e classe stato
-        self._attr_device_class = "monetary"
+        # Imposta classe stato e unità di misura
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "€/L"
         

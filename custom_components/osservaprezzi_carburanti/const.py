@@ -1,7 +1,7 @@
 """Costanti per l'integrazione Osservaprezzi Carburanti."""
 from datetime import timedelta
 
-DOMAIN = "carburanti_mise"
+DOMAIN = "osservaprezzi_carburanti"
 
 # Chiavi di configurazione
 CONF_STATION_ID = "station_id"

@@ -109,6 +109,7 @@ class CarburanteSensor(CoordinatorEntity, SensorEntity):
             "phone": station_info.get("phone"),
             "email": station_info.get("email"),
             "website": station_info.get("website"),
+            "icon": self._attr_icon,
         }
 
     def _get_fuel_icon(self, fuel_name: str) -> str:
@@ -117,15 +118,17 @@ class CarburanteSensor(CoordinatorEntity, SensorEntity):
         
         if "benzina" in fuel_name_lower:
             return "mdi:gas-station"
-        elif "gasolio" in fuel_name_lower:
+        elif "gasolio" in fuel_name_lower or "diesel" in fuel_name_lower:
             return "mdi:fuel"
         elif "gpl" in fuel_name_lower:
             return "mdi:gas-cylinder"
         elif "metano" in fuel_name_lower:
             return "mdi:gas-station"
-        elif "e85" in fuel_name_lower:
+        elif "e85" in fuel_name_lower or "bio" in fuel_name_lower:
             return "mdi:leaf"
         elif "h2" in fuel_name_lower or "idrogeno" in fuel_name_lower:
             return "mdi:water"
+        elif "hvolution" in fuel_name_lower:
+            return "mdi:leaf-circle"
         else:
             return "mdi:fuel"

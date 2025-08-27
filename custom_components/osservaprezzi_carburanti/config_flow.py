@@ -48,12 +48,18 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 # Valida la stazione e ottieni le informazioni
                 station_info = await self._validate_station(station_id)
                 
-                return self.async_create_entry(
+                # Crea l'entry di configurazione
+                entry = self.async_create_entry(
                     title=station_info["name"],
                     data={
                         CONF_STATION_ID: station_id,
                     },
                 )
+                
+                # Aggiungi card automatiche dopo la configurazione
+                await self._add_default_cards(station_info)
+                
+                return entry
                 
             except InvalidStation:
                 errors["base"] = "invalid_station"
@@ -103,6 +109,39 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             raise CannotConnect(f"Errore di connessione: {err}")
         except Exception as err:
             raise CannotConnect(f"Errore imprevisto: {err}")
+
+    async def _add_default_cards(self, station_info: dict[str, Any]) -> None:
+        """Aggiunge card predefinite dopo la configurazione."""
+        # Invece di scrivere direttamente le card qui, invochiamo il servizio registrato
+        # dall'integrazione che si occupa di creare il file e notificare l'utente.
+        try:
+            await self.hass.services.async_call(
+                DOMAIN,
+                "add_default_cards",
+                {
+                    "station_info": station_info,
+                },
+            )
+
+            # Notifica di istruzioni all'utente con link alla pagina dei servizi
+            # Link relativo alla pagina Services; apre Developer Tools con il servizio pre-selezionato
+            svc_link = (
+                f"/developer-tools/service?domain={DOMAIN}&service=add_default_cards"
+            )
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Card Carburanti pronte",
+                    "message": (
+                        "Le card automatiche sono state generate. "
+                        f"Apri <a href=\"{svc_link}\">Developer Tools → Services (Call Service)</a> "
+                        "per eseguire il servizio e rigenerare le card se necessario."
+                    ),
+                },
+            )
+        except Exception as e:
+            _LOGGER.error(f"Errore nell'invocazione del servizio add_default_cards: {e}")
 
     async def async_step_import(self, import_info: dict[str, Any]) -> FlowResult:
         """Configura questa integrazione usando yaml."""

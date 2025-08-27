@@ -1,200 +1,254 @@
-# Integrazione Home Assistant - Osservaprezzi Carburanti
+# Osservaprezzi Carburanti per Home Assistant
 
-Questa integrazione per Home Assistant monitora i prezzi dei carburanti dalle stazioni di servizio italiane.
+Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizio Osservaprezzi del MISE, con card moderne e funzionali.
 
-## Caratteristiche
+## 🚀 Installazione Semplificata
 
-- ✅ Monitoraggio prezzi in tempo reale
-- ✅ Supporto per tutti i tipi di carburante (Benzina, Gasolio, GPL, Metano, E85, H2)
-- ✅ Distinzione tra servizio self-service e servito
-- ✅ Aggiornamento automatico ogni ora
-- ✅ Informazioni complete sulla stazione (indirizzo, brand, orari, servizi)
-- ✅ Interfaccia utente nativa di Home Assistant
-- ✅ Configurazione tramite UI
-- ✅ **Validazione automatica dell'ID stazione**
+### ⚡ Installazione Rapida
 
-## Installazione
+1. **Scarica il repository**:
 
-### Metodo 1: Installazione Manuale
+   ```bash
+   git clone https://github.com/casungo/osservaprezzi-carburanti-ha.git
+   ```
 
-1. Copia la cartella `custom_components/carburanti_mise` nella directory `config/custom_components/` del tuo Home Assistant
-2. Riavvia Home Assistant
-3. Vai in **Configurazione > Integrazioni**
-4. Cerca "Osservaprezzi Carburanti" e clicca su **Aggiungi integrazione**
-5. Inserisci l'ID della stazione di servizio che vuoi monitorare
+2. **Copia l'integrazione**:
 
-### Metodo 2: HACS (Home Assistant Community Store)
+   ```bash
+   cp -r osservaprezzi-carburanti-ha/custom_components /path/to/homeassistant/config/
+   ```
 
-_Prossimamente disponibile su HACS_
+3. **Riavvia Home Assistant** e configura l'integrazione
 
-## Configurazione
+### Tramite HACS (Raccomandato)
 
-### Trovare l'ID della Stazione
+1. **Installa HACS** (se non l'hai già): [Guida HACS](https://hacs.xyz/docs/installation/installation/)
+2. **Aggiungi questo repository** in HACS:
+   - Vai su HACS → Integrazioni
+   - Clicca sui 3 punti in alto a destra
+   - Seleziona "Repository personalizzati"
+   - Aggiungi: `casungo/osservaprezzi-carburanti-ha`
+   - Categoria: Integrazione
+3. **Installa l'integrazione**:
+   - Cerca "Osservaprezzi Carburanti" in HACS
+   - Clicca "Download"
+   - Riavvia Home Assistant
+   - L'integrazione verrà installata automaticamente in `config/custom_components/osservaprezzi_carburanti/`
 
-Per trovare l'ID di una stazione di servizio:
+## Configuration
 
-1. Vai su [carburanti.mise.gov.it](https://carburanti.mise.gov.it)
-2. Cerca la stazione di tuo interesse
-3. Apri la pagina di dettaglio della stazione
-4. L'ID è visibile nell'URL: `https://carburanti.mise.gov.it/ospzSearch/dettaglio/{ID}`
+### Config flow
 
-### Configurazione tramite UI
+To configure this integration go to: `Configurations` -> `Integrations` -> `ADD INTEGRATIONS` button, search for `Osservaprezzi Carburanti` and configure the component.
 
-1. **Configurazione > Integrazioni**
-2. Cerca "Osservaprezzi Carburanti"
-3. Inserisci l'**ID Stazione**: L'ID numerico della stazione
-4. Il nome della stazione verrà recuperato automaticamente
+You can also use following [My Home Assistant](http://my.home-assistant.io/) link (requires integration to be installed first):
 
-### Configurazione YAML (Alternativa)
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
-```yaml
-# configuration.yaml
-carburanti_mise:
-  - station_id: "58706"
+**Note**: The My Home Assistant link works only after the integration is installed. For first-time setup, use the manual configuration method below.
+
+### Installation Structure
+
+The integration folder should be placed in your Home Assistant `config/custom_components/` directory. The structure should be:
+
+```
+config/
+└── custom_components/
+    └── osservaprezzi_carburanti/
+        ├── __init__.py
+        ├── manifest.json
+        ├── config_flow.py
+        ├── const.py
+        ├── sensor.py
+        ├── coordinator.py
+        ├── strings.json
+        └── translations/
 ```
 
-## Sensori Creati
+### Manual Configuration
 
-L'integrazione crea automaticamente un sensore per ogni tipo di carburante disponibile:
+1. **Installa l'integrazione**:
+   - Copia la cartella `custom_components` nella directory `config` di Home Assistant
+   - Riavvia Home Assistant
+2. **Configura l'integrazione**:
+   - Vai su **Configurazione** → **Dispositivi e Servizi**
+   - Clicca **Aggiungi Integrazione**
+   - Cerca "Osservaprezzi Carburanti"
+   - Inserisci l'ID della stazione di servizio
+   - Conferma la configurazione
 
-- **Benzina Self**: Prezzo benzina self-service
-- **Benzina Servito**: Prezzo benzina servito
-- **Gasolio Self**: Prezzo gasolio self-service
-- **Gasolio Servito**: Prezzo gasolio servito
-- **GPL**: Prezzo GPL
-- **Metano**: Prezzo metano
-- **E85**: Prezzo E85
-- **H2**: Prezzo idrogeno
+### 🎁 Card Automatiche
 
-### Attributi dei Sensori
+Dopo la configurazione, l'integrazione crea automaticamente **3 card pronte all'uso**:
 
-Ogni sensore include i seguenti attributi:
+1. **Card Base** - Mostra tutti i prezzi della stazione
+2. **Card Avanzata** - Analisi e statistiche dei prezzi
+3. **Card Sensori** - Monitoraggio ultimo aggiornamento
 
-- `station_name`: Nome della stazione
-- `station_address`: Indirizzo completo
-- `station_brand`: Marchio della stazione
-- `fuel_type`: Tipo di carburante
-- `is_self_service`: Se è self-service (true/false)
-- `last_update`: Data/ora ultimo aggiornamento
-- `validity_date`: Data di validità del prezzo
-- `company`: Nome della società
-- `phone`: Numero di telefono
-- `email`: Email di contatto
-- `website`: Sito web
+Le card vengono salvate in un file YAML che puoi copiare direttamente nel tuo dashboard Lovelace!
 
-## Esempio di Utilizzo
+## 🎨 Card Moderne
 
-### Dashboard Lovelace
+Dopo l'installazione, hai automaticamente accesso a due card moderne:
+
+### Card Base
 
 ```yaml
-type: entities
-title: Prezzi Carburanti
+type: custom:carburanti-card
+title: "Prezzi Carburanti"
+```
+
+### Card Avanzata
+
+```yaml
+type: custom:carburanti-advanced-card
+title: "Analisi Prezzi Carburanti"
+```
+
+**Le card si configurano automaticamente** e trovano tutti i sensori carburante disponibili!
+
+## ✨ Caratteristiche
+
+### Integrazione
+
+- 📊 **Sensori Automatici**: Crea automaticamente sensori per ogni tipo di carburante
+- ⏰ **Aggiornamento Automatico**: Dati aggiornati ogni ora
+- 🏷️ **Informazioni Complete**: Include dettagli su stazione, servizio e validità
+- 🔧 **Configurazione Semplice**: Setup guidato tramite UI
+
+### Card Moderne
+
+- 🎨 **Design Elegante**: Interfaccia moderna con gradiente e animazioni
+- 📊 **Organizzazione Intelligente**: Carburanti raggruppati per categoria
+- 🏆 **Evidenziazione Prezzi**: Mostra automaticamente i prezzi migliori
+- 📱 **Responsive**: Ottimizzata per desktop e mobile
+- 🎯 **Icone Specifiche**: Icone appropriate per ogni tipo di carburante
+
+### Card Avanzata
+
+- 📈 **Statistiche in Tempo Reale**: Prezzo medio, minimo e massimo
+- 📊 **Sistema di Tab**: Lista, Grafico e Analisi
+- 📉 **Indicatori di Variazione**: Confronto con medie di categoria
+- 🔍 **Analisi Dettagliate**: Informazioni approfondite sui prezzi
+
+## 🛠️ Utilizzo
+
+### Configurazione Minima
+
+Le card funzionano senza configurazione aggiuntiva:
+
+```yaml
+# Card base - configurazione minima
+type: custom:carburanti-card
+title: "Prezzi Carburanti"
+
+# Card avanzata - configurazione minima
+type: custom:carburanti-advanced-card
+title: "Analisi Prezzi"
+```
+
+### Configurazione Personalizzata
+
+```yaml
+type: custom:carburanti-card
+title: "Prezzi Carburanti Brescia"
+subtitle: "Stazione 11745 - Aggiornamento in tempo reale"
+```
+
+### Configurazione con Entità Specifiche
+
+```yaml
+type: custom:carburanti-card
+title: "Solo Benzina e Diesel"
 entities:
-  - entity: sensor.keropetrol_calcinato_benzina_self
-    name: Benzina Self
-  - entity: sensor.keropetrol_calcinato_benzina_servito
-    name: Benzina Servito
-  - entity: sensor.keropetrol_calcinato_gasolio_self
-    name: Gasolio Self
-  - entity: sensor.keropetrol_calcinato_gasolio_servito
-    name: Gasolio Servito
-  - entity: sensor.keropetrol_calcinato_gpl_servito
-    name: GPL
+  - sensor.11745_brescia_benzina_self
+  - sensor.11745_brescia_benzina_servito
+  - sensor.11745_brescia_gasolio_self
+  - sensor.11745_brescia_gasolio_servito
 ```
 
-### Automazioni
+## 📋 Tipi di Carburante Supportati
 
-```yaml
-# Notifica quando il prezzo della benzina scende sotto 1.60€/L
-automation:
-  - alias: "Notifica Prezzo Benzina Basso"
-    trigger:
-      platform: numeric_state
-      entity_id: sensor.keropetrol_calcinato_benzina_self
-      below: 1.60
-    action:
-      - service: notify.mobile_app
-        data:
-          title: "Prezzo Benzina Conveniente!"
-          message: "Il prezzo della benzina è sceso a {{ states('sensor.keropetrol_calcinato_benzina_self') }}€/L"
-```
+- **Benzina**: Benzina Self/Servito
+- **Diesel**: Gasolio, Blue Diesel, HVOlution
+- **GPL**: GPL Servito
+- **Metano**: Metano Servito
+- **Biocarburanti**: E85, HVOlution
+- **Idrogeno**: H2
 
-## Risoluzione Problemi
+## 🔧 Opzioni di Configurazione
 
-### L'integrazione non trova la stazione
+| Parametro  | Tipo   | Obbligatorio | Descrizione                                                                                      |
+| ---------- | ------ | ------------ | ------------------------------------------------------------------------------------------------ |
+| `title`    | string | No           | Titolo della card                                                                                |
+| `subtitle` | string | No           | Sottotitolo della card                                                                           |
+| `entities` | list   | No           | Lista specifica di entità (se non specificato, trova automaticamente tutti i sensori carburante) |
 
-- Verifica che l'ID della stazione sia corretto
-- Controlla che la stazione sia attiva sul sito
-- Verifica la connessione internet
+## 🎯 Funzionalità Avanzate
 
-### I prezzi non si aggiornano
+### Raggruppamento Automatico
 
-- Controlla i log di Home Assistant per errori
-- Verifica che il servizio sia accessibile
-- Prova a riavviare l'integrazione
+I carburanti vengono automaticamente raggruppati per categoria e ordinati per prezzo.
 
-### Errore di configurazione
+### Evidenziazione Prezzi Migliori
 
-- Assicurati che tutti i file siano nella directory corretta
-- Verifica che Home Assistant sia stato riavviato dopo l'installazione
-- Controlla che non ci siano errori di sintassi nei file
+- Bordo verde per i prezzi più bassi
+- Badge "Migliore" in alto a destra
+- Sfondo leggermente colorato
 
-## Log
+### Informazioni Dettagliate
 
-Per abilitare i log dettagliati, aggiungi al tuo `configuration.yaml`:
+Ogni carburante mostra:
 
-```yaml
-logger:
-  default: info
-  logs:
-    custom_components.carburanti_mise: debug
-```
+- Nome del carburante
+- Tipo di servizio (Self/Servito)
+- Nome della stazione
+- Prezzo in €/L
+- Icona specifica
+- Ultimo aggiornamento
 
-## Sviluppo
+## 🚨 Risoluzione Problemi
 
-### Struttura del Progetto
+### Card non si carica
 
-```
-custom_components/carburanti_mise/
-├── __init__.py          # Inizializzazione integrazione
-├── manifest.json        # Metadati integrazione
-├── const.py            # Costanti e configurazioni
-├── config_flow.py      # Configurazione UI
-├── coordinator.py      # Gestione dati
-├── sensor.py           # Entità sensori
-├── strings.json        # Stringhe UI
-└── translations/       # Traduzioni
-    ├── en.json
-    └── it.json
-```
+1. Verifica che l'integrazione sia installata correttamente
+2. Controlla che ci siano sensori carburante disponibili
+3. Riavvia Home Assistant
 
-### Contribuire
+### Integrazione non appare
 
-1. Fork del repository
-2. Crea un branch per la tua feature
-3. Committa le modifiche
-4. Crea una Pull Request
+1. Verifica che la struttura delle cartelle sia corretta:
+   ```
+   config/custom_components/osservaprezzi_carburanti/
+   ```
+2. Controlla che tutti i file siano presenti (**init**.py, manifest.json, etc.)
+3. Verifica i log di Home Assistant per errori di importazione
+4. Assicurati che il dominio nel manifest.json sia `osservaprezzi_carburanti`
 
-## Licenza
+### Nessun dato visualizzato
+
+1. Verifica che l'integrazione sia configurata
+2. Controlla che i sensori abbiano uno stato valido
+3. Assicurati che l'ID della stazione sia corretto
+
+### Errori di stile
+
+1. Verifica che il tema di Home Assistant sia compatibile
+2. Controlla la console del browser per errori JavaScript
+
+## 📞 Supporto
+
+Per problemi o suggerimenti:
+
+- Apri una issue su GitHub
+- Contatta l'autore
+
+## 📄 Licenza
 
 Questo progetto è rilasciato sotto licenza MIT.
 
-## Supporto
+## 🙏 Ringraziamenti
 
-Per supporto e domande:
-
-- Apri una issue su GitHub
-- Contatta l'autore: @casungo
-
-## Autore
-
-Creato da **casungo**
-
-## Changelog
-
-### v1.0.0
-
-- Prima release
-- Supporto base per monitoraggio prezzi carburanti
-- Configurazione tramite UI
-- Sensori per tutti i tipi di carburante
+- Servizio Osservaprezzi del MISE per i dati
+- Home Assistant per la piattaforma
+- HACS per la distribuzione semplificata

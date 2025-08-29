@@ -2,33 +2,36 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configurazione Osservaprezzi Carburanti",
-        "description": "Inserisci l'ID della stazione per monitorare i prezzi dei carburanti.",
+        "title": "Setup Osservaprezzi Carburanti",
+        "description": "Enter the station ID to monitor fuel prices.",
         "data": {
-          "station_id": "ID Stazione"
+          "station_id": "Station ID"
         }
       }
     },
     "error": {
-      "unknown": "Si è verificato un errore imprevisto",
-      "cannot_connect": "Impossibile connettersi al servizio",
-      "invalid_station": "ID stazione non valido o stazione non trovata"
+      "unknown": "An unexpected error occurred",
+      "cannot_connect": "Unable to connect to the service",
+      "invalid_station": "Invalid station ID or station not found"
     },
     "abort": {
-      "already_configured": "Questa stazione è già configurata"
+      "already_configured": "This station is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Opzioni Osservaprezzi Carburanti",
-        "description": "Configura le opzioni dell'integrazione.",
+        "title": "Osservaprezzi Carburanti Options",
+        "description": "Configure the integration options.",
         "data": {
-          "scan_interval": "Intervallo di aggiornamento (secondi)"
+          "update_time": "Daily update time (HH:MM)"
         }
       }
+    },
+    "error": {
+      "invalid_time_format": "The time format is invalid. Please use HH:MM."
     }
   },
   "title": "Osservaprezzi Carburanti",
-  "description": "Monitora i prezzi dei carburanti dalle stazioni di servizio italiane."
+  "description": "Monitor fuel prices from Italian service stations."
 }

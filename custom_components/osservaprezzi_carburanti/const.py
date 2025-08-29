@@ -1,30 +1,25 @@
-"""Costanti per l'integrazione Osservaprezzi Carburanti."""
 from datetime import timedelta
 
 DOMAIN = "osservaprezzi_carburanti"
 
-# Chiavi di configurazione
 CONF_STATION_ID = "station_id"
+CONF_UPDATE_TIME = "update_time"
 
-# Valori predefiniti
-DEFAULT_SCAN_INTERVAL = 3600  # 1 ora in secondi
+DEFAULT_UPDATE_TIME = "07:30"
 DEFAULT_NAME = "Osservaprezzi Carburanti"
 
-# URL del servizio
 BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
 STATION_ENDPOINT = "/registry/servicearea/{station_id}"
 
-# Tipi di carburante mappati
 FUEL_TYPES = {
     1: "Benzina",
-    2: "Gasolio", 
+    2: "Gasolio",
     4: "GPL",
     5: "Metano",
     6: "E85",
     7: "H2"
 }
 
-# Headers richiesti dal servizio
 DEFAULT_HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -37,7 +32,6 @@ DEFAULT_HEADERS = {
     "sec-ch-ua-platform": '"Windows"'
 }
 
-# Attributi delle entità
 ATTR_STATION_NAME = "station_name"
 ATTR_STATION_ADDRESS = "station_address"
 ATTR_STATION_BRAND = "station_brand"

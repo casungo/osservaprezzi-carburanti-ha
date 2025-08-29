@@ -24,9 +24,12 @@
         "title": "Opzioni Osservaprezzi Carburanti",
         "description": "Configura le opzioni dell'integrazione.",
         "data": {
-          "scan_interval": "Intervallo di aggiornamento (secondi)"
+          "update_time": "Orario di aggiornamento giornaliero (HH:MM)"
         }
       }
+    },
+    "error": {
+      "invalid_time_format": "Il formato dell'orario non è valido. Usa il formato HH:MM."
     }
   }
 }

@@ -1,15 +1,12 @@
 {
   "domain": "osservaprezzi_carburanti",
   "name": "Osservaprezzi Carburanti",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "documentation": "https://github.com/casungo/osservaprezzi-carburanti-ha",
   "codeowners": [
     "@casungo"
   ],
   "dependencies": [],
-  "requirements": [
-    "aiohttp>=3.8.0"
-  ],
   "iot_class": "cloud_polling",
   "integration_type": "service",
   "config_flow": true

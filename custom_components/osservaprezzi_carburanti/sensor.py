@@ -19,7 +19,9 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
+
 _LOGGER = logging.getLogger(__name__)
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -29,10 +31,12 @@ async def async_setup_entry(
         for fuel_key, fuel_data in coordinator.data["fuels"].items():
             sensors.append(CarburanteSensor(coordinator, fuel_key, fuel_data))
     async_add_entities(sensors, update_before_add=True)
+
+
 class CarburanteSensor(CoordinatorEntity, SensorEntity):
-    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "€/L"
+
     def __init__(
         self,
         coordinator: CarburantiDataUpdateCoordinator,
@@ -42,10 +46,16 @@ class CarburanteSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._fuel_key = fuel_key
         self._station_info = coordinator.data.get("station_info", {})
+        
+        # Costruisce il nome del sensore in modo dinamico
+        fuel_name = fuel_data.get("name", "Sconosciuto")
+        service_type = "Self" if fuel_data.get("is_self") else "Servito"
+        self._attr_name = f"{fuel_name} {service_type}"
+
         self._attr_unique_id = f"{coordinator.station_id}_{fuel_key}"
         self.entity_id = f"sensor.{coordinator.station_id}_{fuel_key}".lower()
-        self._attr_translation_key = fuel_key.lower()
         self._attr_icon = self._get_fuel_icon(fuel_data.get("name", ""))
+
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
@@ -54,12 +64,14 @@ class CarburanteSensor(CoordinatorEntity, SensorEntity):
             manufacturer=self._station_info.get("brand"),
             model="Stazione di Servizio",
         )
+
     @property
     def native_value(self) -> StateType:
         if not self.coordinator.data or "fuels" not in self.coordinator.data:
             return None
         fuel_data = self.coordinator.data["fuels"].get(self._fuel_key)
         return fuel_data.get("price") if fuel_data else None
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data or "fuels" not in self.coordinator.data:
@@ -75,6 +87,7 @@ class CarburanteSensor(CoordinatorEntity, SensorEntity):
             ATTR_LAST_UPDATE: fuel_data.get("last_update"),
             "company": station_info.get("company"),
         }
+
     def _get_fuel_icon(self, fuel_name: str) -> str:
         fuel_name_lower = fuel_name.lower()
         if "benzina" in fuel_name_lower:

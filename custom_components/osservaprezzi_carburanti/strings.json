@@ -32,6 +32,5 @@
       "invalid_time_format": "The time format is invalid. Please use HH:MM."
     }
   },
-  "title": "Osservaprezzi Carburanti",
-  "description": "Monitor fuel prices from Italian service stations."
+  "title": "Osservaprezzi Carburanti"
 }

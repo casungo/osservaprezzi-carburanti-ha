@@ -56,7 +56,14 @@ You can also use the following My Home Assistant link (requires the integration 
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
-During the setup, you will be asked to provide the **Station ID** for the fuel station you want to monitor.
+### Finding the Station ID
+
+During the setup, you will be asked to provide the **Station ID** for the fuel station you want to monitor. To find the Station ID:
+
+1. Go to https://carburanti.mise.gov.it/ospzSearch/zona
+2. Search for your favorite gas station
+3. Click on the station
+4. In the URL (e.g: https://carburanti.mise.gov.it/ospzSearch/dettaglio/1111) copy the ID (1111)
 
 ## 📋 Supported Fuel Types
 

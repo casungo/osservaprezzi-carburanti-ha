@@ -56,7 +56,14 @@ Puoi anche utilizzare il seguente link My Home Assistant (richiede che l'integra
 
 [![Apri la tua istanza di Home Assistant e avvia la configurazione di una nuova integrazione.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
-Durante la configurazione, ti verrà richiesto di inserire l'**ID Stazione** dell'impianto che desideri monitorare.
+### Come trovare l'ID della Stazione
+
+Durante la configurazione, ti verrà richiesto di inserire l'**ID Stazione** dell'impianto che desideri monitorare. Per trovare l'ID della Stazione:
+
+1. Vai a https://carburanti.mise.gov.it/ospzSearch/zona
+2. Cerca la tua stazione preferita
+3. Clicca sulla stazione
+4. Nell'URL (es: https://carburanti.mise.gov.it/ospzSearch/dettaglio/1111) copia l'ID (1111)
 
 ## 📋 Tipi di Carburante Supportati
 

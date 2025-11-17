@@ -3,6 +3,13 @@
     "step": {
       "user": {
         "title": "Setup Osservaprezzi Carburanti",
+        "description": "Enter the station ID to monitor fuel prices.\n\nHow to find ID:\n1. Go to carburanti.mise.gov.it/ospzSearch/zona\n2. Search and click your station\n3. Copy ID from URL (e.g: 1111 from .../dettaglio/1111)",
+        "data": {
+          "station_id": "Station ID"
+        }
+      },
+      "station": {
+        "title": "Single Station Configuration",
         "description": "Enter the station ID to monitor fuel prices.",
         "data": {
           "station_id": "Station ID"
@@ -12,10 +19,11 @@
     "error": {
       "unknown": "An unexpected error occurred",
       "cannot_connect": "Unable to connect to the service",
-      "invalid_station": "Invalid station ID or station not found"
+      "invalid_station": "Invalid station ID or station not found",
+      "invalid_zone": "Invalid zone configuration or no stations found"
     },
     "abort": {
-      "already_configured": "This station is already configured"
+      "already_configured": "This configuration is already set up"
     }
   },
   "options": {

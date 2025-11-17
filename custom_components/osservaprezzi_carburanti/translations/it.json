@@ -3,7 +3,14 @@
     "step": {
       "user": {
         "title": "Configurazione Osservaprezzi Carburanti",
-        "description": "Inserisci l'ID della stazione per monitorare i prezzi dei carburanti dalle stazioni di servizio italiane.",
+        "description": "Inserisci l'ID della stazione per monitorare i prezzi.\n\nCome trovare l'ID:\n1. Vai a carburanti.mise.gov.it/ospzSearch/zona\n2. Cerca e clicca sulla tua stazione\n3. Copia l'ID dall'URL (es: 1111 da .../dettaglio/1111)",
+        "data": {
+          "station_id": "ID Stazione"
+        }
+      },
+      "station": {
+        "title": "Configurazione Stazione Singola",
+        "description": "Inserisci l'ID della stazione per monitorare i prezzi dei carburanti.",
         "data": {
           "station_id": "ID Stazione"
         }
@@ -12,10 +19,11 @@
     "error": {
       "unknown": "Si è verificato un errore imprevisto",
       "cannot_connect": "Impossibile connettersi al servizio",
-      "invalid_station": "ID stazione non valido o stazione non trovata"
+      "invalid_station": "ID stazione non valido o stazione non trovata",
+      "invalid_zone": "Configurazione della zona non valida o nessuna stazione trovata"
     },
     "abort": {
-      "already_configured": "Questa stazione è già configurata"
+      "already_configured": "Questa configurazione è già stata impostata"
     }
   },
   "options": {

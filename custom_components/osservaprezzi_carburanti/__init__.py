@@ -14,8 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    station_id = entry.data.get("station_id")
-    coordinator = CarburantiDataUpdateCoordinator(hass, station_id)
+    coordinator = CarburantiDataUpdateCoordinator(hass, entry)
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
@@ -35,7 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     async def _request_refresh(now):
-        _LOGGER.debug("Requesting refresh for station %s at scheduled time", station_id)
+        _LOGGER.debug("Requesting refresh for %s at scheduled time", entry.title)
         await coordinator.async_request_refresh()
 
     listener = async_track_time_change(

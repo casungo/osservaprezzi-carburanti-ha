@@ -32,6 +32,9 @@ ZONE_ENDPOINT = "/search/zone"
 FUELS_ENDPOINT = "/registry/fuels"
 LOGOS_ENDPOINT = "/registry/alllogos"
 
+# Geocoding API
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+
 # Service type mapping for API fuel ID format
 SERVICE_TYPES = {
     "x": "any",

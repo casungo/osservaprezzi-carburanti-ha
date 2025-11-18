@@ -444,7 +444,59 @@ This endpoint retrieves all available fuel types with their IDs and descriptions
   }
   ```
 
-## 5. Key Observations
+## 5. Hours of Operation Structure
+
+The `orariapertura` array in the station details contains the opening hours for each day of the week. Here's how the structure works:
+
+### Day of Week Mapping
+
+- `giornoSettimanaId`: Day of the week identifier
+  - 1 = Monday
+  - 2 = Tuesday
+  - 3 = Wednesday
+  - 4 = Thursday
+  - 5 = Friday
+  - 6 = Saturday
+  - 7 = Sunday
+  - 8 = Holiday (additional entry for special holiday hours)
+
+### Opening Hours Patterns
+
+#### 1. Split Hours (Morning + Afternoon)
+
+When `flagOrarioContinuato` is `false`:
+
+- `oraAperturaMattina`: Morning opening time (e.g., "07:00")
+- `oraChiusuraMattina`: Morning closing time (e.g., "13:00")
+- `oraAperturaPomeriggio`: Afternoon opening time (e.g., "15:00")
+- `oraChiusuraPomeriggio`: Afternoon closing time (e.g., "19:30")
+
+#### 2. Continuous Hours
+
+When `flagOrarioContinuato` is `true`:
+
+- `oraAperturaOrarioContinuato`: Opening time (e.g., "07:00")
+- `oraChiusuraOrarioContinuato`: Closing time (e.g., "19:00")
+- Morning/Afternoon fields are `null`
+
+#### 3. Special Flags
+
+- `flagH24`: `true` if open 24 hours
+- `flagChiusura`: `true` if closed for the day
+- `flagNonComunicato`: `true` if hours not communicated
+- `flagServito`: `true` if served service is available
+- `flagSelf`: `true` if self-service is available
+
+### Example Interpretation
+
+Based on your provided data:
+
+- Days 1-6 (Monday-Saturday): Continuous hours from 07:00 to 19:00 with self-service only
+- Day 7 (Sunday): Continuous hours from 07:00 to 12:00 with self-service only
+- Day 8 (Holiday): No specific hours set (all time fields null), but self-service available
+
+## 6. Key Observations
 
 - **Self vs. Served:** The `isSelf` boolean flag is critical. It differentiates between self-service (`true`) and served (`false`) prices, which are often different.
 - **Workflow:** A typical workflow would be to use the `search/zone` endpoint to discover nearby stations, then use the `registry/servicearea/{id}` endpoint to get more detailed information (like the full address or services) for a specific station.
+- **Opening Hours:** Stations can have different opening patterns including split hours, continuous hours, 24-hour operation, or be closed on specific days.

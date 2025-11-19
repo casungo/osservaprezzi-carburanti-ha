@@ -106,7 +106,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         target_is_self = self.config_entry.data[CONF_IS_SELF]
 
         try:
-            _LOGGER.info("Fetching zone data from: %s with payload: %s", url, payload)
             async with self.session.post(url, headers=DEFAULT_HEADERS, json=payload, timeout=30) as response:
                 _LOGGER.debug("Zone API response status: %s", response.status)
                 if response.status == 200:
@@ -251,14 +250,10 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         }
         
         try:
-            _LOGGER.info("NOMINATIM API: Geocoding address: %s", sanitized_address)
-            _LOGGER.debug("NOMINATIM API: URL=%s, params=%s", NOMINATIM_URL, {k: v for k, v in params.items() if k != 'q'})
             
             async with self.session.get(NOMINATIM_URL, headers=headers, params=params, timeout=30) as response:
-                _LOGGER.debug("NOMINATIM API: Response status: %s", response.status)
                 if response.status == 200:
                     data = await response.json()
-                    _LOGGER.debug("NOMINATIM API: Response received with %d results", len(data) if data else 0)
                     
                     if data and len(data) > 0:
                         result = data[0]
@@ -267,8 +262,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                         display_name = result.get("display_name", "Unknown")
                         address_type = result.get("type", "Unknown")
                         
-                        _LOGGER.info("NOMINATIM API: SUCCESS - Found coordinates: lat=%.6f, lon=%.6f", lat, lon)
-                        _LOGGER.info("NOMINATIM API: Location details - display_name='%s', type='%s'", display_name, address_type)
                         
                         return {
                             "latitude": lat,
@@ -281,7 +274,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                         # Try with a simplified address as a fallback
                         simplified_address = self._simplify_address(address)
                         if simplified_address != address:
-                            _LOGGER.info("NOMINATIM API: Retrying with simplified address")
                             return await self._async_geocode_simplified(simplified_address, headers)
                         return None
                 elif response.status == 429:
@@ -392,7 +384,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         }
         
         try:
-            _LOGGER.info("Retrying geocoding without country restriction for: %s", self._sanitize_address_for_logging(address))
             async with self.session.get(NOMINATIM_URL, headers=headers, params=params, timeout=30) as response:
                 _LOGGER.debug("Geocoding retry response status: %s", response.status)
                 if response.status == 200:
@@ -401,7 +392,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Geocoding retry response received with %d results", len(data) if data else 0)
                     
                     if data and len(data) > 0:
-                        _LOGGER.info("Successfully geocoded simplified address: %s", self._sanitize_address_for_logging(address))
                         return {
                             "latitude": float(data[0]["lat"]),
                             "longitude": float(data[0]["lon"]),
@@ -415,12 +405,10 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                     "format": "jsonv2",
                     "limit": 1,
                 }
-                _LOGGER.info("Final fallback: geocoding city only for: %s", city_name)
                 async with self.session.get(NOMINATIM_URL, headers=headers, params=city_params, timeout=30) as response:
                     if response.status == 200:
                         data = await response.json()
                         if data and len(data) > 0:
-                            _LOGGER.warning("Using city center coordinates as fallback for address: %s", self._sanitize_address_for_logging(address))
                             return {
                                 "latitude": float(data[0]["lat"]),
                                 "longitude": float(data[0]["lon"]),
@@ -439,24 +427,17 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("No station ID provided for geocoding")
             return None
             
-        _LOGGER.info("Getting coordinates for station ID %s using hybrid approach", station_id)
-        _LOGGER.debug("Station details - ID: %s, Name: %s, Address: %s", station_id, station_name, address)
         
         # Strategy 1: Try OSM lookup by ref:mise ID (most reliable when available)
-        _LOGGER.info("Strategy 1: Attempting OSM ID lookup for ref:mise=%s", station_id)
         coordinates = await self._async_geocode_by_osm_id(station_id)
         if coordinates:
-            _LOGGER.info("SUCCESS: Strategy 1 - Found coordinates via OSM ID lookup for station %s", station_id)
             return coordinates
         
-        _LOGGER.info("FAILED: Strategy 1 - OSM ID lookup failed for station %s", station_id)
         
         # Strategy 2: Fall back to address-based geocoding
         if address:
-            _LOGGER.info("Strategy 2: Attempting address geocoding for station %s", station_id)
             coordinates = await self._async_geocode_address_improved(address)
             if coordinates:
-                _LOGGER.info("SUCCESS: Strategy 2 - Found coordinates via address geocoding for station %s", station_id)
                 return coordinates
             else:
                 _LOGGER.warning("FAILED: Strategy 2 - Address geocoding also failed for station %s", station_id)
@@ -465,10 +446,8 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         
         # Strategy 3: Zone search fallback
         if address and station_name:
-            _LOGGER.info("Strategy 3.0: Attempting zone search fallback for station %s with name '%s'", station_id, station_name)
             coordinates = await self._async_zone_search_fallback(address, station_name)
             if coordinates:
-                _LOGGER.info("SUCCESS: Strategy 3.0 - Found coordinates via zone search for station %s", station_id)
                 return coordinates
             else:
                 _LOGGER.warning("FAILED: Strategy 3.0 - Zone search fallback failed for station %s", station_id)
@@ -495,7 +474,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Overpass query for station %s: %s", station_id, overpass_query.strip())
         
         try:
-            _LOGGER.info("Strategy 1.1: Trying Overpass API lookup for ref:mise=%s", station_id)
             async with self.session.post(
                 "https://overpass-api.de/api/interpreter",
                 data=overpass_query,
@@ -516,15 +494,12 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug("Processing element type: %s, data: %s", element_type, element)
                         
                         if "lat" in element and "lon" in element:
-                            _LOGGER.info("SUCCESS: Strategy 1.1 - Found Overpass node coordinates: lat=%s, lon=%s", element["lat"], element["lon"])
                             return {
                                 "latitude": float(element["lat"]),
                                 "longitude": float(element["lon"]),
                             }
                         elif "center" in element and "lat" in element["center"] and "lon" in element["center"]:
                             # For ways/relations that have a center point
-                            _LOGGER.info("SUCCESS: Strategy 1.1 - Found Overpass center coordinates: lat=%s, lon=%s",
-                                       element["center"]["lat"], element["center"]["lon"])
                             return {
                                 "latitude": float(element["center"]["lat"]),
                                 "longitude": float(element["center"]["lon"]),
@@ -544,7 +519,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("FAILED: Strategy 1.1 - Unexpected error in Overpass lookup: %s", err)
         
-        _LOGGER.info("Strategy 1.1 FAILED: No coordinates found via OSM ID lookup for station %s", station_id)
         return None
 
     async def _async_geocode_address_improved(self, address: str) -> dict[str, Any] | None:
@@ -558,14 +532,12 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Strategy 2.0 FAILED: Invalid address format provided for geocoding")
             return None
         
-        _LOGGER.info("Strategy 2.0: Trying full address geocoding: %s", self._sanitize_address_for_logging(address))
         
         # Try ONLY the full address - this is what Strategy 2 should do
         result = await self._async_geocode_address(address)
         if result:
             # Validate that this is a specific address, not just city center
             if await self._async_validate_specific_address(address, result):
-                _LOGGER.info("SUCCESS: Strategy 2.0 - Found specific station coordinates via full address geocoding")
                 return result
             else:
                 _LOGGER.warning("FAILED: Strategy 2.0 - Geocoding returned city center instead of specific address - will proceed to Strategy 3 (zone search)")
@@ -650,12 +622,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         display_name = coordinates.get("display_name", "Unknown")
         location_type = coordinates.get("type", "Unknown")
         
-        _LOGGER.info("Strategy 2.0.1: VALIDATING ADDRESS SPECIFICITY")
-        _LOGGER.info("Strategy 2.0.1: Input address: %s", sanitized_address)
-        _LOGGER.info("Strategy 2.0.1: Geocoded display_name: '%s'", display_name)
-        _LOGGER.info("Strategy 2.0.1: Geocoded type: '%s'", location_type)
-        _LOGGER.info("Strategy 2.0.1: Coordinates: lat=%.6f, lon=%.6f",
-                   coordinates.get("latitude", 0), coordinates.get("longitude", 0))
         
         # Extract street information from address
         # Italian addresses typically have: "VIA/STREET NAME NUMBER - CAP CITY (PROVINCE)"
@@ -667,19 +633,16 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         
         has_street_info = any(re.search(pattern, address.upper()) for pattern in street_patterns)
         
-        _LOGGER.debug("Strategy 2.0.1: Street pattern analysis - has_street_info=%s", has_street_info)
         
         # Check if geocoded result is too generic
         generic_indicators = ["roma", "rome", "italy", "italia"]
         is_generic_location = any(indicator in display_name.lower() for indicator in generic_indicators)
         
-        _LOGGER.debug("Strategy 2.0.1: Generic location check - is_generic_location=%s", is_generic_location)
         
         # Additional check: if address only has city and postal code, it's too broad
         city_only_pattern = r'^\d{5}\s+[A-Z]+(?:\s*\([A-Z]{2}\))?$'
         is_city_only = re.match(city_only_pattern, address.strip())
         
-        _LOGGER.debug("Strategy 2.0.1: City-only pattern check - is_city_only=%s", is_city_only)
         
         # Decision logic
         if not has_street_info:
@@ -694,7 +657,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Strategy 2.0.1: REJECTED - Geocoding returned generic location: '%s' (type: %s)", display_name, location_type)
             return False
         
-        _LOGGER.info("Strategy 2.0.1: ACCEPTED - Address appears to be specific location: %s", sanitized_address)
         return True
 
     async def _async_zone_search_fallback(self, address: str, station_name: str) -> dict[str, Any] | None:
@@ -702,7 +664,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         import re
         
         # Extract CAP (postal code) and city from address
-        _LOGGER.info("Strategy 3.1: Extracting CAP and city from address: %s", self._sanitize_address_for_logging(address))
         
         postal_city_match = re.search(r'(\d{5})\s+([A-Z]+(?:\s+[A-Z]+)*)', address.upper())
         if not postal_city_match:
@@ -712,20 +673,15 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         postal_code = postal_city_match.group(1)
         city_name = postal_city_match.group(2).strip()
         
-        _LOGGER.info("Strategy 3.1: Extracted CAP=%s, City=%s", postal_code, city_name)
         
         # Get city center coordinates using Overpass API
-        _LOGGER.info("Strategy 3.2: Getting city center coordinates for %s", city_name)
         city_coordinates = await self._async_get_city_center_coordinates(city_name)
         if not city_coordinates:
             _LOGGER.warning("FAILED: Strategy 3.2 - Could not get city center coordinates for %s", city_name)
             return None
         
-        _LOGGER.info("SUCCESS: Strategy 3.2 - City center coordinates: lat=%s, lon=%s",
-                   city_coordinates["latitude"], city_coordinates["longitude"])
         
         # Search zone API for stations within 10km radius
-        _LOGGER.info("Strategy 3.3: Searching zone API within 10km of city center")
         zone_stations = await self._async_search_zone_by_coordinates(
             city_coordinates["latitude"],
             city_coordinates["longitude"],
@@ -736,17 +692,13 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("FAILED: Strategy 3.3 - No stations found in zone search")
             return None
         
-        _LOGGER.info("SUCCESS: Strategy 3.3 - Found %d stations in zone search", len(zone_stations))
         
         # Match station by nomeImpianto
-        _LOGGER.info("Strategy 3.4: Matching station by nomeImpianto='%s'", station_name)
         matched_station = await self._async_match_station_by_name(zone_stations, station_name)
         
         if matched_station and "location" in matched_station:
             location = matched_station["location"]
             if "lat" in location and "lng" in location:
-                _LOGGER.info("SUCCESS: Strategy 3.4 - Found matching station: lat=%s, lng=%s",
-                           location["lat"], location["lng"])
                 return {
                     "latitude": float(location["lat"]),
                     "longitude": float(location["lng"]),
@@ -772,7 +724,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Overpass city query: %s", overpass_query.strip())
         
         try:
-            _LOGGER.info("Strategy 3.2.1: Querying Overpass for city center of %s", city_name)
             async with self.session.post(
                 "https://overpass-api.de/api/interpreter",
                 data=overpass_query,
@@ -786,15 +737,11 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                     if data.get("elements") and len(data["elements"]) > 0:
                         element = data["elements"][0]
                         if "lat" in element and "lon" in element:
-                            _LOGGER.info("SUCCESS: Strategy 3.2.1 - Found city center: lat=%s, lon=%s",
-                                       element["lat"], element["lon"])
                             return {
                                 "latitude": float(element["lat"]),
                                 "longitude": float(element["lon"]),
                             }
                         elif "center" in element:
-                            _LOGGER.info("SUCCESS: Strategy 3.2.1 - Found city center: lat=%s, lon=%s",
-                                       element["center"]["lat"], element["center"]["lon"])
                             return {
                                 "latitude": float(element["center"]["lat"]),
                                 "longitude": float(element["center"]["lon"]),
@@ -823,7 +770,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         }
         
         try:
-            _LOGGER.info("Strategy 3.3.1: Searching zone API with lat=%s, lon=%s, radius=%s", lat, lon, radius)
             async with self.session.post(url, headers=DEFAULT_HEADERS, json=payload, timeout=30) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -831,7 +777,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                     
                     if data.get("success") and data.get("results"):
                         stations = data["results"]
-                        _LOGGER.info("SUCCESS: Strategy 3.3.1 - Found %d stations in zone", len(stations))
                         return stations
                     else:
                         _LOGGER.warning("FAILED: Strategy 3.3.1 - Zone API returned no results")
@@ -846,7 +791,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         """Match station by nomeImpianto from zone search results."""
         import re
         
-        _LOGGER.info("Strategy 3.4.1: Looking for station with nomeImpianto='%s' among %d stations", target_name, len(stations))
         
         # Normalize target name for comparison
         target_name_normalized = target_name.lower().strip()
@@ -859,7 +803,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             
             # Exact match
             if station_name_normalized == target_name_normalized:
-                _LOGGER.info("SUCCESS: Strategy 3.4.1 - Found exact match: '%s'", station_name)
                 return station
             
             # Partial match (remove common words and spaces)
@@ -867,7 +810,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             station_simple = re.sub(r'[^a-z0-9]', '', station_name_normalized)
             
             if target_simple == station_simple and len(target_simple) > 3:
-                _LOGGER.info("SUCCESS: Strategy 3.4.1 - Found normalized match: '%s'", station_name)
                 return station
         
         _LOGGER.warning("FAILED: Strategy 3.4.1 - No match found for '%s'", target_name)

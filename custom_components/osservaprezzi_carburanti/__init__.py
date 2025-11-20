@@ -1,14 +1,15 @@
 from __future__ import annotations
 import logging
-from datetime import time
+from datetime import datetime, timedelta
 from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.event import async_track_time_change
-from .const import DOMAIN, CONF_UPDATE_TIME, DEFAULT_UPDATE_TIME
+from homeassistant.helpers.event import async_track_time_interval
+from .const import DOMAIN, CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION
 from .coordinator import CarburantiDataUpdateCoordinator
+from .cron_helper import get_schedule_interval
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -21,29 +22,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_shutdown()
         raise
     
-    update_time_str = entry.options.get(CONF_UPDATE_TIME, DEFAULT_UPDATE_TIME)
-    try:
-        update_time = time.fromisoformat(update_time_str)
-    except ValueError:
-        _LOGGER.warning(
-            "Invalid time format '%s', falling back to default '%s'",
-            update_time_str,
-            DEFAULT_UPDATE_TIME,
-        )
-        update_time = time.fromisoformat(DEFAULT_UPDATE_TIME)
-
+    # Get cron expression from options
+    cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+    _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
+    
     @callback
     async def _request_refresh(now):
-        _LOGGER.debug("Requesting refresh for %s at scheduled time", entry.title)
+        _LOGGER.info("Executing scheduled refresh for %s at %s", entry.title, now)
         await coordinator.async_request_refresh()
+        
+        # Reschedule for next run time
+        try:
+            interval = get_schedule_interval(cron_expression)
+            next_run_time = datetime.now() + interval
+            _LOGGER.info("Rescheduling next refresh for %s in %s (at %s)", entry.title, interval, next_run_time)
+            # Create new listener for next run
+            new_listener = async_track_time_interval(
+                hass,
+                _request_refresh,
+                interval
+            )
+            # Replace the listener in hass.data
+            hass.data[DOMAIN][entry.entry_id]["listener"]()
+            hass.data[DOMAIN][entry.entry_id]["listener"] = new_listener
+        except Exception as e:
+            _LOGGER.error("Failed to reschedule: %s", e)
 
-    listener = async_track_time_change(
-        hass,
-        _request_refresh,
-        hour=update_time.hour,
-        minute=update_time.minute,
-        second=0,
-    )
+    # Set initial schedule
+    try:
+        interval = get_schedule_interval(cron_expression)
+        next_run_time = datetime.now() + interval
+        _LOGGER.info("Initial cron schedule for %s: next refresh in %s (at %s)", entry.title, interval, next_run_time)
+        listener = async_track_time_interval(
+            hass,
+            _request_refresh,
+            interval
+        )
+    except Exception as e:
+        _LOGGER.error("Failed to set up cron schedule: %s", e)
+        return False
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
@@ -62,4 +79,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    _LOGGER.info("Reloading entry %s to apply new cron schedule", entry.title)
     await hass.config_entries.async_reload(entry.entry_id)

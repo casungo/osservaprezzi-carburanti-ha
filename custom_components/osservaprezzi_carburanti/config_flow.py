@@ -18,8 +18,8 @@ from homeassistant.helpers.selector import (
 from .const import (
     DOMAIN,
     CONF_STATION_ID,
-    CONF_UPDATE_TIME,
-    DEFAULT_UPDATE_TIME,
+    CONF_CRON_EXPRESSION,
+    DEFAULT_CRON_EXPRESSION,
     BASE_URL,
     STATION_ENDPOINT,
     ZONE_ENDPOINT,
@@ -36,6 +36,7 @@ from .const import (
     CONF_POINTS,
     FUEL_TYPES,
 )
+from .cron_helper import validate_cron_expression
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ class InvalidStation(HomeAssistantError):
 
 class InvalidZone(HomeAssistantError):
     """Error to indicate there is an invalid zone configuration."""
+
+class InvalidCronExpression(HomeAssistantError):
+    """Error to indicate there is an invalid cron expression."""
 
 async def _validate_station(hass: HomeAssistant, station_id: str) -> dict[str, Any]:
     """Validate the station_id by making an API call."""
@@ -344,18 +348,21 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
         """Manage the options."""
         errors = {}
         if user_input is not None:
-            update_time_str = user_input[CONF_UPDATE_TIME]
-            try:
-                time.fromisoformat(update_time_str)
+            cron_expr = user_input[CONF_CRON_EXPRESSION]
+            old_cron_expr = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+            if validate_cron_expression(cron_expr):
+                if cron_expr != old_cron_expr:
+                    _LOGGER.info("Cron expression updated from '%s' to '%s' for %s", old_cron_expr, cron_expr, self.config_entry.title)
                 return self.async_create_entry(title="", data=user_input)
-            except ValueError:
-                errors["base"] = "invalid_time_format"
+            else:
+                _LOGGER.warning("Invalid cron expression submitted: '%s' for %s", cron_expr, self.config_entry.title)
+                errors["base"] = "invalid_cron_expression"
 
         schema = vol.Schema(
             {
                 vol.Required(
-                    CONF_UPDATE_TIME,
-                    default=self.options.get(CONF_UPDATE_TIME, DEFAULT_UPDATE_TIME),
+                    CONF_CRON_EXPRESSION,
+                    default=self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION),
                 ): str,
             }
         )

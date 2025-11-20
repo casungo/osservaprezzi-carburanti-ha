@@ -57,7 +57,8 @@ async def async_setup_entry(
                 StationInfoSensor(coordinator, entry, "phoneNumber", "Telefono", "mdi:phone"),
                 StationInfoSensor(coordinator, entry, "email", "Email", "mdi:email"),
                 StationInfoSensor(coordinator, entry, "website", "Sito Web", "mdi:web"),
-                # Coordinates are not available when retrieving a station by ID
+                # Add a single location sensor for the map marker
+                StationLocationSensor(coordinator, entry),
             ])
 
     async_add_entities(sensors, update_before_add=True)
@@ -194,7 +195,7 @@ class OsservaprezziStationSensor(CoordinatorEntity, SensorEntity):
             ATTR_STATION_NAME: station_info.get("name"),
             ATTR_STATION_ADDRESS: station_info.get("address"),
             ATTR_STATION_BRAND: station_info.get("brand"),
-            # Coordinates are not available when retrieving a station by ID
+            # Remove lat/lon to prevent multiple map markers
         }
 
 class StationInfoSensor(CoordinatorEntity, SensorEntity):
@@ -227,3 +228,74 @@ class StationInfoSensor(CoordinatorEntity, SensorEntity):
         if not self.coordinator.data or "station_info" not in self.coordinator.data:
             return None
         return self.coordinator.data["station_info"].get(self._info_key)
+
+
+
+class StationLocationSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a sensor for station location (single map marker)."""
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:map-marker"
+
+    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize location sensor."""
+        super().__init__(coordinator)
+        self._station_id = entry.data[CONF_STATION_ID]
+        # Set a default name, will be updated with actual station name in _attr_name property
+        self._attr_name = "Posizione Stazione"
+        self._attr_unique_id = f"{self._station_id}_location"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor (use station name for map marker)."""
+        if not self.coordinator.data or "station_info" not in self.coordinator.data:
+            return "Posizione Stazione"
+        station_info = self.coordinator.data.get("station_info", {})
+        # Prefer nomeImpianto (station name), fallback to name, then default
+        station_name = station_info.get("nomeImpianto") or station_info.get("name") or "Posizione Stazione"
+        return station_name
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info."""
+        station_info = self.coordinator.data.get("station_info", {})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._station_id)},
+            name=station_info.get("name"),
+            manufacturer=station_info.get("brand"),
+            model="Stazione di Servizio",
+        )
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the state of the sensor (station name)."""
+        if not self.coordinator.data or "station_info" not in self.coordinator.data:
+            return None
+        station_info = self.coordinator.data.get("station_info", {})
+        # Prefer nomeImpianto (station name), fallback to name, then default
+        return station_info.get("nomeImpianto") or station_info.get("name") or "Stazione Servizio"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes including coordinates for map."""
+        if not self.coordinator.data or "station_info" not in self.coordinator.data:
+            return {}
+        
+        station_info = self.coordinator.data.get("station_info", {})
+        
+        return {
+            ATTR_STATION_NAME: station_info.get("name"),
+            ATTR_STATION_ADDRESS: station_info.get("address"),
+            ATTR_STATION_BRAND: station_info.get("brand"),
+            ATTR_LATITUDE: station_info.get(ATTR_LATITUDE),
+            ATTR_LONGITUDE: station_info.get(ATTR_LONGITUDE),
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        if not self.coordinator.data or "station_info" not in self.coordinator.data:
+            return False
+        station_info = self.coordinator.data.get("station_info", {})
+        # Only show as available if we have coordinates
+        return (station_info.get(ATTR_LATITUDE) is not None and
+                station_info.get(ATTR_LONGITUDE) is not None)

@@ -30,14 +30,14 @@
     "step": {
       "init": {
         "title": "Opzioni Osservaprezzi Carburanti",
-        "description": "Configura le opzioni dell'integrazione.",
+        "description": "Configura le opzioni dell'integrazione.\n\nPuoi usare https://crontab.guru per aiutarti a costruire e validare le tue espressioni cron.",
         "data": {
-          "update_time": "Orario di aggiornamento giornaliero (HH:MM)"
+          "cron_expression": "Espressione cron"
         }
       }
     },
     "error": {
-      "invalid_time_format": "Il formato dell'orario non è valido. Usa il formato HH:MM."
+      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (giornalmente alle 07:30). Visita https://crontab.guru per aiuto nella creazione di espressioni valide."
     }
   }
 }

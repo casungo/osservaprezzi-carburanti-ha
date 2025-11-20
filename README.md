@@ -56,6 +56,21 @@ You can also use the following My Home Assistant link (requires the integration 
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
+### Cron Expression Configuration
+
+The integration uses a cron expression to schedule automatic data updates. This is not part of the initial configuration but can be modified later according to your preferences.
+
+**Default value**: `30 8 * * *` (daily at 8:30 AM)
+
+You can modify this expression to customize when you want the data to be updated. You can use [Crontab Guru](https://crontab.guru) to help build and validate your cron expressions. This tool provides a helpful interface to understand when your scheduled updates will run.
+
+Common examples:
+
+- `0 8 * * *` - Daily at 8:00 AM
+- `30 7,19 * * *` - Daily at 7:30 AM and 7:30 PM
+- `0 */6 * * *` - Every 6 hours
+- `0 8 * * 1-5` - Weekdays at 8:00 AM
+
 ### Finding the Station ID
 
 During the setup, you will be asked to provide the **Station ID** for the fuel station you want to monitor. To find the Station ID:

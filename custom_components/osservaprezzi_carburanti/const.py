@@ -19,8 +19,8 @@ CONF_IS_SELF = "is_self"
 CONF_POINTS = "points"  # Support for multiple points in zone search
 
 # Options
-CONF_UPDATE_TIME = "update_time"
-DEFAULT_UPDATE_TIME = "07:30"
+CONF_CRON_EXPRESSION = "cron_expression"
+DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 07:30
 
 # API
 DEFAULT_NAME = "Osservaprezzi Carburanti"
@@ -31,6 +31,9 @@ ZONE_ENDPOINT = "/search/zone"
 # Additional API endpoints
 FUELS_ENDPOINT = "/registry/fuels"
 LOGOS_ENDPOINT = "/registry/alllogos"
+
+# Geocoding API
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 # Service type mapping for API fuel ID format
 SERVICE_TYPES = {

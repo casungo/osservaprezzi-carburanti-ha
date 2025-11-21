@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
@@ -24,6 +25,7 @@ from .const import (
     ATTR_DISTANCE,
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
+    ADDITIONAL_SERVICES,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 
@@ -64,6 +66,24 @@ async def async_setup_entry(
                 # Add opening hours sensor
                 StationOpeningHoursSensor(coordinator, entry),
             ])
+            
+            # Add binary sensors for available services
+            if coordinator.data and "services" in coordinator.data:
+                # Get the list of available services at this station
+                available_services = coordinator.data.get("services", [])
+                
+                # Create a set of available service IDs for quick lookup
+                available_service_ids = set()
+                for service in available_services:
+                    if isinstance(service, dict) and "id" in service:
+                        available_service_ids.add(str(service["id"]))
+                
+                # Only create binary sensors for services that are available at this station
+                for service_id, service_info in ADDITIONAL_SERVICES.items():
+                    if service_id in available_service_ids:
+                        sensors.append(
+                            StationServiceBinarySensor(coordinator, entry, service_id, service_info)
+                        )
     
         async_add_entities(sensors, update_before_add=True)
 
@@ -620,3 +640,65 @@ class StationOpeningHoursSensor(CoordinatorEntity, SensorEntity):
         opening_hours_attributes["opening_hours_count"] = len(opening_hours)
         
         return opening_hours_attributes
+
+
+class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a binary sensor for a specific station service."""
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry, service_id: str, service_info: dict) -> None:
+        """Initialize the service binary sensor."""
+        super().__init__(coordinator)
+        self._station_id = entry.data[CONF_STATION_ID]
+        self._service_id = service_id
+        self._service_info = service_info
+        
+        # Set name, unique_id, and icon from service info
+        self._attr_name = service_info["name"]
+        self._attr_unique_id = f"{self._station_id}_service_{service_id}"
+        self._attr_icon = service_info["icon"]
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the device info."""
+        station_info = self.coordinator.data.get("station_info", {})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._station_id)},
+            name=station_info.get("name"),
+            manufacturer=station_info.get("brand"),
+            model="Stazione di Servizio",
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if the service is available at the station."""
+        if not self.coordinator.data or "services" not in self.coordinator.data:
+            return False
+        
+        services = self.coordinator.data.get("services", [])
+        if not services:
+            return False
+        
+        # Check if this service is available
+        for service in services:
+            if isinstance(service, dict) and str(service.get("id")) == self._service_id:
+                return True
+        
+        return False
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes with service information."""
+        return {
+            "service_id": self._service_id,
+            "service_name": self._service_info["name"],
+            "service_description": self._service_info["description"],
+            "service_icon": self._service_info["icon"],
+            "service_image_url": self._service_info["image_url"],
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        # Service binary sensors are always available since we only create them for available services
+        return True

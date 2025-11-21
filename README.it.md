@@ -56,6 +56,21 @@ Puoi anche utilizzare il seguente link My Home Assistant (richiede che l'integra
 
 [![Apri la tua istanza di Home Assistant e avvia la configurazione di una nuova integrazione.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
+### Configurazione dell'Espressione Cron
+
+L'integrazione utilizza un'espressione cron per programmare gli aggiornamenti automatici dei dati. Questo può essere modificato in seguito secondo le tue preferenze.
+
+**Valore predefinito**: `30 8 * * *` (ogni giorno alle 8:30)
+
+Puoi modificare questa espressione per personalizzare quando desideri che vengano aggiornati i dati. Puoi usare [Crontab Guru](https://crontab.guru) per aiutarti a costruire e validare le tue espressioni cron. Questo strumento fornisce un'interfaccia utile per capire quando verranno eseguiti i tuoi aggiornamenti programmati.
+
+Esempi comuni:
+
+- `0 8 * * *` - Ogni giorno alle 8:00
+- `30 7,19 * * *` - Ogni giorno alle 7:30 e 19:30
+- `0 */6 * * *` - Ogni 6 ore
+- `0 8 * * 1-5` - Giorni feriali alle 8:00
+
 ### Come trovare l'ID della Stazione
 
 Durante la configurazione, ti verrà richiesto di inserire l'**ID Stazione** dell'impianto che desideri monitorare. Per trovare l'ID della Stazione:

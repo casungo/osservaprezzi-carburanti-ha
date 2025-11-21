@@ -30,14 +30,14 @@
     "step": {
       "init": {
         "title": "Osservaprezzi Carburanti Options",
-        "description": "Configure the integration options.",
+        "description": "Configure the integration options.\n\nYou can use https://crontab.guru to help build and validate your cron expressions.",
         "data": {
-          "update_time": "Daily update time (HH:MM)"
+          "cron_expression": "Cron expression"
         }
       }
     },
     "error": {
-      "invalid_time_format": "The time format is invalid. Please use HH:MM."
+      "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30). Visit https://crontab.guru for help building valid expressions."
     }
   },
   "title": "Osservaprezzi Carburanti"

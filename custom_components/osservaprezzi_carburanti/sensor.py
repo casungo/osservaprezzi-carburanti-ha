@@ -50,6 +50,9 @@ async def async_setup_entry(
                 sensors.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
             
             # Diagnostic sensors for the station
+            station_info = coordinator.data.get("station_info", {})
+            
+            # Always add basic info sensors
             sensors.extend([
                 StationInfoSensor(coordinator, entry, "name", "Nome", "mdi:gas-station"),
                 StationInfoSensor(coordinator, entry, "nomeImpianto", "Nome Impianto", "mdi:gas-station"),
@@ -57,16 +60,27 @@ async def async_setup_entry(
                 StationInfoSensor(coordinator, entry, "address", "Indirizzo", "mdi:map-marker"),
                 StationInfoSensor(coordinator, entry, "brand", "Marchio", "mdi:tag"),
                 StationInfoSensor(coordinator, entry, "company", "Società", "mdi:office-building"),
-                StationInfoSensor(coordinator, entry, "phoneNumber", "Telefono", "mdi:phone"),
-                StationInfoSensor(coordinator, entry, "email", "Email", "mdi:email"),
-                StationInfoSensor(coordinator, entry, "website", "Sito Web", "mdi:web"),
-                # Add a single location sensor for the map marker
-                StationLocationSensor(coordinator, entry),
-                # Add open/closed status binary sensor
-                StationOpenClosedBinarySensor(coordinator, entry),
-                # Add next opening/closing time sensor
-                StationNextChangeSensor(coordinator, entry),
             ])
+            
+            # Only add contact sensors if data is available
+            if station_info.get("phoneNumber") and station_info.get("phoneNumber").strip():
+                sensors.append(StationInfoSensor(coordinator, entry, "phoneNumber", "Telefono", "mdi:phone"))
+            
+            if station_info.get("email") and station_info.get("email").strip():
+                sensors.append(StationInfoSensor(coordinator, entry, "email", "Email", "mdi:email"))
+            
+            if station_info.get("website") and station_info.get("website").strip():
+                sensors.append(StationInfoSensor(coordinator, entry, "website", "Sito Web", "mdi:web"))
+            
+            # Add a single location sensor for the map marker
+            sensors.append(StationLocationSensor(coordinator, entry))
+            
+            # Only add opening hours related sensors if opening hours data is available and valid
+            if _has_valid_opening_hours(coordinator.data):
+                # Add open/closed status binary sensor
+                sensors.append(StationOpenClosedBinarySensor(coordinator, entry))
+                # Add next opening/closing time sensor
+                sensors.append(StationNextChangeSensor(coordinator, entry))
             
             # Add binary sensors for available services
             if coordinator.data and "services" in coordinator.data:
@@ -87,6 +101,47 @@ async def async_setup_entry(
                         )
     
         async_add_entities(sensors, update_before_add=True)
+
+
+def _has_valid_opening_hours(data: dict) -> bool:
+    """Check if opening hours data contains valid schedule information."""
+    if not data or "opening_hours" not in data:
+        return False
+    
+    opening_hours = data.get("opening_hours", [])
+    if not opening_hours:
+        return False
+    
+    # Check if at least one day has valid opening hours
+    for day in opening_hours:
+        # Skip if the day is marked as closed
+        if day.get("flagChiusura"):
+            continue
+        
+        # Check if it's 24/7
+        if day.get("flagH24"):
+            return True
+        
+        # Check for continuous hours
+        if day.get("flagOrarioContinuato"):
+            open_time = day.get("oraAperturaOrarioContinuato")
+            close_time = day.get("oraChiusuraOrarioContinuato")
+            if open_time and close_time:
+                return True
+        
+        # Check for split hours
+        else:
+            morning_open = day.get("oraAperturaMattina")
+            morning_close = day.get("oraChiusuraMattina")
+            afternoon_open = day.get("oraAperturaPomeriggio")
+            afternoon_close = day.get("oraChiusuraPomeriggio")
+            
+            # Check if we have valid morning or afternoon hours
+            if (morning_open and morning_close) or (afternoon_open and afternoon_close):
+                return True
+    
+    # If we get here, no valid opening hours were found
+    return False
 
 
 def _get_fuel_icon(fuel_name: str) -> str:
@@ -328,7 +383,6 @@ class StationLocationSensor(CoordinatorEntity, SensorEntity):
 
 class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """Binary sensor indicating if the station is currently open."""
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:storefront"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
@@ -449,7 +503,6 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
 class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
     """Sensor indicating when the station will next open or close."""
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:clock-time-eight"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:

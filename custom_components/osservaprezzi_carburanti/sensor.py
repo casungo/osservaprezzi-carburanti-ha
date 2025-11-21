@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+from datetime import datetime, time, timedelta
 from typing import Any
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -61,8 +62,10 @@ async def async_setup_entry(
                 StationInfoSensor(coordinator, entry, "website", "Sito Web", "mdi:web"),
                 # Add a single location sensor for the map marker
                 StationLocationSensor(coordinator, entry),
-                # Add opening hours sensor
-                StationOpeningHoursSensor(coordinator, entry),
+                # Add open/closed status binary sensor
+                StationOpenClosedBinarySensor(coordinator, entry),
+                # Add next opening/closing time sensor
+                StationNextChangeSensor(coordinator, entry),
             ])
             
             # Add binary sensors for available services
@@ -323,18 +326,17 @@ class StationLocationSensor(CoordinatorEntity, SensorEntity):
                 station_info.get(ATTR_LONGITUDE) is not None)
 
 
-
-class StationOpeningHoursSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a sensor for station opening hours."""
+class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Binary sensor indicating if the station is currently open."""
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:store-clock"
+    _attr_icon = "mdi:storefront"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the opening hours sensor."""
+        """Initialize the open/closed binary sensor."""
         super().__init__(coordinator)
         self._station_id = entry.data[CONF_STATION_ID]
-        self._attr_name = "Orari di Apertura"
-        self._attr_unique_id = f"{self._station_id}_opening_hours"
+        self._attr_name = "Stazione Aperta"
+        self._attr_unique_id = f"{self._station_id}_open_closed"
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -347,196 +349,329 @@ class StationOpeningHoursSensor(CoordinatorEntity, SensorEntity):
             model="Area di Servizio",
         )
 
-    def _format_day_name(self, day_id: int) -> str:
-        """Convert giornoSettimanaId to Italian day name."""
-        # Map giornoSettimanaId to Italian day names
-        day_mapping = {
-            1: "Lun",  # Monday
-            2: "Mar",  # Tuesday
-            3: "Mer",  # Wednesday
-            4: "Gio",  # Thursday
-            5: "Ven",  # Friday
-            6: "Sab",  # Saturday
-            7: "Dom",  # Sunday
-            8: "Fest", # Holiday
-        }
-        
-        return day_mapping.get(day_id, f"Giorno{day_id}")
-
-    def _format_time(self, time_str: str) -> str:
-        """Format time string to HH:MM format with enhanced validation."""
-        import re
-        
+    def _parse_time(self, time_str: str | None) -> time | None:
+        """Parse time string to time object."""
         if not time_str:
-            return ""
-        
-        # Strip whitespace and normalize
-        time_str = str(time_str).strip()
-        
-        # Try to match various time formats with regex
-        # HH:MM format (24-hour)
-        match = re.match(r'^(\d{1,2}):(\d{1,2})$', time_str)
-        if match:
-            hour, minute = match.groups()
-            try:
-                # Validate hour and minute ranges
-                h = int(hour)
-                m = int(minute)
-                if 0 <= h <= 23 and 0 <= m <= 59:
-                    return f"{h:02d}:{m:02d}"
-            except ValueError:
-                pass
-        
-        # HH.MM format
-        match = re.match(r'^(\d{1,2})\.(\d{1,2})$', time_str)
-        if match:
-            hour, minute = match.groups()
-            try:
-                h = int(hour)
-                m = int(minute)
-                if 0 <= h <= 23 and 0 <= m <= 59:
-                    return f"{h:02d}:{m:02d}"
-            except ValueError:
-                pass
-        
-        # HH format (hour only, assume 00 minutes)
-        match = re.match(r'^(\d{1,2})$', time_str)
-        if match:
-            hour = match.group(1)
-            try:
-                h = int(hour)
-                if 0 <= h <= 23:
-                    return f"{h:02d}:00"
-            except ValueError:
-                pass
-        
-        # Handle special cases
-        if time_str.lower() in ["24:00", "24:00:00", "24.00"]:
-            return "00:00"  # Midnight
-        
-        # If we can't parse the time, return the original string
-        # This preserves any special formatting that might be intentional
-        return time_str
-
-    def _format_opening_hours(self) -> str | None:
-        """Format opening hours into a readable string."""
-        if not self.coordinator.data or "opening_hours" not in self.coordinator.data:
             return None
+        
+        try:
+            # Handle HH:MM format
+            if ":" in str(time_str):
+                hour, minute = str(time_str).split(":")
+                return time(int(hour), int(minute))
+            # Handle HH.MM format
+            elif "." in str(time_str):
+                hour, minute = str(time_str).split(".")
+                return time(int(hour), int(minute))
+            # Handle HH format
+            else:
+                return time(int(time_str), 0)
+        except (ValueError, TypeError):
+            return None
+
+    def _is_currently_open(self) -> bool:
+        """Check if the station is currently open."""
+        if not self.coordinator.data or "opening_hours" not in self.coordinator.data:
+            return False
         
         opening_hours = self.coordinator.data.get("opening_hours", [])
         if not opening_hours:
+            return False
+        
+        # Get current time in Italy timezone
+        now = datetime.now()
+        current_weekday = now.weekday() + 1  # Convert to 1-7 (Monday=1)
+        current_time = now.time()
+        
+        # Find today's schedule
+        today_schedule = None
+        for day in opening_hours:
+            if day.get("giornoSettimanaId") == current_weekday:
+                today_schedule = day
+                break
+        
+        if not today_schedule:
+            return False
+        
+        # Check if closed today
+        if today_schedule.get("flagChiusura"):
+            return False
+        
+        # Check if 24/7
+        if today_schedule.get("flagH24"):
+            return True
+        
+        # Check continuous hours
+        if today_schedule.get("flagOrarioContinuato"):
+            open_time = self._parse_time(today_schedule.get("oraAperturaOrarioContinuato"))
+            close_time = self._parse_time(today_schedule.get("oraChiusuraOrarioContinuato"))
+            
+            if open_time and close_time:
+                if open_time <= close_time:
+                    # Same day (e.g., 08:00-20:00)
+                    return open_time <= current_time <= close_time
+                else:
+                    # Overnight (e.g., 22:00-06:00)
+                    return current_time >= open_time or current_time <= close_time
+        
+        # Check split hours (morning + afternoon)
+        else:
+            morning_open = self._parse_time(today_schedule.get("oraAperturaMattina"))
+            morning_close = self._parse_time(today_schedule.get("oraChiusuraMattina"))
+            afternoon_open = self._parse_time(today_schedule.get("oraAperturaPomeriggio"))
+            afternoon_close = self._parse_time(today_schedule.get("oraChiusuraPomeriggio"))
+            
+            # Check morning slot
+            if morning_open and morning_close:
+                if morning_open <= current_time <= morning_close:
+                    return True
+            
+            # Check afternoon slot
+            if afternoon_open and afternoon_close:
+                if afternoon_open <= current_time <= afternoon_close:
+                    return True
+        
+        return False
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if the station is currently open."""
+        return self._is_currently_open()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        return {
+            "current_status": "Aperta" if self._is_currently_open() else "Chiusa",
+            "last_updated": datetime.now().isoformat(),
+        }
+
+
+class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
+    """Sensor indicating when the station will next open or close."""
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clock-time-eight"
+
+    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the next change sensor."""
+        super().__init__(coordinator)
+        self._station_id = entry.data[CONF_STATION_ID]
+        self._attr_name = "Prossimo Cambio Orario"
+        self._attr_unique_id = f"{self._station_id}_next_change"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the device info."""
+        station_info = self.coordinator.data.get("station_info", {})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._station_id)},
+            name=station_info.get("name"),
+            manufacturer=station_info.get("brand"),
+            model="Area di Servizio",
+        )
+
+    def _parse_time(self, time_str: str) -> time | None:
+        """Parse time string to time object."""
+        if not time_str:
             return None
+        
+        try:
+            # Handle HH:MM format
+            if ":" in time_str:
+                hour, minute = time_str.split(":")
+                return time(int(hour), int(minute))
+            # Handle HH.MM format
+            elif "." in time_str:
+                hour, minute = time_str.split(".")
+                return time(int(hour), int(minute))
+            # Handle HH format
+            else:
+                return time(int(time_str), 0)
+        except (ValueError, TypeError):
+            return None
+
+    def _get_next_change(self) -> tuple[str, datetime | None]:
+        """Get the next opening or closing time and type."""
+        if not self.coordinator.data or "opening_hours" not in self.coordinator.data:
+            return "Orari non disponibili", None
+        
+        opening_hours = self.coordinator.data.get("opening_hours", [])
+        if not opening_hours:
+            return "Orari non disponibili", None
         
         # Check if 24/7
         for day in opening_hours:
             if day.get("flagH24"):
-                return "24/7"
+                return "Sempre aperto", None
         
-        # Group consecutive days with same hours
-        formatted_hours = []
-        current_group = []
-        current_hours = None
+        now = datetime.now()
+        current_weekday = now.weekday() + 1  # Convert to 1-7 (Monday=1)
+        current_time = now.time()
         
+        # Find today's schedule
+        today_schedule = None
         for day in opening_hours:
-            day_id = day.get("giornoSettimanaId", 0)
-            day_name = self._format_day_name(day_id)
+            if day.get("giornoSettimanaId") == current_weekday:
+                today_schedule = day
+                break
+        
+        if not today_schedule or today_schedule.get("flagChiusura"):
+            # Station is closed today, find next opening
+            return self._find_next_opening(opening_hours, now)
+        
+        # Check if currently open
+        is_open = self._is_currently_open(today_schedule, current_time)
+        
+        if is_open:
+            # Find next closing time
+            return self._find_next_closing(today_schedule, now)
+        else:
+            # Find next opening time
+            return self._find_next_opening(opening_hours, now)
+
+    def _is_currently_open(self, schedule: dict, current_time: time) -> bool:
+        """Check if station is currently open based on schedule."""
+        # Check continuous hours
+        if schedule.get("flagOrarioContinuato"):
+            open_time = self._parse_time(schedule.get("oraAperturaOrarioContinuato"))
+            close_time = self._parse_time(schedule.get("oraChiusuraOrarioContinuato"))
             
-            # Skip days with uncommunicated hours
-            if day.get("flagNonComunicato"):
-                time_str = "Orario non comunicato"
-            elif day.get("flagChiusura"):
-                time_str = "Chiuso"
-            else:
-                # Format opening hours based on flagOrarioContinuato
-                if day.get("flagOrarioContinuato"):
-                    # Continuous hours
-                    open_time = self._format_time(day.get("oraAperturaOrarioContinuato", ""))
-                    close_time = self._format_time(day.get("oraChiusuraOrarioContinuato", ""))
-                    if open_time and close_time:
-                        time_str = f"{open_time}-{close_time}"
-                    else:
-                        time_str = "Orario non disponibile"
+            if open_time and close_time:
+                if open_time <= close_time:
+                    return open_time <= current_time <= close_time
                 else:
-                    # Split hours (morning + afternoon)
-                    morning_open = self._format_time(day.get("oraAperturaMattina", ""))
-                    morning_close = self._format_time(day.get("oraChiusuraMattina", ""))
-                    afternoon_open = self._format_time(day.get("oraAperturaPomeriggio", ""))
-                    afternoon_close = self._format_time(day.get("oraChiusuraPomeriggio", ""))
-                    
-                    if morning_open and morning_close and afternoon_open and afternoon_close:
-                        # Two time slots
-                        time_str = f"{morning_open}-{morning_close}, {afternoon_open}-{afternoon_close}"
-                    elif morning_open and morning_close:
-                        # Single time slot (continuous hours)
-                        time_str = f"{morning_open}-{morning_close}"
-                    else:
-                        time_str = "Orario non disponibile"
+                    return current_time >= open_time or current_time <= close_time
+        
+        # Check split hours
+        else:
+            morning_open = self._parse_time(schedule.get("oraAperturaMattina"))
+            morning_close = self._parse_time(schedule.get("oraChiusuraMattina"))
+            afternoon_open = self._parse_time(schedule.get("oraAperturaPomeriggio"))
+            afternoon_close = self._parse_time(schedule.get("oraChiusuraPomeriggio"))
             
-            # Check if this day has the same hours as the current group
-            if current_hours == time_str:
-                current_group.append(day_name)
-            else:
-                # Save the previous group if it exists
-                if current_group:
-                    if len(current_group) == 1:
-                        formatted_hours.append(f"{current_group[0]}: {current_hours}")
+            # Check morning slot
+            if morning_open and morning_close:
+                if morning_open <= current_time <= morning_close:
+                    return True
+            
+            # Check afternoon slot
+            if afternoon_open and afternoon_close:
+                if afternoon_open <= current_time <= afternoon_close:
+                    return True
+        
+        return False
+
+    def _find_next_closing(self, schedule: dict, now: datetime) -> tuple[str, datetime | None]:
+        """Find the next closing time for today."""
+        current_time = now.time()
+        
+        # Check continuous hours
+        if schedule.get("flagOrarioContinuato"):
+            close_time = self._parse_time(schedule.get("oraChiusuraOrarioContinuato"))
+            if close_time and close_time > current_time:
+                close_datetime = now.replace(hour=close_time.hour, minute=close_time.minute, second=0, microsecond=0)
+                return "Chiude alle", close_datetime
+        
+        # Check split hours
+        else:
+            morning_close = self._parse_time(schedule.get("oraChiusuraMattina"))
+            afternoon_close = self._parse_time(schedule.get("oraChiusuraPomeriggio"))
+            
+            # Check morning closing
+            if morning_close and morning_close > current_time:
+                close_datetime = now.replace(hour=morning_close.hour, minute=morning_close.minute, second=0, microsecond=0)
+                return "Chiude alle", close_datetime
+            
+            # Check afternoon closing
+            if afternoon_close and afternoon_close > current_time:
+                close_datetime = now.replace(hour=afternoon_close.hour, minute=afternoon_close.minute, second=0, microsecond=0)
+                return "Chiude alle", close_datetime
+        
+        # If no closing time found today, find next opening
+        opening_hours = self.coordinator.data.get("opening_hours", [])
+        return self._find_next_opening(opening_hours, now)
+
+    def _find_next_opening(self, opening_hours: list, now: datetime) -> tuple[str, datetime | None]:
+        """Find the next opening time."""
+        current_weekday = now.weekday() + 1
+        current_time = now.time()
+        
+        # Check remaining time today
+        for day_offset in range(7):
+            check_weekday = (current_weekday + day_offset - 1) % 7 + 1
+            check_date = now.date() + timedelta(days=day_offset)
+            
+            for day in opening_hours:
+                if day.get("giornoSettimanaId") == check_weekday:
+                    if day.get("flagChiusura") or day.get("flagNonComunicato"):
+                        continue
+                    
+                    # Check continuous hours
+                    if day.get("flagOrarioContinuato"):
+                        open_time = self._parse_time(day.get("oraAperturaOrarioContinuato"))
+                        if open_time:
+                            if day_offset == 0 and open_time > current_time:
+                                open_datetime = now.replace(hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0)
+                                return "Apre alle", open_datetime
+                            elif day_offset > 0:
+                                open_datetime = datetime.combine(check_date, open_time)
+                                return "Apre alle", open_datetime
+                    
+                    # Check split hours
                     else:
-                        formatted_hours.append(f"{current_group[0]}-{current_group[-1]}: {current_hours}")
-                
-                # Start a new group
-                current_group = [day_name]
-                current_hours = time_str
+                        morning_open = self._parse_time(day.get("oraAperturaMattina"))
+                        afternoon_open = self._parse_time(day.get("oraAperturaPomeriggio"))
+                        
+                        # Check morning opening
+                        if morning_open:
+                            if day_offset == 0 and morning_open > current_time:
+                                open_datetime = now.replace(hour=morning_open.hour, minute=morning_open.minute, second=0, microsecond=0)
+                                return "Apre alle", open_datetime
+                            elif day_offset > 0:
+                                open_datetime = datetime.combine(check_date, morning_open)
+                                return "Apre alle", open_datetime
+                        
+                        # Check afternoon opening
+                        if afternoon_open:
+                            if day_offset == 0 and afternoon_open > current_time:
+                                open_datetime = now.replace(hour=afternoon_open.hour, minute=afternoon_open.minute, second=0, microsecond=0)
+                                return "Apre alle", open_datetime
+                            elif day_offset > 0:
+                                open_datetime = datetime.combine(check_date, afternoon_open)
+                                return "Apre alle", open_datetime
         
-        # Add the last group
-        if current_group:
-            if len(current_group) == 1:
-                formatted_hours.append(f"{current_group[0]}: {current_hours}")
-            else:
-                formatted_hours.append(f"{current_group[0]}-{current_group[-1]}: {current_hours}")
-        
-        return "; ".join(formatted_hours) if formatted_hours else None
+        return "Nessuna apertura prevista", None
 
     @property
     def native_value(self) -> StateType:
-        """Return the state of the sensor (formatted opening hours)."""
-        return self._format_opening_hours()
+        """Return the next change description."""
+        change_type, change_time = self._get_next_change()
+        if change_time:
+            time_str = change_time.strftime("%H:%M")
+            if change_time.date() != datetime.now().date():
+                date_str = change_time.strftime("%d/%m")
+                return f"{change_type} {time_str} ({date_str})"
+            else:
+                return f"{change_type} {time_str}"
+        return change_type
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes with raw opening hours data."""
-        if not self.coordinator.data or "opening_hours" not in self.coordinator.data:
-            return {}
+        """Return additional state attributes."""
+        change_type, change_time = self._get_next_change()
+        attributes = {
+            "change_type": change_type,
+            "next_change_time": change_time.isoformat() if change_time else None,
+            "last_updated": datetime.now().isoformat(),
+        }
         
-        opening_hours = self.coordinator.data.get("opening_hours", [])
-        if not opening_hours:
-            return {"opening_hours_count": 0}
+        if change_time:
+            # Calculate minutes until next change
+            now = datetime.now()
+            minutes_until = int((change_time - now).total_seconds() / 60)
+            attributes["minutes_until_change"] = minutes_until
         
-        # Create detailed attributes for each day
-        opening_hours_attributes = {}
-        for i, day in enumerate(opening_hours):
-            day_id = day.get("giornoSettimanaId", f"day_{i}")
-            day_name = self._format_day_name(day_id) if isinstance(day_id, int) else f"day_{i+1}"
-            
-            # Add each day's raw data as attributes using correct API field names
-            opening_hours_attributes[f"day_{i+1}_id"] = day_id
-            opening_hours_attributes[f"day_{i+1}_name"] = day_name
-            opening_hours_attributes[f"day_{i+1}_morning_open"] = day.get("oraAperturaMattina")
-            opening_hours_attributes[f"day_{i+1}_morning_close"] = day.get("oraChiusuraMattina")
-            opening_hours_attributes[f"day_{i+1}_afternoon_open"] = day.get("oraAperturaPomeriggio")
-            opening_hours_attributes[f"day_{i+1}_afternoon_close"] = day.get("oraChiusuraPomeriggio")
-            opening_hours_attributes[f"day_{i+1}_continuous_open"] = day.get("oraAperturaOrarioContinuato")
-            opening_hours_attributes[f"day_{i+1}_continuous_close"] = day.get("oraChiusuraOrarioContinuato")
-            opening_hours_attributes[f"day_{i+1}_is_continuous"] = day.get("flagOrarioContinuato", False)
-            opening_hours_attributes[f"day_{i+1}_is_24h"] = day.get("flagH24", False)
-            opening_hours_attributes[f"day_{i+1}_is_closed"] = day.get("flagChiusura", False)
-            opening_hours_attributes[f"day_{i+1}_is_uncommunicated"] = day.get("flagNonComunicato", False)
-            opening_hours_attributes[f"day_{i+1}_self_service"] = day.get("flagSelf", False)
-            opening_hours_attributes[f"day_{i+1}_served"] = day.get("flagServito", False)
-        
-        # Add total count
-        opening_hours_attributes["opening_hours_count"] = len(opening_hours)
-        
-        return opening_hours_attributes
+        return attributes
 
 
 class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):

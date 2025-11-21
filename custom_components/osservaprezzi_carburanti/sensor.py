@@ -189,7 +189,7 @@ class OsservaprezziStationSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=station_info.get("name"),
             manufacturer=station_info.get("brand"),
-            model="Stazione di Servizio",
+            model="Area di Servizio",
         )
 
     @property
@@ -241,7 +241,7 @@ class StationInfoSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=station_info.get("name"),
             manufacturer=station_info.get("brand"),
-            model="Stazione di Servizio",
+            model="Area di Servizio",
         )
 
     @property
@@ -284,7 +284,7 @@ class StationLocationSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=station_info.get("name"),
             manufacturer=station_info.get("brand"),
-            model="Stazione di Servizio",
+            model="Area di Servizio",
         )
 
     @property
@@ -344,7 +344,7 @@ class StationOpeningHoursSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=station_info.get("name"),
             manufacturer=station_info.get("brand"),
-            model="Stazione di Servizio",
+            model="Area di Servizio",
         )
 
     def _format_day_name(self, day_id: int) -> str:
@@ -563,7 +563,7 @@ class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=station_info.get("name"),
             manufacturer=station_info.get("brand"),
-            model="Stazione di Servizio",
+            model="Area di Servizio",
         )
 
     @property

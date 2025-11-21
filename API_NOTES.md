@@ -24,10 +24,6 @@ This endpoint finds fuel stations within a given radius from a central point if 
 
 - **Response Body:** A JSON object containing a list of results.
 
-  - `success`: `true` on success.
-  - `center`: `lat` and `lng` that are the exact same as request values.
-  - `results`: An array of station objects.
-
 - **Example Response:**
 
   ```json
@@ -320,9 +316,80 @@ This endpoint retrieves detailed information for a specific station by its ID (5
   }
   ```
 
-## 3. Endpoint: Get All Logos
+## 3. Hours of Operation Structure
 
-This endpoint retrieves all available fuel station brand logos.
+The `orariapertura` array in the station details contains the opening hours for each day of the week. Here's how the structure works:
+
+### Day of Week Mapping
+
+- `giornoSettimanaId`: Day of the week identifier
+  - 1 = Monday
+  - 2 = Tuesday
+  - 3 = Wednesday
+  - 4 = Thursday
+  - 5 = Friday
+  - 6 = Saturday
+  - 7 = Sunday
+  - 8 = Holiday (additional entry for special holiday hours)
+
+### Opening Hours Patterns
+
+#### 1. Split Hours (Morning + Afternoon)
+
+When `flagOrarioContinuato` is `false`:
+
+- `oraAperturaMattina`: Morning opening time (e.g., "07:00")
+- `oraChiusuraMattina`: Morning closing time (e.g., "13:00")
+- `oraAperturaPomeriggio`: Afternoon opening time (e.g., "15:00")
+- `oraChiusuraPomeriggio`: Afternoon closing time (e.g., "19:30")
+
+#### 2. Continuous Hours
+
+When `flagOrarioContinuato` is `true`:
+
+- `oraAperturaOrarioContinuato`: Opening time (e.g., "07:00")
+- `oraChiusuraOrarioContinuato`: Closing time (e.g., "19:00")
+- Morning/Afternoon fields are `null`
+
+#### 3. Special Flags
+
+- `flagH24`: `true` if open 24 hours
+- `flagChiusura`: `true` if closed for the day
+- `flagNonComunicato`: `true` if hours not communicated
+- `flagServito`: `true` if served service is available
+- `flagSelf`: `true` if self-service is available
+
+## Available Services
+
+The API provides information about additional services available at fuel stations. These services are returned as an array of service objects in the station details response. Each service has an ID and description.
+
+### Service IDs and Descriptions
+
+| ID  | Name                 | Icon                         | Description                                    |
+| --- | -------------------- | ---------------------------- | ---------------------------------------------- |
+| 1   | Food&Beverage        | mdi:food                     | Bar, ristorante o punto ristoro                |
+| 2   | Officina             | mdi:car-wrench               | Servizio di riparazione e manutenzione         |
+| 3   | Sosta Camper/Tir     | mdi:truck                    | Area di sosta per camper e autotreni           |
+| 4   | Scarico per camper   | mdi:water-pump               | Punto di scarico acque nere/grigie             |
+| 5   | Area bambini         | mdi:human-child              | Area giochi per bambini                        |
+| 6   | Bancomat             | mdi:cash-multiple            | Sportello automatico ATM                       |
+| 7   | Servizi per disabili | mdi:wheelchair-accessibility | Servizi accessibili per persone con disabilità |
+| 8   | Wi-Fi                | mdi:wifi                     | Connessione Wi-Fi gratuita o a pagamento       |
+| 9   | Gommista             | mdi:tire                     | Servizio pneumatici e gommista                 |
+| 10  | Autolavaggio         | mdi:car-wash                 | Servizio di lavaggio auto                      |
+| 11  | Ricarica elettrica   | mdi:ev-station               | Colonnine per ricarica veicoli elettrici       |
+
+### Service Images
+
+Each service has an associated image available at:
+
+```
+https://carburanti.mise.gov.it/ospzSearch/assets/servizi/{service_id}.gif
+```
+
+## 4. Endpoint: Get All Logos
+
+This endpoint retrieves all available fuel station brand logos. logoMakerList.tipoFile can also be th5, th4, th3, th2, th1 and th0
 
 - **URL:** `https://carburanti.mise.gov.it/ospzApi/registry/alllogos`
 - **Method:** `GET`
@@ -355,9 +422,9 @@ This endpoint retrieves all available fuel station brand logos.
   ]
   ```
 
-## 4. Endpoint: Get Fuel Types
+## 5. Endpoint: Get Fuel Types
 
-This endpoint retrieves all available fuel types with their IDs and descriptions.
+This endpoint retrieves all available fuel types with their IDs and descriptions. This endpoint is kind of useless because gas stations return a wide variety of fuels not mentioned here. I keep it documented for completeness because this is used in the webapp to filter for fuels (which would be more useful if it provided all available fuel types and better for users searching for specific fuels but oh well...)
 
 - **URL:** `https://carburanti.mise.gov.it/ospzApi/registry/fuels`
 - **Method:** `GET`
@@ -443,8 +510,3 @@ This endpoint retrieves all available fuel types with their IDs and descriptions
     ]
   }
   ```
-
-## 5. Key Observations
-
-- **Self vs. Served:** The `isSelf` boolean flag is critical. It differentiates between self-service (`true`) and served (`false`) prices, which are often different.
-- **Workflow:** A typical workflow would be to use the `search/zone` endpoint to discover nearby stations, then use the `registry/servicearea/{id}` endpoint to get more detailed information (like the full address or services) for a specific station.

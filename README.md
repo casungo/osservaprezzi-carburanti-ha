@@ -2,63 +2,88 @@
 
 [🇮🇹 Read this in Italian / Leggi in Italiano](./README.it.md)
 
-An integration for Home Assistant that retrieves fuel prices from the "Osservaprezzi" service provided by the Italian Ministry of Enterprises and Made in Italy (MISE).
+Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi service provided by the Italian Ministry of Enterprises and Made in Italy (MISE).
 
 ## ✨ Features
 
-- 📊 **Automatic Sensors**: Automatically creates a sensor for each available fuel type at the selected station.
-- ⏰ **Scheduled Updates**: Data is refreshed daily at a user-configured time.
-- 🏷️ **Complete Information**: Sensors include detailed attributes such as station name, brand, address, and last update time.
-- 🔧 **Simple Configuration**: Guided setup through the Home Assistant UI.
+📊 **Automatic Fuel Sensors**: Automatically creates a sensor for each fuel type available at the selected station.
 
-## 🚀 Installation
+⏰ **Scheduled Updates**: Data is updated daily at a user-configurable time using cron expressions (default is daily at 08:30).
 
-### Through HACS (Recommended)
+🏷️ **Complete Station Information**: Sensors include detailed attributes such as station name, brand, address, and last update time.
 
-1.  **Install HACS** (if you don't have it already): [HACS Guide](https://hacs.xyz/docs/installation/installation/)
-2.  **Add this repository** in HACS:
-    - Go to HACS → Integrations.
-    - Click the 3 dots in the top right corner.
-    - Select "Custom repositories".
-    - Add: `casungo/osservaprezzi-carburanti-ha`
-    - Category: Integration
-3.  **Install the integration**:
-    - Search for "Osservaprezzi Carburanti" in HACS.
-    - Click "Download".
-    - Restart Home Assistant.
-    - The integration will be automatically installed in `config/custom_components/osservaprezzi_carburanti/`.
+📍 **Location Sensor**: Creates a map marker sensor showing the station's location.
 
-### Manual Installation
+🕐 **Opening Hours Sensors**: Provides sensors for open/closed status and next opening/closing time when available.
 
-1.  **Download the repository**:
-    ```bash
-    git clone https://github.com/casungo/osservaprezzi-carburanti-ha.git
-    ```
-2.  **Copy the integration**:
-    Copy the `custom_components/osservaprezzi_carburanti` folder into your Home Assistant `config` directory.
-3.  **Verify the structure**:
-    ```
-    config/
-    └── custom_components/
-        └── osservaprezzi_carburanti/
-            ├── __init__.py
-            ├── manifest.json
-            ├── sensor.py
-            └── ...
-    ```
-4.  **Restart Home Assistant**.
+🛠️ **Service Binary Sensors**: Automatically creates binary sensors for services when available.
 
-## ⚙️ Configuration
+📞 **Contact Information Sensors**: Creates sensors for phone, email, and website when available.
 
-To configure this integration, go to: `Settings` -> `Devices & Services` -> `ADD INTEGRATION`, search for `Osservaprezzi Carburanti`, and follow the on-screen instructions.
+## 🚀 Installation and Configuration
 
-You can also use the following My Home Assistant link (requires the integration to be installed first):
+### Installation via HACS
+
+1. **Install HACS** (if you don't have it already): [HACS Guide](https://hacs.xyz/docs/installation/installation/)
+2. **Install the integration**:
+   - Search for "Osservaprezzi Carburanti" in HACS.
+   - Click "Download".
+   - Restart Home Assistant.
+
+### Configuration
+
+To configure the integration, go to: "Settings" -> "Devices & Services" -> "+ Add Integration", search for "Osservaprezzi Carburanti" and follow the instructions.
+
+You can also use the following My Home Assistant link (requires the integration to be already installed):
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
+## 📊 Created Sensors
+
+When you configure a station, the integration automatically creates the following sensors:
+
+### Fuel Price Sensors
+
+- One sensor for each fuel type available at the station (both self-service and served)
+- Shows current price in €/L
+- Includes attributes for fuel name, service type, last update time, and validity date
+
+### Station Information Sensors
+
+- **Station Name**: The name of the fuel station
+- **Station ID**: The Osservaprezzi identifier
+- **Address**: Full street address
+- **Brand**: Fuel station brand (e.g., Eni, Shell, TotalEnergies)
+- **Company**: Operating company name
+- **Phone**: Contact phone number (if available)
+- **Email**: Contact email (if available)
+- **Website**: Official website (if available)
+- **Location**: Map marker with GPS coordinates
+
+### Operating Hours Sensors (when data is available)
+
+- **Open/Closed Status**: Binary sensor indicating if the station is currently open
+- **Next Change**: Shows when the station will next open or close with time
+
+### Service Binary Sensors (when data is available)
+
+Binary sensors are created for each available service at the station:
+
+- 🍽️ **Food&Beverage**: Bar, restaurant or catering service
+- 🔧 **Workshop**: Car repair and maintenance services
+- 🚛 **RV/Truck Parking Area**: Designated parking area for campers and trucks
+- 💧 **Camper Waste Disposal**: Black/grey water discharge point
+- 🧒 **Children's Area**: Playground for children
+- 💳 **ATM/Bancomat**: Cash machine availability
+- ♿ **Disabled Access**: Accessibility services
+- 📶 **Wi-Fi**: Internet connection availability
+- 🛞 **Tire Service**: Tire fitting and repair services
+- 🚗 **Car Wash**: Vehicle washing services
+- 🔌 **Electric Charging**: Electric vehicle charging stations
+
 ### Cron Expression Configuration
 
-The integration uses a cron expression to schedule automatic data updates. This is not part of the initial configuration but can be modified later according to your preferences.
+The integration uses a cron expression to schedule automatic data updates. This can be configured after initial installation through the integration options.
 
 **Default value**: `30 8 * * *` (daily at 8:30 AM)
 
@@ -71,54 +96,23 @@ Common examples:
 - `0 */6 * * *` - Every 6 hours
 - `0 8 * * 1-5` - Weekdays at 8:00 AM
 
-### Finding the Station ID
+### How to Find the Station ID
 
-During the setup, you will be asked to provide the **Station ID** for the fuel station you want to monitor. To find the Station ID:
+During configuration, you will be asked to enter the **Station ID** of the facility you want to monitor. To find the Station ID:
 
 1. Go to https://carburanti.mise.gov.it/ospzSearch/zona
-2. Search for your favorite gas station
+2. Search for your favorite station
 3. Click on the station
 4. In the URL (e.g: https://carburanti.mise.gov.it/ospzSearch/dettaglio/1111) copy the ID (1111)
 
 ## 📋 Supported Fuel Types
 
-The integration will create sensors for any of the following fuels reported by the station:
-
-- **Gasoline**: Benzina Self/Servito
-- **Diesel**: Gasolio, Blue Diesel, etc.
-- **LPG**: GPL Servito
-- **Methane**: Metano Servito
-- **Biofuels**: E85
-- **Hydrogen**: H2
-
-## 🚨 Troubleshooting
-
-### Integration not found
-
-1.  Verify the folder structure is correct: `config/custom_components/osservaprezzi_carburanti/`.
-2.  Check that all essential files are present (`__init__.py`, `manifest.json`, etc.).
-3.  Review the Home Assistant logs for any import errors related to the integration.
-4.  Ensure the domain in `manifest.json` is `osservaprezzi_carburanti`.
-
-### No data is displayed
-
-1.  Ensure the integration has been configured correctly from the UI.
-2.  Check that the sensors have a valid state in Developer Tools.
-3.  Verify that the Station ID is correct and the station is actively reporting prices.
+The integration will create sensors for every possible fuel type.
 
 ## 📞 Support
 
-For issues or suggestions:
-
-- Open an issue on GitHub.
-- Contact the author.
+For issues or suggestions, open an issue on GitHub.
 
 ## 📄 License
 
 This project is released under the MIT License.
-
-## 🙏 Acknowledgements
-
-- The "Osservaprezzi Carburanti" service for providing the data.
-- The Home Assistant team for the platform.
-- The HACS team for making distribution simple.

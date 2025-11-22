@@ -28,19 +28,8 @@ BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
 STATION_ENDPOINT = "/registry/servicearea/{station_id}"
 ZONE_ENDPOINT = "/search/zone"
 
-# Additional API endpoints
-FUELS_ENDPOINT = "/registry/fuels"
-LOGOS_ENDPOINT = "/registry/alllogos"
-
 # Geocoding API
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
-# Service type mapping for API fuel ID format
-SERVICE_TYPES = {
-    "x": "any",
-    "1": "self",
-    "0": "servito"
-}
 
 # Additional services mapping
 ADDITIONAL_SERVICES = {
@@ -154,10 +143,8 @@ FUEL_TYPES = {
 DEFAULT_HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Content-Type": "application/json",
-    "Pragma": "no-cache",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
 }
 

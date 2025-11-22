@@ -13,9 +13,6 @@ from .const import (
     STATION_ENDPOINT,
     ZONE_ENDPOINT,
     FUEL_TYPES,
-    SERVICE_TYPES,
-    FUELS_ENDPOINT,
-    LOGOS_ENDPOINT,
     DOMAIN,
     CONF_CONFIG_TYPE,
     CONF_TYPE_STATION,
@@ -38,10 +35,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.config_entry = entry
         self.session = async_get_clientsession(hass)
-        self._fuel_types_cache = None
-        self._fuel_types_cache_time = None
-        self._logos_cache = None
-        self._logos_cache_time = None
 
         unique_id = entry.unique_id
         super().__init__(
@@ -152,81 +145,9 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error fetching zone data: {err}")
 
-    async def _async_fetch_fuel_types(self) -> dict[str, str]:
-        """Fetch fuel types from the API with caching."""
-        # Cache for 24 hours
-        cache_duration = 86400
-        now = datetime.now().timestamp()
-        
-        if (self._fuel_types_cache and self._fuel_types_cache_time and
-            now - self._fuel_types_cache_time < cache_duration):
-            return self._fuel_types_cache
-            
-        url = f"{BASE_URL}{FUELS_ENDPOINT}"
-        try:
-            _LOGGER.info("Fetching fuel types from: %s", url)
-            async with self.session.get(url, headers=DEFAULT_HEADERS, timeout=30) as response:
-                _LOGGER.debug("Fuel types API response status: %s", response.status)
-                if response.status == 200:
-                    data = await response.json()
-                    _LOGGER.debug("Fuel types API response data: %s", data)
-                    fuel_types = {}
-                    for fuel in data.get("results", []):
-                        fuel_id = fuel.get("id", "")
-                        if "-" in fuel_id:
-                            # Parse format like "1-x", "1-1", "1-0"
-                            base_id, service_type = fuel_id.split("-", 1)
-                            fuel_types[fuel_id] = fuel.get("description", "")
-                        else:
-                            # Fallback for numeric IDs
-                            fuel_types[fuel_id] = fuel.get("description", "")
-                    
-                    self._fuel_types_cache = fuel_types
-                    self._fuel_types_cache_time = now
-                    return fuel_types
-                else:
-                    _LOGGER.error("Service error for fuel types API: %s - %s", response.status, response.reason)
-                    raise UpdateFailed(f"Service error: {response.status} - {response.reason}")
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error fetching fuel types: %s", err)
-            raise UpdateFailed(f"Error fetching fuel types: {err}")
-
-    async def _async_fetch_logos(self) -> dict[str, Any]:
-        """Fetch brand logos from the API with caching."""
-        # Cache for 7 days
-        cache_duration = 604800
-        now = datetime.now().timestamp()
-        
-        if (self._logos_cache and self._logos_cache_time and
-            now - self._logos_cache_time < cache_duration):
-            return self._logos_cache
-            
-        url = f"{BASE_URL}{LOGOS_ENDPOINT}"
-        try:
-            _LOGGER.info("Fetching logos from: %s", url)
-            async with self.session.get(url, headers=DEFAULT_HEADERS, timeout=30) as response:
-                _LOGGER.debug("Logos API response status: %s", response.status)
-                if response.status == 200:
-                    data = await response.json()
-                    _LOGGER.debug("Logos API response data: %s", data)
-                    logos = {}
-                    for brand in data:
-                        brand_id = brand.get("bandieraId")
-                        if brand_id is not None:
-                            logos[str(brand_id)] = {
-                                "name": brand.get("bandiera"),
-                                "logos": brand.get("logoMarkerList", [])
-                            }
-                    
-                    self._logos_cache = logos
-                    self._logos_cache_time = now
-                    return logos
-                else:
-                    _LOGGER.error("Service error for logos API: %s - %s", response.status, response.reason)
-                    raise UpdateFailed(f"Service error: {response.status} - {response.reason}")
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error fetching logos: %s", err)
-            raise UpdateFailed(f"Error fetching logos: {err}")
+    def _get_fuel_types(self) -> dict[int, str]:
+        """Get fuel types from static mapping."""
+        return FUEL_TYPES
 
     async def _async_geocode_address(self, address: str) -> dict[str, Any] | None:
         """Convert address to coordinates using Nominatim."""

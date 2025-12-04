@@ -28,8 +28,9 @@ BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
 STATION_ENDPOINT = "/registry/servicearea/{station_id}"
 ZONE_ENDPOINT = "/search/zone"
 
-# Geocoding API
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# CSV data source
+CSV_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
+CSV_UPDATE_INTERVAL = 24  # hours
 
 # Additional services mapping
 ADDITIONAL_SERVICES = {

@@ -11,7 +11,6 @@ from .const import (
     BASE_URL,
     DEFAULT_HEADERS,
     STATION_ENDPOINT,
-    FUEL_TYPES,
     DOMAIN,
     CONF_CONFIG_TYPE,
     CONF_TYPE_STATION,
@@ -85,9 +84,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error fetching station data: {err}")
 
 
-    def _get_fuel_types(self) -> dict[int, str]:
-        """Get fuel types from static mapping."""
-        return FUEL_TYPES
 
 
     async def _async_get_station_coordinates(self, station_id: str | None, address: str | None = None, station_name: str | None = None) -> dict[str, Any] | None:
@@ -191,7 +187,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         }
         for fuel in data.get("fuels", []):
             fuel_id = fuel.get("fuelId")
-            fuel_name = FUEL_TYPES.get(fuel_id, "Unknown")
+            fuel_name = fuel.get("name", "Unknown")
             service_type = "self" if fuel.get("isSelf") else "servito"
             fuel_key = f"{fuel_name}_{service_type}"
             processed_data["fuels"][fuel_key] = {

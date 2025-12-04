@@ -5,18 +5,9 @@ DOMAIN = "osservaprezzi_carburanti"
 # Configuration types
 CONF_CONFIG_TYPE = "config_type"
 CONF_TYPE_STATION = "station"
-CONF_TYPE_ZONE = "zone"
 
 # Station config
 CONF_STATION_ID = "station_id"
-
-# Zone config
-CONF_LATITUDE = "latitude"
-CONF_LONGITUDE = "longitude"
-CONF_RADIUS = "radius"
-CONF_FUEL_TYPE = "fuel_type"
-CONF_IS_SELF = "is_self"
-CONF_POINTS = "points"  # Support for multiple points in zone search
 
 # Options
 CONF_CRON_EXPRESSION = "cron_expression"
@@ -26,11 +17,16 @@ DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 07:30
 DEFAULT_NAME = "Osservaprezzi Carburanti"
 BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
 STATION_ENDPOINT = "/registry/servicearea/{station_id}"
-ZONE_ENDPOINT = "/search/zone"
 
 # CSV data source
 CSV_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
 CSV_UPDATE_INTERVAL = 24  # hours
+
+# CSV update options
+CONF_CSV_UPDATE_ENABLED = "csv_update_enabled"
+CONF_CSV_UPDATE_INTERVAL = "csv_update_interval"
+DEFAULT_CSV_UPDATE_ENABLED = True
+DEFAULT_CSV_UPDATE_INTERVAL = 24
 
 # Additional services mapping
 ADDITIONAL_SERVICES = {

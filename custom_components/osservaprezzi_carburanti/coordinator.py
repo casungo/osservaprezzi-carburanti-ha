@@ -11,21 +11,19 @@ from .const import (
     BASE_URL,
     DEFAULT_HEADERS,
     STATION_ENDPOINT,
-    ZONE_ENDPOINT,
     FUEL_TYPES,
     DOMAIN,
     CONF_CONFIG_TYPE,
     CONF_TYPE_STATION,
-    CONF_TYPE_ZONE,
     CONF_STATION_ID,
-    CONF_LATITUDE,
-    CONF_LONGITUDE,
-    CONF_RADIUS,
-    CONF_FUEL_TYPE,
-    CONF_IS_SELF,
     ATTR_DISTANCE,
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
+    CSV_UPDATE_INTERVAL,
+    CONF_CSV_UPDATE_ENABLED,
+    CONF_CSV_UPDATE_INTERVAL,
+    DEFAULT_CSV_UPDATE_ENABLED,
+    DEFAULT_CSV_UPDATE_INTERVAL,
 )
 from .csv_manager import CSVStationManager
 
@@ -51,12 +49,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Initializing CSV station data")
             await self.csv_manager.async_initialize()
         
-        config_type = self.config_entry.data.get(CONF_CONFIG_TYPE, CONF_TYPE_STATION)
-
-        if config_type == CONF_TYPE_ZONE:
-            return await self._async_fetch_zone_data()
-        else: # Default to station type for backward compatibility
-            return await self._async_fetch_station_data()
+        return await self._async_fetch_station_data()
 
     async def _async_fetch_station_data(self) -> dict[str, Any]:
         """Fetch data for a single station."""
@@ -91,70 +84,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Error fetching station data: %s", err)
             raise UpdateFailed(f"Error fetching station data: {err}")
 
-    async def _async_fetch_zone_data(self) -> dict[str, Any]:
-        """Fetch data for a zone and find the cheapest station."""
-        url = f"{BASE_URL}{ZONE_ENDPOINT}"
-        # Support both single point (backward compatibility) and multiple points
-        points_data = self.config_entry.data.get("points", [
-            {
-                "lat": self.config_entry.data[CONF_LATITUDE],
-                "lng": self.config_entry.data[CONF_LONGITUDE],
-            }
-        ])
-        
-        payload = {
-            "points": points_data,
-            "radius": self.config_entry.data[CONF_RADIUS],
-        }
-        target_fuel_id = self.config_entry.data[CONF_FUEL_TYPE]
-        target_is_self = self.config_entry.data[CONF_IS_SELF]
-
-        try:
-            async with self.session.post(url, headers=DEFAULT_HEADERS, json=payload, timeout=30) as response:
-                _LOGGER.debug("Zone API response status: %s", response.status)
-                if response.status == 200:
-                    data = await response.json()
-                    _LOGGER.debug("Zone API response data: %s", data)
-                    if not data.get("success"):
-                        _LOGGER.error("API reported failure for zone search: %s", data.get('message', 'Unknown error'))
-                        raise UpdateFailed(f"API reported failure: {data.get('message', 'Unknown error')}")
-                    if not data.get("results"):
-                        _LOGGER.warning("No results found for the specified zone.")
-                        raise UpdateFailed("No results found for the zone.")
-                elif response.status == 429:
-                    _LOGGER.error("Rate limit exceeded for zone API")
-                    raise UpdateFailed("Rate limit exceeded. Please try again later.")
-                elif response.status >= 500:
-                    _LOGGER.error("Server error for zone API: %s - %s", response.status, response.reason)
-                    raise UpdateFailed(f"Server error: {response.status} - {response.reason}")
-                else:
-                    _LOGGER.error("Service error for zone API: %s - %s", response.status, response.reason)
-                    raise UpdateFailed(f"Service error: {response.status} - {response.reason}")
-
-                cheapest_station = None
-                min_price = float('inf')
-
-                for station in data["results"]:
-                    for fuel in station.get("fuels", []):
-                        if (
-                            fuel.get("fuelId") == target_fuel_id
-                            and fuel.get("isSelf") == target_is_self
-                            and fuel.get("price") is not None
-                            and fuel.get("price") < min_price
-                        ):
-                            min_price = fuel.get("price")
-                            cheapest_station = {
-                                **station,
-                                "target_fuel": fuel, # Keep track of the specific fuel that was cheapest
-                            }
-                
-                if cheapest_station is None:
-                    raise UpdateFailed("No station found with the specified fuel type in the zone.")
-
-                return self._process_zone_data(cheapest_station)
-
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Error fetching zone data: {err}")
 
     def _get_fuel_types(self) -> dict[int, str]:
         """Get fuel types from static mapping."""
@@ -224,7 +153,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         """Process the raw data from a single station API call."""
         address = data.get("address")
         station_id = data.get("id")
-        station_name = data.get("nomeImpianto")  # Extract station name for potential zone search matching
+        station_name = data.get("nomeImpianto")
         
         _LOGGER.debug("Processing station data - ID: %s, Name: %s, Address: %s", station_id, station_name, address)
         
@@ -315,33 +244,3 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.info("Forcing immediate CSV data update")
         return await self.csv_manager.async_update_csv_data(force_update=True)
 
-    def _process_zone_data(self, station_data: dict[str, Any]) -> dict[str, Any]:
-        """Process the data for the cheapest station found in a zone search."""
-        target_fuel = station_data["target_fuel"]
-        fuel_id = target_fuel.get("fuelId")
-        fuel_name = FUEL_TYPES.get(fuel_id, "Unknown")
-        service_type = "self" if target_fuel["isSelf"] else "servito"
-        fuel_key = f"{fuel_name}_{service_type}"
-
-        processed_data = {
-            "station_info": {
-                "id": station_data.get("id"),
-                "name": station_data.get("name"),
-                "address": station_data.get("address", "N/A"), # Address might be null in zone search
-                "brand": station_data.get("brand"),
-                ATTR_DISTANCE: round(float(station_data.get("distance", 0)), 2),
-                # Add geolocation data from zone search response
-                ATTR_LATITUDE: station_data.get("location", {}).get("lat") if station_data.get("location") else None,
-                ATTR_LONGITUDE: station_data.get("location", {}).get("lng") if station_data.get("location") else None,
-            },
-            "fuels": {
-                fuel_key: {
-                    "price": target_fuel.get("price"),
-                    "last_update": self._parse_iso_datetime(station_data.get("insertDate")),
-                    "fuel_id": fuel_id,
-                    "is_self": target_fuel.get("isSelf"),
-                }
-            },
-            "last_update": datetime.now().isoformat(),
-        }
-        return processed_data

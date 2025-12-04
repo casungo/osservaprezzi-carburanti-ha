@@ -25,7 +25,6 @@ from .const import (
     DEFAULT_HEADERS,
     CONF_CONFIG_TYPE,
     CONF_TYPE_STATION,
-    FUEL_TYPES,
 )
 from .cron_helper import validate_cron_expression
 
@@ -57,11 +56,6 @@ async def _validate_station(hass: HomeAssistant, station_id: str) -> dict[str, A
                 raise CannotConnect(f"Service error: {response.status}")
     except (aiohttp.ClientError, asyncio.TimeoutError) as err:
         raise CannotConnect(f"Connection error: {err}")
-
-
-def _get_fuel_types() -> dict[int, str]:
-    """Get fuel types from static mapping."""
-    return FUEL_TYPES
 
 
 class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

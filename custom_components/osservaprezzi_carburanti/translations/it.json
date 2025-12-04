@@ -19,8 +19,7 @@
     "error": {
       "unknown": "Si è verificato un errore imprevisto",
       "cannot_connect": "Impossibile connettersi al servizio",
-      "invalid_station": "ID stazione non valido o stazione non trovata",
-      "invalid_zone": "Configurazione della zona non valida o nessuna stazione trovata"
+      "invalid_station": "ID stazione non valido o stazione non trovata"
     },
     "abort": {
       "already_configured": "Questa configurazione è già stata impostata"

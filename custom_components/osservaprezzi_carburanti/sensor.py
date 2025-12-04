@@ -14,7 +14,6 @@ from .const import (
     DOMAIN,
     CONF_CONFIG_TYPE,
     CONF_TYPE_STATION,
-    CONF_TYPE_ZONE,
     CONF_STATION_ID,
     ATTR_STATION_NAME,
     ATTR_STATION_ADDRESS,
@@ -38,67 +37,62 @@ async def async_setup_entry(
     """Set up the sensor platform based on config type."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     
-    config_type = entry.data.get(CONF_CONFIG_TYPE, CONF_TYPE_STATION)
-
     sensors = []
     if coordinator.data:
-        if config_type == CONF_TYPE_ZONE:
-            sensors.append(OsservaprezziZoneSensor(coordinator, entry))
-        else:
-            # Station-based sensors
-            for fuel_key in coordinator.data.get("fuels", {}):
-                sensors.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
+        # Station-based sensors
+        for fuel_key in coordinator.data.get("fuels", {}):
+            sensors.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
+        
+        # Diagnostic sensors for the station (created only once)
+        station_info = coordinator.data.get("station_info", {})
+        
+        # Always add basic info sensors
+        sensors.extend([
+            StationInfoSensor(coordinator, entry, "name", "Nome", "mdi:gas-station"),
+            StationInfoSensor(coordinator, entry, "nomeImpianto", "Nome Impianto", "mdi:gas-station"),
+            StationInfoSensor(coordinator, entry, "id", "ID Osservaprezzi", "mdi:identifier"),
+            StationInfoSensor(coordinator, entry, "address", "Indirizzo", "mdi:map-marker"),
+            StationInfoSensor(coordinator, entry, "brand", "Marchio", "mdi:tag"),
+            StationInfoSensor(coordinator, entry, "company", "Società", "mdi:office-building"),
+        ])
+        
+        # Only add contact sensors if data is available
+        if station_info.get("phoneNumber") and station_info.get("phoneNumber").strip():
+            sensors.append(StationInfoSensor(coordinator, entry, "phoneNumber", "Telefono", "mdi:phone"))
+        
+        if station_info.get("email") and station_info.get("email").strip():
+            sensors.append(StationInfoSensor(coordinator, entry, "email", "Email", "mdi:email"))
+        
+        if station_info.get("website") and station_info.get("website").strip():
+            sensors.append(StationInfoSensor(coordinator, entry, "website", "Sito Web", "mdi:web"))
+        
+        # Add a single location sensor for the map marker
+        sensors.append(StationLocationSensor(coordinator, entry))
+        
+        # Only add opening hours related sensors if opening hours data is available and valid
+        if _has_valid_opening_hours(coordinator.data):
+            # Add open/closed status binary sensor
+            sensors.append(StationOpenClosedBinarySensor(coordinator, entry))
+            # Add next opening/closing time sensor
+            sensors.append(StationNextChangeSensor(coordinator, entry))
+        
+        # Add binary sensors for available services
+        if coordinator.data and "services" in coordinator.data:
+            # Get the list of available services at this station
+            available_services = coordinator.data.get("services", [])
             
-            # Diagnostic sensors for the station
-            station_info = coordinator.data.get("station_info", {})
+            # Create a set of available service IDs for quick lookup
+            available_service_ids = set()
+            for service in available_services:
+                if isinstance(service, dict) and "id" in service:
+                    available_service_ids.add(str(service["id"]))
             
-            # Always add basic info sensors
-            sensors.extend([
-                StationInfoSensor(coordinator, entry, "name", "Nome", "mdi:gas-station"),
-                StationInfoSensor(coordinator, entry, "nomeImpianto", "Nome Impianto", "mdi:gas-station"),
-                StationInfoSensor(coordinator, entry, "id", "ID Osservaprezzi", "mdi:identifier"),
-                StationInfoSensor(coordinator, entry, "address", "Indirizzo", "mdi:map-marker"),
-                StationInfoSensor(coordinator, entry, "brand", "Marchio", "mdi:tag"),
-                StationInfoSensor(coordinator, entry, "company", "Società", "mdi:office-building"),
-            ])
-            
-            # Only add contact sensors if data is available
-            if station_info.get("phoneNumber") and station_info.get("phoneNumber").strip():
-                sensors.append(StationInfoSensor(coordinator, entry, "phoneNumber", "Telefono", "mdi:phone"))
-            
-            if station_info.get("email") and station_info.get("email").strip():
-                sensors.append(StationInfoSensor(coordinator, entry, "email", "Email", "mdi:email"))
-            
-            if station_info.get("website") and station_info.get("website").strip():
-                sensors.append(StationInfoSensor(coordinator, entry, "website", "Sito Web", "mdi:web"))
-            
-            # Add a single location sensor for the map marker
-            sensors.append(StationLocationSensor(coordinator, entry))
-            
-            # Only add opening hours related sensors if opening hours data is available and valid
-            if _has_valid_opening_hours(coordinator.data):
-                # Add open/closed status binary sensor
-                sensors.append(StationOpenClosedBinarySensor(coordinator, entry))
-                # Add next opening/closing time sensor
-                sensors.append(StationNextChangeSensor(coordinator, entry))
-            
-            # Add binary sensors for available services
-            if coordinator.data and "services" in coordinator.data:
-                # Get the list of available services at this station
-                available_services = coordinator.data.get("services", [])
-                
-                # Create a set of available service IDs for quick lookup
-                available_service_ids = set()
-                for service in available_services:
-                    if isinstance(service, dict) and "id" in service:
-                        available_service_ids.add(str(service["id"]))
-                
-                # Only create binary sensors for services that are available at this station
-                for service_id, service_info in ADDITIONAL_SERVICES.items():
-                    if service_id in available_service_ids:
-                        sensors.append(
-                            StationServiceBinarySensor(coordinator, entry, service_id, service_info)
-                        )
+            # Only create binary sensors for services that are available at this station
+            for service_id, service_info in ADDITIONAL_SERVICES.items():
+                if service_id in available_service_ids:
+                    sensors.append(
+                        StationServiceBinarySensor(coordinator, entry, service_id, service_info)
+                    )
     
         async_add_entities(sensors, update_before_add=True)
 
@@ -158,70 +152,6 @@ def _get_fuel_icon(fuel_name: str) -> str:
     else:
         return "mdi:currency-eur"
 
-class OsservaprezziZoneSensor(CoordinatorEntity, SensorEntity):
-    """Representation of the cheapest fuel price in a zone."""
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "€/L"
-
-    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the zone sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_name = entry.title
-        self._attr_unique_id = entry.unique_id
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return the device info for the zone."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.unique_id)},
-            name=self._entry.title,
-            manufacturer="Osservaprezzi Carburanti",
-            model="Ricerca in Zona",
-        )
-
-    @property
-    def native_value(self) -> StateType:
-        """Return the state of the sensor (the cheapest price)."""
-        if not self.coordinator.data or "fuels" not in self.coordinator.data:
-            return None
-        # In zone mode, there's only one fuel in the coordinator data
-        fuel_key = next(iter(self.coordinator.data["fuels"]))
-        return self.coordinator.data["fuels"][fuel_key].get("price")
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        if not self.coordinator.data or "station_info" not in self.coordinator.data:
-            return {}
-        
-        station_info = self.coordinator.data["station_info"]
-        fuel_key = next(iter(self.coordinator.data["fuels"]))
-        fuel_info = self.coordinator.data["fuels"][fuel_key]
-        
-        fuel_name, service_type = fuel_key.rsplit('_', 1)
-
-        return {
-            ATTR_STATION_NAME: station_info.get("name"),
-            ATTR_STATION_ADDRESS: station_info.get("address"),
-            ATTR_STATION_BRAND: station_info.get("brand"),
-            ATTR_DISTANCE: station_info.get(ATTR_DISTANCE),
-            ATTR_FUEL_TYPE_NAME: fuel_name.replace('_', ' ').title(),
-            ATTR_IS_SELF: service_type == "self",
-            ATTR_LAST_UPDATE: fuel_info.get("last_update"),
-            ATTR_VALIDITY_DATE: fuel_info.get("validity_date"),
-            ATTR_LATITUDE: station_info.get(ATTR_LATITUDE),
-            ATTR_LONGITUDE: station_info.get(ATTR_LONGITUDE),
-        }
-    
-    @property
-    def icon(self) -> str:
-        """Return the icon of the sensor."""
-        if self.coordinator.data and "fuels" in self.coordinator.data:
-            fuel_key = next(iter(self.coordinator.data["fuels"]))
-            fuel_name, _ = fuel_key.rsplit('_', 1)
-            return _get_fuel_icon(fuel_name)
-        return "mdi:currency-eur"
 
 class OsservaprezziStationSensor(CoordinatorEntity, SensorEntity):
     """Representation of a single fuel price for a specific station."""

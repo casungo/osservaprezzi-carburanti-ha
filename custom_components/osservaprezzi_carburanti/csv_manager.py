@@ -3,13 +3,16 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import os
+import shutil
 import aiofiles
 import aiohttp
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from .const import DEFAULT_HEADERS, CSV_URL, CSV_UPDATE_INTERVAL
+from .const import DOMAIN, DEFAULT_HEADERS, CSV_URL, CSV_UPDATE_INTERVAL
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,10 +39,23 @@ class CSVStationManager:
         self.session = async_get_clientsession(hass)
         self._stations_cache: Dict[str, Dict[str, Any]] = {}
         self._last_update: Optional[datetime] = None
-        self._csv_path = hass.config.path("osservaprezzi_stations.csv")
-        self._cache_path = hass.config.path("osservaprezzi_cache.json")
+        self._csv_path = hass.config.path(".storage", f"{DOMAIN}_stations.csv")
+        self._cache_path = hass.config.path(".storage", f"{DOMAIN}_cache.json")
         self._detected_separator = '|'  # Default to new format (pipe)
-        
+
+    async def _async_migrate_legacy_files(self) -> None:
+        """Migrate old CSV/cache files from config root to .storage."""
+        old_csv = self.hass.config.path("osservaprezzi_stations.csv")
+        old_cache = self.hass.config.path("osservaprezzi_cache.json")
+
+        for old_path, new_path in [(old_csv, self._csv_path), (old_cache, self._cache_path)]:
+            if os.path.exists(old_path) and not os.path.exists(new_path):
+                try:
+                    shutil.move(old_path, new_path)
+                    _LOGGER.info("Migrated legacy file: %s -> %s", old_path, new_path)
+                except Exception as err:
+                    _LOGGER.warning("Failed to migrate %s: %s", old_path, err)
+
     async def async_update_csv_data(self, force_update: bool = False) -> bool:
         """Update CSV data from the remote source."""
         now = datetime.now()
@@ -286,6 +302,9 @@ class CSVStationManager:
     async def async_initialize(self) -> bool:
         """Initialize the CSV manager."""
         _LOGGER.info("Initializing CSV station data")
+
+        # Migrate legacy files from config root to .storage (one-time operation)
+        await self._async_migrate_legacy_files()
         
         # Try to load cached data first
         cache_loaded = await self.async_load_cached_data()
@@ -331,9 +350,6 @@ class CSVStationManager:
     async def async_clear_cache(self) -> bool:
         """Clear the CSV cache files and in-memory data."""
         try:
-            import os
-            
-            # Clear in-memory cache
             self._stations_cache.clear()
             self._last_update = None
             

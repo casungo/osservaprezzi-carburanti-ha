@@ -38,6 +38,7 @@ class CSVStationManager:
         self._last_update: Optional[datetime] = None
         self._csv_path = hass.config.path("osservaprezzi_stations.csv")
         self._cache_path = hass.config.path("osservaprezzi_cache.json")
+        self._detected_separator = '|'  # Default to new format (pipe)
         
     async def async_update_csv_data(self, force_update: bool = False) -> bool:
         """Update CSV data from the remote source."""
@@ -84,6 +85,25 @@ class CSVStationManager:
             _LOGGER.error("Unexpected error updating CSV data: %s", err)
             return False
     
+    def _detect_separator(self, header_line: str) -> str:
+        """Detect the CSV separator (pipe | or semicolon ;)."""
+        pipe_count = header_line.count('|')
+        semicolon_count = header_line.count(';')
+        
+        if pipe_count > semicolon_count:
+            separator = '|'
+            _LOGGER.info("Detected pipe (|) separator in CSV file")
+        elif semicolon_count > pipe_count:
+            separator = ';'
+            _LOGGER.info("Detected semicolon (;) separator in CSV file")
+        else:
+            # Default to new format if equal or none found
+            separator = '|'
+            _LOGGER.info("Separator count equal or none detected, defaulting to pipe (|)")
+        
+        self._detected_separator = separator
+        return separator
+    
     async def _parse_csv_data(self, csv_content: str) -> bool:
         """Parse CSV content and populate station cache."""
         try:
@@ -95,7 +115,10 @@ class CSVStationManager:
                 
             # Skip extraction date line (line 0) and use headers from line 1
             header_line = lines[1]
-            headers = [h.strip().strip('"') for h in header_line.split(';')]
+            
+            # Detect separator automatically
+            separator = self._detect_separator(header_line)
+            headers = [h.strip().strip('"') for h in header_line.split(separator)]
             
             # Find column indices
             col_indices = {}
@@ -111,7 +134,7 @@ class CSVStationManager:
             stations_cache = {}
             for line_num, line in enumerate(lines[2:], 3):  # Start from line 3 (after extraction date and headers)
                 try:
-                    values = [v.strip().strip('"') for v in line.split(';')]
+                    values = [v.strip().strip('"') for v in line.split(separator)]
                     if len(values) < len(headers):
                         continue
                         
@@ -162,14 +185,24 @@ class CSVStationManager:
                 _LOGGER.debug("Cache file content length: %d characters", len(content))
                 data = json.loads(content)
                 
+                # Check cache version - force update if version is outdated
+                cache_version = data.get('version', '1.0')
+                if cache_version != '2.0':
+                    _LOGGER.info("Cache version %s is outdated (expected 2.0), forcing update", cache_version)
+                    return False
+                
                 self._stations_cache = data.get('stations', {})
                 last_update_str = data.get('last_update')
                 if last_update_str:
                     self._last_update = datetime.fromisoformat(last_update_str)
-                    
-                _LOGGER.info("Loaded %d stations from cache", len(self._stations_cache))
-                _LOGGER.debug("Cache metadata: last_update=%s, version=%s",
-                            data.get('last_update'), data.get('version'))
+                
+                # Load separator info if available
+                self._detected_separator = data.get('csv_separator', '|')
+                
+                _LOGGER.info("Loaded %d stations from cache (version %s, separator: %s)", 
+                           len(self._stations_cache), cache_version, self._detected_separator)
+                _LOGGER.debug("Cache metadata: last_update=%s",
+                            data.get('last_update'))
                 return True
                 
         except FileNotFoundError:
@@ -186,13 +219,14 @@ class CSVStationManager:
             data = {
                 'stations': self._stations_cache,
                 'last_update': self._last_update.isoformat() if self._last_update else None,
-                'version': '1.0'
+                'version': '2.0',
+                'csv_separator': self._detected_separator
             }
             
             async with aiofiles.open(self._cache_path, 'w', encoding='utf-8') as f:
                 await f.write(json.dumps(data, ensure_ascii=False, indent=2))
                 
-            _LOGGER.debug("Saved station data to cache")
+            _LOGGER.debug("Saved station data to cache (version 2.0, separator: %s)", self._detected_separator)
             return True
             
         except Exception as err:

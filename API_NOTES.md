@@ -2,6 +2,40 @@
 
 This document summarizes the structure of the API endpoints for retrieving fuel price data.
 
+## CSV Data Format
+
+### Field Separator Change (February 10, 2026)
+
+**Important**: As of February 10, 2026, the Italian Ministry of Enterprises and Made in Italy changed the CSV field separator from semicolon (`;`) to pipe (`|`) for both the "Prezzo alle 8 di mattina" and "Anagrafica degli impianti attivi" datasets.
+
+- **Old Format (pre-February 10, 2026)**: Semicolon (`;`) separator
+- **New Format (post-February 10, 2026)**: Pipe (`|`) separator
+
+The integration automatically detects the separator format by analyzing the header line and supports both formats for backward compatibility.
+
+### CSV File Structure
+
+The CSV files contain:
+
+1. **Line 0**: Extraction date
+2. **Line 1**: Column headers
+3. **Lines 2+**: Station data rows
+
+### Station Data Columns
+
+| CSV Column    | Internal Field | Description               |
+| ------------- | -------------- | ------------------------- |
+| idImpianto    | id             | Unique station identifier |
+| Gestore       | operator       | Station operator name     |
+| Bandiera      | brand          | Fuel station brand        |
+| Tipo Impianto | station_type   | Type of station           |
+| Nome Impianto | name           | Station name              |
+| Indirizzo     | address        | Street address            |
+| Comune        | municipality   | Municipality              |
+| Provincia     | province       | Province                  |
+| Latitudine    | latitude       | GPS latitude coordinate   |
+| Longitudine   | longitude      | GPS longitude coordinate  |
+
 ## 1. Endpoint: Search by Zone
 
 This endpoint finds fuel stations within a given radius from a central point if only one point is provided. You can also input a minimum of 3 points to a maximum of any number of points you want and the API will search within the zone delimited by these points, ignoring the radius parameter (default: 5).

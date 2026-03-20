@@ -290,39 +290,39 @@ class CSVStationManager:
             _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
             content = await asyncio.to_thread(_read_file_sync, self._cache_path)
             _LOGGER.debug("Cache file content length: %d characters", len(content))
-                data = json.loads(content)
-                
-                # Check cache version - force update if version is outdated
-                cache_version = data.get('version', '1.0')
-                if cache_version != '2.0':
-                    _LOGGER.info("Cache version %s is outdated (expected 2.0), forcing update", cache_version)
-                    return False
-                
-                self._stations_cache = data.get('stations', {})
-                last_update_str = data.get('last_update')
-                if last_update_str:
-                    try:
-                        parsed_dt = dt_util.parse_datetime(last_update_str)
-                        if parsed_dt is None:
-                            parsed_dt = datetime.fromisoformat(last_update_str)
+            data = json.loads(content)
+            
+            # Check cache version - force update if version is outdated
+            cache_version = data.get('version', '1.0')
+            if cache_version != '2.0':
+                _LOGGER.info("Cache version %s is outdated (expected 2.0), forcing update", cache_version)
+                return False
+            
+            self._stations_cache = data.get('stations', {})
+            last_update_str = data.get('last_update')
+            if last_update_str:
+                try:
+                    parsed_dt = dt_util.parse_datetime(last_update_str)
+                    if parsed_dt is None:
+                        parsed_dt = datetime.fromisoformat(last_update_str)
+                    
+                    if parsed_dt.tzinfo is None:
+                        parsed_dt = parsed_dt.replace(tzinfo=dt_util.now().tzinfo)
                         
-                        if parsed_dt.tzinfo is None:
-                            parsed_dt = parsed_dt.replace(tzinfo=dt_util.now().tzinfo)
-                            
-                        self._last_update = parsed_dt
-                    except (ValueError, TypeError):
-                        _LOGGER.warning("Could not parse last_update from cache: %s", last_update_str)
-                        self._last_update = None
-                
-                # Load separator info if available
-                self._detected_separator = data.get('csv_separator', '|')
-                
-                _LOGGER.info("Loaded %d stations from cache (version %s, separator: %s)", 
-                           len(self._stations_cache), cache_version, self._detected_separator)
-                _LOGGER.debug("Cache metadata: last_update=%s",
-                            data.get('last_update'))
-                return True
-                
+                    self._last_update = parsed_dt
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Could not parse last_update from cache: %s", last_update_str)
+                    self._last_update = None
+            
+            # Load separator info if available
+            self._detected_separator = data.get('csv_separator', '|')
+            
+            _LOGGER.info("Loaded %d stations from cache (version %s, separator: %s)", 
+                       len(self._stations_cache), cache_version, self._detected_separator)
+            _LOGGER.debug("Cache metadata: last_update=%s",
+                        data.get('last_update'))
+            return True
+            
         except FileNotFoundError:
             _LOGGER.info("No cached data found, will download from CSV")
             return False

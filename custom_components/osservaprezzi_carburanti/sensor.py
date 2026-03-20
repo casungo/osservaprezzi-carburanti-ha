@@ -10,10 +10,9 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
-    CONF_CONFIG_TYPE,
-    CONF_TYPE_STATION,
     CONF_STATION_ID,
     ATTR_STATION_NAME,
     ATTR_STATION_ADDRESS,
@@ -22,14 +21,62 @@ from .const import (
     ATTR_IS_SELF,
     ATTR_LAST_UPDATE,
     ATTR_VALIDITY_DATE,
-    ATTR_DISTANCE,
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
     ADDITIONAL_SERVICES,
+    SERVICE_ID_TO_TRANSLATION_KEY,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _parse_time(time_str: str | None) -> time | None:
+    """Parse time string to time object.
+
+    Supports formats:
+    - HH:MM (e.g., "07:00")
+    - HH.MM (e.g., "07.00")
+    - HH (e.g., "7")
+
+    Note: Handles "24.00" as midnight (00:00) for legacy system compatibility.
+    """
+    if not time_str:
+        return None
+
+    try:
+        time_str_clean = str(time_str).strip()
+
+        # Handle HH:MM format using fromisoformat (Python 3.7+)
+        if ":" in time_str_clean:
+            return time.fromisoformat(time_str_clean)
+
+        # Handle HH.MM format
+        elif "." in time_str_clean:
+            hour_str, minute_str = time_str_clean.split(".")
+            hour = int(hour_str)
+
+            # Handle "24.00" as midnight for legacy systems
+            if hour == 24:
+                hour = 0
+
+            minute = int(minute_str) if minute_str else 0
+            return time(hour, minute)
+
+        # Handle HH format
+        else:
+            hour = int(time_str_clean)
+
+            # Handle "24" as midnight for legacy systems
+            if hour == 24:
+                hour = 0
+
+            return time(hour, 0)
+
+    except (ValueError, TypeError) as err:
+        _LOGGER.warning("Failed to parse time string '%s': %s", time_str, err)
+        return None
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -245,13 +292,12 @@ class StationLocationSensor(CoordinatorEntity, SensorEntity):
     """Representation of a sensor for station location (single map marker)."""
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:map-marker"
+    _attr_translation_key = "location"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize location sensor."""
         super().__init__(coordinator)
         self._station_id = entry.data[CONF_STATION_ID]
-        # Set a default name, will be updated with actual station name in _attr_name property
-        self._attr_name = "Posizione Stazione"
         self._attr_unique_id = f"{self._station_id}_location"
 
     @property
@@ -314,13 +360,14 @@ class StationLocationSensor(CoordinatorEntity, SensorEntity):
 class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """Binary sensor indicating if the station is currently open."""
     _attr_icon = "mdi:storefront"
+    _attr_translation_key = "station_open_closed"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the open/closed binary sensor."""
         super().__init__(coordinator)
         self._station_id = entry.data[CONF_STATION_ID]
-        self._attr_name = "Stazione Aperta"
         self._attr_unique_id = f"{self._station_id}_open_closed"
+        self._cached_is_open: bool | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -333,37 +380,17 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
             model="Area di Servizio",
         )
 
-    def _parse_time(self, time_str: str | None) -> time | None:
-        """Parse time string to time object."""
-        if not time_str:
-            return None
-        
-        try:
-            # Handle HH:MM format
-            if ":" in str(time_str):
-                hour, minute = str(time_str).split(":")
-                return time(int(hour), int(minute))
-            # Handle HH.MM format
-            elif "." in str(time_str):
-                hour, minute = str(time_str).split(".")
-                return time(int(hour), int(minute))
-            # Handle HH format
-            else:
-                return time(int(time_str), 0)
-        except (ValueError, TypeError):
-            return None
-
     def _is_currently_open(self) -> bool:
         """Check if the station is currently open."""
         if not self.coordinator.data or "opening_hours" not in self.coordinator.data:
             return False
-        
+
         opening_hours = self.coordinator.data.get("opening_hours", [])
         if not opening_hours:
             return False
-        
+
         # Get current time in Italy timezone
-        now = datetime.now()
+        now = dt_util.now()
         current_weekday = now.weekday() + 1  # Convert to 1-7 (Monday=1)
         current_time = now.time()
         
@@ -387,8 +414,8 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
         
         # Check continuous hours
         if today_schedule.get("flagOrarioContinuato"):
-            open_time = self._parse_time(today_schedule.get("oraAperturaOrarioContinuato"))
-            close_time = self._parse_time(today_schedule.get("oraChiusuraOrarioContinuato"))
+            open_time = _parse_time(today_schedule.get("oraAperturaOrarioContinuato"))
+            close_time = _parse_time(today_schedule.get("oraChiusuraOrarioContinuato"))
             
             if open_time and close_time:
                 if open_time <= close_time:
@@ -400,10 +427,10 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
         
         # Check split hours (morning + afternoon)
         else:
-            morning_open = self._parse_time(today_schedule.get("oraAperturaMattina"))
-            morning_close = self._parse_time(today_schedule.get("oraChiusuraMattina"))
-            afternoon_open = self._parse_time(today_schedule.get("oraAperturaPomeriggio"))
-            afternoon_close = self._parse_time(today_schedule.get("oraChiusuraPomeriggio"))
+            morning_open = _parse_time(today_schedule.get("oraAperturaMattina"))
+            morning_close = _parse_time(today_schedule.get("oraChiusuraMattina"))
+            afternoon_open = _parse_time(today_schedule.get("oraAperturaPomeriggio"))
+            afternoon_close = _parse_time(today_schedule.get("oraChiusuraPomeriggio"))
             
             # Check morning slot
             if morning_open and morning_close:
@@ -420,27 +447,35 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         """Return True if the station is currently open."""
-        return self._is_currently_open()
+        if self._cached_is_open is None:
+            self._cached_is_open = self._is_currently_open()
+        return self._cached_is_open
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         return {
-            "current_status": "Aperta" if self._is_currently_open() else "Chiusa",
-            "last_updated": datetime.now().isoformat(),
+            "current_status": "on" if self.is_on else "off",
+            "last_updated": dt_util.now().isoformat(),
         }
+
+    async def async_update(self) -> None:
+        """Update the sensor and clear cache."""
+        await super().async_update()
+        self._cached_is_open = None
 
 
 class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
     """Sensor indicating when the station will next open or close."""
     _attr_icon = "mdi:clock-time-eight"
+    _attr_translation_key = "next_change"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the next change sensor."""
         super().__init__(coordinator)
         self._station_id = entry.data[CONF_STATION_ID]
-        self._attr_name = "Prossimo Cambio Orario"
         self._attr_unique_id = f"{self._station_id}_next_change"
+        self._cached_next_change: tuple[str, datetime | None] | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -453,58 +488,44 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
             model="Area di Servizio",
         )
 
-    def _parse_time(self, time_str: str) -> time | None:
-        """Parse time string to time object."""
-        if not time_str:
-            return None
-        
-        try:
-            # Handle HH:MM format
-            if ":" in time_str:
-                hour, minute = time_str.split(":")
-                return time(int(hour), int(minute))
-            # Handle HH.MM format
-            elif "." in time_str:
-                hour, minute = time_str.split(".")
-                return time(int(hour), int(minute))
-            # Handle HH format
-            else:
-                return time(int(time_str), 0)
-        except (ValueError, TypeError):
-            return None
-
     def _get_next_change(self) -> tuple[str, datetime | None]:
-        """Get the next opening or closing time and type."""
+        """Get the next opening or closing time and type (cached per update)."""
+        if self._cached_next_change is None:
+            self._cached_next_change = self._compute_next_change()
+        return self._cached_next_change
+
+    def _compute_next_change(self) -> tuple[str, datetime | None]:
+        """Compute the next opening or closing time and type."""
         if not self.coordinator.data or "opening_hours" not in self.coordinator.data:
-            return "Orari non disponibili", None
-        
+            return "no_schedule", None
+
         opening_hours = self.coordinator.data.get("opening_hours", [])
         if not opening_hours:
-            return "Orari non disponibili", None
-        
+            return "no_schedule", None
+
         # Check if 24/7
         for day in opening_hours:
             if day.get("flagH24"):
-                return "Sempre aperto", None
-        
-        now = datetime.now()
+                return "always_open", None
+
+        now = dt_util.now()
         current_weekday = now.weekday() + 1  # Convert to 1-7 (Monday=1)
         current_time = now.time()
-        
+
         # Find today's schedule
         today_schedule = None
         for day in opening_hours:
             if day.get("giornoSettimanaId") == current_weekday:
                 today_schedule = day
                 break
-        
+
         if not today_schedule or today_schedule.get("flagChiusura"):
             # Station is closed today, find next opening
             return self._find_next_opening(opening_hours, now)
-        
+
         # Check if currently open
         is_open = self._is_currently_open(today_schedule, current_time)
-        
+
         if is_open:
             # Find next closing time
             return self._find_next_closing(today_schedule, now)
@@ -516,8 +537,8 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
         """Check if station is currently open based on schedule."""
         # Check continuous hours
         if schedule.get("flagOrarioContinuato"):
-            open_time = self._parse_time(schedule.get("oraAperturaOrarioContinuato"))
-            close_time = self._parse_time(schedule.get("oraChiusuraOrarioContinuato"))
+            open_time = _parse_time(schedule.get("oraAperturaOrarioContinuato"))
+            close_time = _parse_time(schedule.get("oraChiusuraOrarioContinuato"))
             
             if open_time and close_time:
                 if open_time <= close_time:
@@ -527,10 +548,10 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
         
         # Check split hours
         else:
-            morning_open = self._parse_time(schedule.get("oraAperturaMattina"))
-            morning_close = self._parse_time(schedule.get("oraChiusuraMattina"))
-            afternoon_open = self._parse_time(schedule.get("oraAperturaPomeriggio"))
-            afternoon_close = self._parse_time(schedule.get("oraChiusuraPomeriggio"))
+            morning_open = _parse_time(schedule.get("oraAperturaMattina"))
+            morning_close = _parse_time(schedule.get("oraChiusuraMattina"))
+            afternoon_open = _parse_time(schedule.get("oraAperturaPomeriggio"))
+            afternoon_close = _parse_time(schedule.get("oraChiusuraPomeriggio"))
             
             # Check morning slot
             if morning_open and morning_close:
@@ -547,83 +568,91 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
     def _find_next_closing(self, schedule: dict, now: datetime) -> tuple[str, datetime | None]:
         """Find the next closing time for today."""
         current_time = now.time()
-        
+
         # Check continuous hours
         if schedule.get("flagOrarioContinuato"):
-            close_time = self._parse_time(schedule.get("oraChiusuraOrarioContinuato"))
+            close_time = _parse_time(schedule.get("oraChiusuraOrarioContinuato"))
             if close_time and close_time > current_time:
                 close_datetime = now.replace(hour=close_time.hour, minute=close_time.minute, second=0, microsecond=0)
-                return "Chiude alle", close_datetime
-        
+                return "closes_at", close_datetime
+
         # Check split hours
         else:
-            morning_close = self._parse_time(schedule.get("oraChiusuraMattina"))
-            afternoon_close = self._parse_time(schedule.get("oraChiusuraPomeriggio"))
-            
+            morning_close = _parse_time(schedule.get("oraChiusuraMattina"))
+            afternoon_close = _parse_time(schedule.get("oraChiusuraPomeriggio"))
+
             # Check morning closing
             if morning_close and morning_close > current_time:
                 close_datetime = now.replace(hour=morning_close.hour, minute=morning_close.minute, second=0, microsecond=0)
-                return "Chiude alle", close_datetime
-            
+                return "closes_at", close_datetime
+
             # Check afternoon closing
             if afternoon_close and afternoon_close > current_time:
                 close_datetime = now.replace(hour=afternoon_close.hour, minute=afternoon_close.minute, second=0, microsecond=0)
-                return "Chiude alle", close_datetime
-        
+                return "closes_at", close_datetime
+
         # If no closing time found today, find next opening
         opening_hours = self.coordinator.data.get("opening_hours", [])
         return self._find_next_opening(opening_hours, now)
 
+    @staticmethod
+    def _make_open_datetime(
+        open_time: time | None,
+        day_offset: int,
+        now: datetime,
+        check_date: datetime | None = None
+    ) -> datetime | None:
+        """Create a datetime for an opening time, handling same-day vs future-day logic."""
+        if open_time is None:
+            return None
+
+        if day_offset == 0:
+            # Same day: only return if time is in the future
+            if open_time > now.time():
+                return now.replace(hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0)
+            return None
+        else:
+            # Future day: use provided date or calculate it
+            if check_date is None:
+                check_date = now + timedelta(days=day_offset)
+            return datetime.combine(check_date.date(), open_time)
+
     def _find_next_opening(self, opening_hours: list, now: datetime) -> tuple[str, datetime | None]:
         """Find the next opening time."""
         current_weekday = now.weekday() + 1
-        current_time = now.time()
-        
+
         # Check remaining time today
         for day_offset in range(7):
             check_weekday = (current_weekday + day_offset - 1) % 7 + 1
-            check_date = now.date() + timedelta(days=day_offset)
-            
+            check_date = now + timedelta(days=day_offset)
+
             for day in opening_hours:
                 if day.get("giornoSettimanaId") == check_weekday:
                     if day.get("flagChiusura") or day.get("flagNonComunicato"):
                         continue
-                    
+
                     # Check continuous hours
                     if day.get("flagOrarioContinuato"):
-                        open_time = self._parse_time(day.get("oraAperturaOrarioContinuato"))
-                        if open_time:
-                            if day_offset == 0 and open_time > current_time:
-                                open_datetime = now.replace(hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0)
-                                return "Apre alle", open_datetime
-                            elif day_offset > 0:
-                                open_datetime = datetime.combine(check_date, open_time)
-                                return "Apre alle", open_datetime
-                    
+                        open_time = _parse_time(day.get("oraAperturaOrarioContinuato"))
+                        open_datetime = StationNextChangeSensor._make_open_datetime(open_time, day_offset, now, check_date)
+                        if open_datetime:
+                            return "opens_at", open_datetime
+
                     # Check split hours
                     else:
-                        morning_open = self._parse_time(day.get("oraAperturaMattina"))
-                        afternoon_open = self._parse_time(day.get("oraAperturaPomeriggio"))
-                        
                         # Check morning opening
-                        if morning_open:
-                            if day_offset == 0 and morning_open > current_time:
-                                open_datetime = now.replace(hour=morning_open.hour, minute=morning_open.minute, second=0, microsecond=0)
-                                return "Apre alle", open_datetime
-                            elif day_offset > 0:
-                                open_datetime = datetime.combine(check_date, morning_open)
-                                return "Apre alle", open_datetime
-                        
+                        morning_open = _parse_time(day.get("oraAperturaMattina"))
+                        open_datetime = StationNextChangeSensor._make_open_datetime(morning_open, day_offset, now, check_date)
+                        if open_datetime:
+                            return "opens_at", open_datetime
+
                         # Check afternoon opening
-                        if afternoon_open:
-                            if day_offset == 0 and afternoon_open > current_time:
-                                open_datetime = now.replace(hour=afternoon_open.hour, minute=afternoon_open.minute, second=0, microsecond=0)
-                                return "Apre alle", open_datetime
-                            elif day_offset > 0:
-                                open_datetime = datetime.combine(check_date, afternoon_open)
-                                return "Apre alle", open_datetime
-        
-        return "Nessuna apertura prevista", None
+                        afternoon_open = _parse_time(day.get("oraAperturaPomeriggio"))
+                        open_datetime = StationNextChangeSensor._make_open_datetime(afternoon_open, day_offset, now, check_date)
+                        if open_datetime:
+                            return "opens_at", open_datetime
+
+        return "no_opening", None
 
     @property
     def native_value(self) -> StateType:
@@ -631,11 +660,11 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
         change_type, change_time = self._get_next_change()
         if change_time:
             time_str = change_time.strftime("%H:%M")
-            if change_time.date() != datetime.now().date():
+            if change_time.date() != dt_util.now().date():
                 date_str = change_time.strftime("%d/%m")
-                return f"{change_type} {time_str} ({date_str})"
+                return f"{time_str} ({date_str})"
             else:
-                return f"{change_type} {time_str}"
+                return time_str
         return change_type
 
     @property
@@ -645,16 +674,21 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
         attributes = {
             "change_type": change_type,
             "next_change_time": change_time.isoformat() if change_time else None,
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": dt_util.now().isoformat(),
         }
-        
+
         if change_time:
             # Calculate minutes until next change
-            now = datetime.now()
+            now = dt_util.now()
             minutes_until = int((change_time - now).total_seconds() / 60)
             attributes["minutes_until_change"] = minutes_until
-        
+
         return attributes
+
+    async def async_update(self) -> None:
+        """Update the sensor and clear cache."""
+        await super().async_update()
+        self._cached_next_change = None
 
 
 class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
@@ -667,11 +701,12 @@ class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._station_id = entry.data[CONF_STATION_ID]
         self._service_id = service_id
         self._service_info = service_info
-        
-        # Set name, unique_id, and icon from service info
-        self._attr_name = service_info["name"]
+
+        # Set unique_id, icon, and translation key from service info
         self._attr_unique_id = f"{self._station_id}_service_{service_id}"
         self._attr_icon = service_info["icon"]
+        # Use translation key for entity name localization
+        self._attr_translation_key = f"service.{SERVICE_ID_TO_TRANSLATION_KEY.get(service_id, service_id)}"
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -696,7 +731,14 @@ class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
         
         # Check if this service is available
         for service in services:
+            # Handle list of dictionaries (detailed service info)
             if isinstance(service, dict) and str(service.get("id")) == self._service_id:
+                return True
+            # Handle list of strings (raw service IDs)
+            elif isinstance(service, str) and service == self._service_id:
+                return True
+            # Handle list of integers
+            elif isinstance(service, int) and str(service) == self._service_id:
                 return True
         
         return False
@@ -706,14 +748,8 @@ class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
         """Return the state attributes with service information."""
         return {
             "service_id": self._service_id,
-            "service_name": self._service_info["name"],
-            "service_description": self._service_info["description"],
-            "service_icon": self._service_info["icon"],
-            "service_image_url": self._service_info["image_url"],
+            "service_name": self._service_info.get("name"),
+            "service_description": self._service_info.get("description"),
+            "service_icon": self._service_info.get("icon"),
+            "service_image_url": self._service_info.get("image_url"),
         }
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        # Service binary sensors are always available since we only create them for available services
-        return True

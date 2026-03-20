@@ -1,10 +1,4 @@
-from datetime import timedelta
-
 DOMAIN = "osservaprezzi_carburanti"
-
-# Configuration types
-CONF_CONFIG_TYPE = "config_type"
-CONF_TYPE_STATION = "station"
 
 # Station config
 CONF_STATION_ID = "station_id"
@@ -14,7 +8,6 @@ CONF_CRON_EXPRESSION = "cron_expression"
 DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 07:30
 
 # API
-DEFAULT_NAME = "Osservaprezzi Carburanti"
 BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
 STATION_ENDPOINT = "/registry/servicearea/{station_id}"
 
@@ -22,80 +15,78 @@ STATION_ENDPOINT = "/registry/servicearea/{station_id}"
 CSV_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
 CSV_UPDATE_INTERVAL = 24  # hours
 
-# CSV update options
-CONF_CSV_UPDATE_ENABLED = "csv_update_enabled"
-CONF_CSV_UPDATE_INTERVAL = "csv_update_interval"
-DEFAULT_CSV_UPDATE_ENABLED = True
-DEFAULT_CSV_UPDATE_INTERVAL = 24
-
 # Additional services mapping
 ADDITIONAL_SERVICES = {
     "1": {
         "name": "Food&Beverage",
         "icon": "mdi:food",
-        "description": "Bar, ristorante o punto ristoro",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/1.gif"
     },
     "2": {
         "name": "Officina",
         "icon": "mdi:car-wrench",
-        "description": "Servizio di riparazione e manutenzione",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/2.gif"
     },
     "3": {
         "name": "Sosta Camper/Tir",
         "icon": "mdi:truck",
-        "description": "Area di sosta per camper e autotreni",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/3.gif"
     },
     "4": {
         "name": "Scarico per camper",
         "icon": "mdi:water-pump",
-        "description": "Punto di scarico acque nere/grigie",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/4.gif"
     },
     "5": {
         "name": "Area bambini",
         "icon": "mdi:human-child",
-        "description": "Area giochi per bambini",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/5.gif"
     },
     "6": {
         "name": "Bancomat",
         "icon": "mdi:cash-multiple",
-        "description": "Sportello automatico ATM",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/6.gif"
     },
     "7": {
         "name": "Servizi per disabili",
         "icon": "mdi:wheelchair-accessibility",
-        "description": "Servizi accessibili per persone con disabilità",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/7.gif"
     },
     "8": {
         "name": "Wi-Fi",
         "icon": "mdi:wifi",
-        "description": "Connessione Wi-Fi gratuita o a pagamento",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/8.gif"
     },
     "9": {
         "name": "Gommista",
         "icon": "mdi:tire",
-        "description": "Servizio pneumatici e gommista",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/9.gif"
     },
     "10": {
         "name": "Autolavaggio",
         "icon": "mdi:car-wash",
-        "description": "Servizio di lavaggio auto",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/10.gif"
     },
     "11": {
         "name": "Ricarica elettrica",
         "icon": "mdi:ev-station",
-        "description": "Colonnine per ricarica veicoli elettrici",
         "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/11.gif"
     }
+}
+
+# Map service IDs to translation keys for entity localization
+SERVICE_ID_TO_TRANSLATION_KEY = {
+    "1": "food_beverage",
+    "2": "workshop",
+    "3": "camper_truck_parking",
+    "4": "camper_dump",
+    "5": "play_area",
+    "6": "atm",
+    "7": "disabled_access",
+    "8": "wifi",
+    "9": "tire_service",
+    "10": "car_wash",
+    "11": "ev_charging"
 }
 
 # Headers for API calls
@@ -103,7 +94,6 @@ DEFAULT_HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
     "Connection": "keep-alive",
-    "Content-Type": "application/json",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
 }
 
@@ -115,6 +105,5 @@ ATTR_LAST_UPDATE = "last_update"
 ATTR_VALIDITY_DATE = "validity_date"
 ATTR_FUEL_TYPE_NAME = "fuel_type_name"
 ATTR_IS_SELF = "is_self_service"
-ATTR_DISTANCE = "distance"
 ATTR_LATITUDE = "latitude"
 ATTR_LONGITUDE = "longitude"

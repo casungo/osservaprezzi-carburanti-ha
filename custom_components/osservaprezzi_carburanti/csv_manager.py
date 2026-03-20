@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import shutil
-import aiofiles
+import asyncio
 import aiohttp
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -29,6 +29,16 @@ CSV_COLUMNS = {
     "Latitudine": "latitude",
     "Longitudine": "longitude"
 }
+
+def _write_file_sync(path: str, content: str) -> None:
+    """Write content to file synchronously."""
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write(content)
+
+def _read_file_sync(path: str) -> str:
+    """Read content from file synchronously."""
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
 
 class CSVStationManager:
     """Manager for CSV station data."""
@@ -84,8 +94,7 @@ class CSVStationManager:
 
                 # Save CSV to file
                 content = await response.text()
-                async with aiofiles.open(self._csv_path, 'w', encoding='utf-8') as f:
-                    await f.write(content)
+                await asyncio.to_thread(_write_file_sync, self._csv_path, content)
 
                 # Parse from disk instead of from memory string to reduce memory usage
                 success = await self._parse_csv_data_from_file()
@@ -279,9 +288,8 @@ class CSVStationManager:
         """Load cached station data from local file."""
         try:
             _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
-            async with aiofiles.open(self._cache_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                _LOGGER.debug("Cache file content length: %d characters", len(content))
+            content = await asyncio.to_thread(_read_file_sync, self._cache_path)
+            _LOGGER.debug("Cache file content length: %d characters", len(content))
                 data = json.loads(content)
                 
                 # Check cache version - force update if version is outdated
@@ -332,8 +340,8 @@ class CSVStationManager:
                 'csv_separator': self._detected_separator
             }
             
-            async with aiofiles.open(self._cache_path, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+            content = json.dumps(data, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(_write_file_sync, self._cache_path, content)
                 
             _LOGGER.debug("Saved station data to cache (version 2.0, separator: %s)", self._detected_separator)
             return True

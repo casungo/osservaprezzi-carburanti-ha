@@ -29,7 +29,7 @@
     "step": {
       "init": {
         "title": "Osservaprezzi Carburanti Options",
-        "description": "Configure the integration options.\n\nYou can use https://crontab.guru to help build and validate your cron expressions.",
+        "description": "Configure integration options.\n\nYou can use https://crontab.guru to help build and validate your cron expressions.",
         "data": {
           "cron_expression": "Cron expression"
         }
@@ -37,6 +37,89 @@
     },
     "error": {
       "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30). Visit https://crontab.guru for help building valid expressions."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "station_open_closed": {
+        "name": "Station Open",
+        "state": {
+          "on": "Open",
+          "off": "Closed"
+        }
+      },
+      "next_change": {
+        "name": "Next Schedule Change",
+        "state": {
+          "opens_at": "Opens at",
+          "closes_at": "Closes at",
+          "always_open": "Always open",
+          "no_schedule": "Schedule not available",
+          "no_opening": "No opening scheduled"
+        }
+      },
+      "location": {
+        "name": "Station Location"
+      },
+      "info": {
+        "name": "Name",
+        "nome_impianto": "Station Name",
+        "id": "Osservaprezzi ID",
+        "address": "Address",
+        "brand": "Brand",
+        "company": "Company",
+        "phone": "Phone",
+        "email": "Email",
+        "website": "Website"
+      }
+    },
+    "binary_sensor": {
+      "service": {
+        "food_beverage": {
+          "name": "Food&Beverage",
+          "description": "Bar, restaurant or refreshment point"
+        },
+        "workshop": {
+          "name": "Workshop",
+          "description": "Repair and maintenance service"
+        },
+        "parking": {
+          "name": "Camper/Truck Parking",
+          "description": "Parking area for campers and trucks"
+        },
+        "dump_station": {
+          "name": "Camper Dump Station",
+          "description": "Black/gray water dump point"
+        },
+        "playground": {
+          "name": "Children's Area",
+          "description": "Playground for children"
+        },
+        "atm": {
+          "name": "ATM",
+          "description": "Automatic teller machine"
+        },
+        "disabled_access": {
+          "name": "Disabled Services",
+          "description": "Services accessible for disabled people"
+        },
+        "wifi": {
+          "name": "Wi-Fi",
+          "description": "Free or paid Wi-Fi connection"
+        },
+        "tire_service": {
+          "name": "Tire Service",
+          "description": "Tire and tire service"
+        },
+        "car_wash": {
+          "name": "Car Wash",
+          "description": "Car washing service"
+        },
+        "ev_charging": {
+          "name": "EV Charging",
+          "description": "Charging stations for electric vehicles"
+        }
+      }
     }
   },
   "title": "Osservaprezzi Carburanti"

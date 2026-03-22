@@ -63,6 +63,8 @@ async def fetch_station_data(
                     status=response.status,
                     message=f"Service error: {response.status} - {response.reason}"
                 )
+    except aiohttp.ClientError:
+        raise  # Re-raise aiohttp errors as-is (ClientResponseError, ClientError, etc.)
     except Exception as e:
         _LOGGER.error("Unexpected error fetching station data: %s", e)
         raise aiohttp.ClientError(f"Unexpected error: {e}")

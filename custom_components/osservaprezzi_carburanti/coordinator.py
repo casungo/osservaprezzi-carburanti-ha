@@ -61,6 +61,9 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         except aiohttp.ClientError as err:
             _LOGGER.error("Error fetching station data: %s", err)
             raise UpdateFailed(f"Error fetching station data: {err}")
+        except Exception as err:
+            _LOGGER.error("Unexpected error fetching station data for station %s: %s", station_id, err)
+            raise UpdateFailed(f"Unexpected error fetching station data: {err}")
 
 
 

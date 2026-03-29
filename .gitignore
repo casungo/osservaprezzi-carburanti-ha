@@ -1,7 +1,3 @@
-# Repomix
-/repomix-output.xml
-/repomix.config.json
-
 # Python
 __pycache__/
 *.py[cod]

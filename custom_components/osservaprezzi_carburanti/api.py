@@ -35,7 +35,7 @@ async def fetch_station_data(
     _LOGGER.debug("Fetching station data from: %s", url)
 
     try:
-        async with session.get(url, headers=DEFAULT_HEADERS, timeout=timeout) as response:
+        async with session.get(url, headers=DEFAULT_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
             _LOGGER.debug("Station API response status: %s", response.status)
 
             if response.status == 200:

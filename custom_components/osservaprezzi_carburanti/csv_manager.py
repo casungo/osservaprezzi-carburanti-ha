@@ -87,7 +87,7 @@ class CSVStationManager:
                 "Accept": "text/csv,application/csv,text/plain,*/*",
             }
 
-            async with self.session.get(CSV_URL, headers=headers, timeout=60) as response:
+            async with self.session.get(CSV_URL, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response:
                 if response.status != 200:
                     _LOGGER.error("Failed to download CSV: HTTP %s", response.status)
                     return False
@@ -151,14 +151,14 @@ class CSVStationManager:
                     _LOGGER.warning("Column '%s' not found in CSV", csv_col)
                     col_indices[internal_col] = -1
 
-            stations_cache = {}
+            stations_cache: dict[str, dict[str, Any]] = {}
             for line_num, line in enumerate(lines[2:], 3):
                 try:
                     values = [v.strip().strip('"') for v in line.split(separator)]
                     if len(values) < len(headers):
                         continue
 
-                    station_data = {}
+                    station_data: dict[str, Any] = {}
 
                     for csv_col, internal_col in CSV_COLUMNS.items():
                         idx = col_indices.get(internal_col, -1)
@@ -279,9 +279,9 @@ class CSVStationManager:
         if not self._stations_cache:
             return {"total": 0, "formats": {}}
         
-        id_lengths = {}
-        id_types = {}
-        sample_ids = []
+        id_lengths: dict[int, int] = {}
+        id_types: dict[str, int] = {}
+        sample_ids: list[str] = []
         
         for station_id in list(self._stations_cache.keys())[:100]:
             length = len(station_id)

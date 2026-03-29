@@ -120,7 +120,7 @@ async def async_setup_entry(
     """Set up the sensor platform based on config type."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     
-    sensors = []
+    sensors: list[SensorEntity | BinarySensorEntity] = []
     if coordinator.data:
         # Station-based sensors
         for fuel_key in coordinator.data.get("fuels", {}):
@@ -663,7 +663,7 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         change_type, change_time = self._get_next_change()
-        attributes = {
+        attributes: dict[str, Any] = {
             "change_type": change_type,
             "next_change_time": change_time.isoformat() if change_time else None,
             "last_updated": dt_util.now().isoformat(),

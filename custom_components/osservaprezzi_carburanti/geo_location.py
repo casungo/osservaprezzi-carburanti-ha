@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from homeassistant.components.geo_location import GeoLocationEntity
+from homeassistant.components.geo_location import GeolocationEvent
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
@@ -24,10 +24,11 @@ async def async_setup_entry(
     async_add_entities([StationGeoLocation(coordinator, entry)], update_before_add=True)
 
 
-class StationGeoLocation(CoordinatorEntity, GeoLocationEntity):
+class StationGeoLocation(CoordinatorEntity, GeolocationEvent):
     _attr_icon = "mdi:gas-station"
     _attr_source = DOMAIN
     _attr_translation_key = "station_geolocation"
+    _attr_distance = None
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -61,11 +62,11 @@ class StationGeoLocation(CoordinatorEntity, GeoLocationEntity):
         return self.coordinator.data["station_info"].get(ATTR_LONGITUDE)
 
     @property
-    def state(self) -> str:
+    def name(self) -> str | None:
         if not self.coordinator.data or "station_info" not in self.coordinator.data:
-            return ""
+            return None
         station_info = self.coordinator.data["station_info"]
-        return station_info.get("nomeImpianto") or station_info.get("name") or ""
+        return station_info.get("nomeImpianto") or station_info.get("name")
 
     @property
     def available(self) -> bool:

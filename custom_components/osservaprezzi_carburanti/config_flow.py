@@ -5,10 +5,9 @@ import asyncio
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback, HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     DOMAIN,
     CONF_STATION_ID,
@@ -56,9 +55,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 
     async def _handle_station_input(
         self, user_input: dict[str, Any] | None, step_id: str
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle station ID input for any config flow step."""
-        errors = {}
+        errors: dict[str, str] = {}
         if user_input is not None:
             try:
                 station_id = user_input[CONF_STATION_ID]
@@ -87,7 +86,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step - directly ask for station ID."""
         return await self._handle_station_input(user_input, "user")
 
@@ -99,9 +98,9 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
-        errors = {}
+        errors: dict[str, str] = {}
         if user_input is not None:
             cron_expr = user_input[CONF_CRON_EXPRESSION]
             old_cron_expr = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)

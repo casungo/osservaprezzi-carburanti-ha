@@ -61,6 +61,9 @@
       "location": {
         "name": "Posizione Stazione"
       },
+      "station_geolocation": {
+        "name": "Geolocalizzazione Stazione"
+      },
       "info": {
         "name": "Nome",
         "nome_impianto": "Nome Impianto",
@@ -121,5 +124,20 @@
         }
       }
     }
-  }
+  },
+  "services": {
+    "force_csv_update": {
+      "name": "Forza aggiornamento CSV",
+      "description": "Forza il download e l'aggiornamento immediato del database CSV delle stazioni per tutte le stazioni configurate."
+    },
+    "clear_cache": {
+      "name": "Cancella cache CSV",
+      "description": "Cancella i dati CSV memorizzati nella cache e scarica una copia aggiornata."
+    },
+    "compare_stations": {
+      "name": "Confronta prezzi stazioni",
+      "description": "Restituisce un confronto dei prezzi dei carburanti tra tutte le stazioni configurate."
+    }
+  },
+  "title": "Osservaprezzi Carburanti"
 }

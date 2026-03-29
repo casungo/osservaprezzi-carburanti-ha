@@ -15,15 +15,17 @@ This is a **Home Assistant custom integration** (HACS) called "Osservaprezzi Car
 
 ```
 custom_components/osservaprezzi_carburanti/
-  __init__.py          # Entry point: setup/unload/reload config entries, cron scheduling
+  __init__.py          # Entry point: setup/unload/reload config entries, cron scheduling, services
   api.py               # Async API helper: fetches station data from MISE REST API
   config_flow.py       # Config & options flow (station ID input, cron expression)
   const.py             # Constants: domain, config keys, API URLs, service maps, headers
-  coordinator.py       # DataUpdateCoordinator: orchestrates data fetch + CSV enrichment
+  coordinator.py       # DataUpdateCoordinator: orchestrates data fetch + CSV enrichment + retry/backoff
   cron_helper.py       # Cron expression validation and next-run calculation (cronsim)
   csv_manager.py       # Downloads/parses/caches a large CSV of all Italian stations
+  geo_location.py      # GeoLocation platform: exposes stations on the HA map
   manifest.json        # HACS/HA manifest (domain, version, codeowners, etc.)
   sensor.py            # Sensor + BinarySensor entities (fuel prices, info, hours, services)
+  services.yaml        # Service definitions for HA UI
   translations/
     en.json            # English UI strings
     it.json            # Italian UI strings
@@ -166,6 +168,7 @@ from .coordinator import CarburantiDataUpdateCoordinator
 - **Cron scheduling**: uses `cronsim` library (soft dependency, gracefully degrades if missing)
 - **CSV data**: downloaded from MIMIT government site, parsed with auto-detected separator (`|` or `;`), cached in `.storage/` as JSON
 - **Config entry version**: currently `2` (see `VERSION` in config_flow and `async_migrate_entry`)
-- **Platform**: only `SENSOR` platform is registered
+- **Platform**: `SENSOR` and `GEO_LOCATION` platforms are registered
+- **Services**: three global services (`force_csv_update`, `clear_cache`, `compare_stations`) registered once and cleaned up on last entry unload
 - **Update mechanism**: cron-based rescheduling via `async_track_time_interval`, not `update_interval` on the coordinator
 - **Fuel key format**: `"{fuel_name}_{service_type}"` where service_type is `"self"` or `"servito"`

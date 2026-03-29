@@ -91,11 +91,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         """Handle the initial step - directly ask for station ID."""
         return await self._handle_station_input(user_input, "user")
 
-    async def async_step_station(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the setup of a single station."""
-        return await self._handle_station_input(user_input, "station")
+
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):

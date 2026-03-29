@@ -61,6 +61,9 @@
       "location": {
         "name": "Station Location"
       },
+      "station_geolocation": {
+        "name": "Station Geo Location"
+      },
       "info": {
         "name": "Name",
         "nome_impianto": "Station Name",
@@ -120,6 +123,20 @@
           "description": "Charging stations for electric vehicles"
         }
       }
+    }
+  },
+  "services": {
+    "force_csv_update": {
+      "name": "Force CSV update",
+      "description": "Forces an immediate download and refresh of the CSV station database for all configured stations."
+    },
+    "clear_cache": {
+      "name": "Clear CSV cache",
+      "description": "Clears the cached CSV station data and re-downloads a fresh copy."
+    },
+    "compare_stations": {
+      "name": "Compare station prices",
+      "description": "Returns a comparison of fuel prices across all configured stations."
     }
   },
   "title": "Osservaprezzi Carburanti"

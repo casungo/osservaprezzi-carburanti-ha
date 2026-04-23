@@ -5,7 +5,7 @@ CONF_STATION_ID = "station_id"
 
 # Options
 CONF_CRON_EXPRESSION = "cron_expression"
-DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 07:30
+DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 08:30
 
 # API
 BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
@@ -90,9 +90,9 @@ ADDITIONAL_SERVICES = {
 SERVICE_ID_TO_TRANSLATION_KEY = {
     "1": "food_beverage",
     "2": "workshop",
-    "3": "camper_truck_parking",
-    "4": "camper_dump",
-    "5": "play_area",
+    "3": "parking",
+    "4": "dump_station",
+    "5": "playground",
     "6": "atm",
     "7": "disabled_access",
     "8": "wifi",

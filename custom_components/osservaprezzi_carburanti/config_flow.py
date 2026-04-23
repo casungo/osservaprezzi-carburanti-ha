@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import logging
 from typing import Any
-import asyncio
+
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
@@ -41,7 +42,7 @@ async def _validate_station(hass: HomeAssistant, station_id: str) -> dict[str, A
         raise CannotConnect(f"Connection error: {err}")
 
 
-class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     VERSION = 2
 
 

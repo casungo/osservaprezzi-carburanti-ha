@@ -41,13 +41,6 @@
   },
   "entity": {
     "sensor": {
-      "station_open_closed": {
-        "name": "Station Open",
-        "state": {
-          "on": "Open",
-          "off": "Closed"
-        }
-      },
       "next_change": {
         "name": "Next Schedule Change",
         "state": {
@@ -77,6 +70,13 @@
       }
     },
     "binary_sensor": {
+      "station_open_closed": {
+        "name": "Station Open",
+        "state": {
+          "on": "Open",
+          "off": "Closed"
+        }
+      },
       "service": {
         "food_beverage": {
           "name": "Food&Beverage",

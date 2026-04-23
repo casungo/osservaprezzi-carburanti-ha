@@ -498,10 +498,10 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
             "last_updated": dt_util.now().isoformat(),
         }
 
-    async def async_update(self) -> None:
-        """Update the sensor and clear cache."""
-        await super().async_update()
+    def _handle_coordinator_update(self) -> None:
+        """Clear cached state after coordinator updates."""
         self._cached_is_open = None
+        super()._handle_coordinator_update()
 
 
 class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
@@ -677,10 +677,10 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
 
         return attributes
 
-    async def async_update(self) -> None:
-        """Update the sensor and clear cache."""
-        await super().async_update()
+    def _handle_coordinator_update(self) -> None:
+        """Clear cached state after coordinator updates."""
         self._cached_next_change = None
+        super()._handle_coordinator_update()
 
 
 class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):

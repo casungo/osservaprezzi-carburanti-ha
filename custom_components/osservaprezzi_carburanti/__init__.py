@@ -1,13 +1,17 @@
 from __future__ import annotations
+
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
+
 from .const import (
     DOMAIN,
     CONF_CRON_EXPRESSION,
@@ -17,7 +21,7 @@ from .const import (
     SERVICE_COMPARE_STATIONS,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
-from .cron_helper import get_schedule_interval
+from .cron_helper import get_next_run_time
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -36,41 +40,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
     _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
     
-    async def _request_refresh(now):
-        _LOGGER.info("Executing scheduled refresh for %s at %s", entry.title, now)
-        await coordinator.async_request_refresh()
-
-        try:
-            interval = get_schedule_interval(cron_expression)
-            next_run_time = dt_util.now() + interval
-            _LOGGER.info("Rescheduling next refresh for %s in %s (at %s)", entry.title, interval, next_run_time)
-            new_listener = async_track_time_interval(
-                hass,
-                _request_refresh,
-                interval
-            )
-            hass.data[DOMAIN][entry.entry_id]["listener"]()
-            hass.data[DOMAIN][entry.entry_id]["listener"] = new_listener
-        except Exception as e:
-            _LOGGER.error("Failed to reschedule: %s", e)
-
-    try:
-        interval = get_schedule_interval(cron_expression)
-        next_run_time = dt_util.now() + interval
-        _LOGGER.info("Initial cron schedule for %s: next refresh in %s (at %s)", entry.title, interval, next_run_time)
-        listener = async_track_time_interval(
-            hass,
-            _request_refresh,
-            interval
-        )
-    except Exception as e:
-        _LOGGER.error("Failed to set up cron schedule: %s", e)
-        return False
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
-        "listener": listener,
+        "listener": None,
     }
+
+    def _schedule_next_refresh() -> None:
+        try:
+            next_run_time = get_next_run_time(cron_expression)
+        except Exception as err:
+            _LOGGER.error("Failed to compute next cron schedule for %s: %s", entry.title, err)
+            raise
+
+        _LOGGER.info(
+            "Scheduling next refresh for %s at %s",
+            entry.title,
+            next_run_time,
+        )
+        listener: Callable[[], None] = async_track_point_in_utc_time(
+            hass,
+            _request_refresh,
+            dt_util.as_utc(next_run_time),
+        )
+        hass.data[DOMAIN][entry.entry_id]["listener"] = listener
+
+    async def _request_refresh(now: datetime) -> None:
+        _LOGGER.info("Executing scheduled refresh for %s at %s", entry.title, now)
+        try:
+            await coordinator.async_request_refresh()
+        finally:
+            _schedule_next_refresh()
+
+    try:
+        _schedule_next_refresh()
+    except Exception:
+        await coordinator.async_shutdown()
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        return False
 
     _async_register_services(hass)
 

@@ -7,7 +7,7 @@ import shutil
 import asyncio
 import aiohttp
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
@@ -47,8 +47,8 @@ class CSVStationManager:
         """Initialize the CSV manager."""
         self.hass = hass
         self.session = async_get_clientsession(hass)
-        self._stations_cache: Dict[str, Dict[str, Any]] = {}
-        self._last_update: Optional[datetime] = None
+        self._stations_cache: dict[str, dict[str, Any]] = {}
+        self._last_update: datetime | None = None
         self._csv_path = hass.config.path(".storage", f"{DOMAIN}_stations.csv")
         self._cache_path = hass.config.path(".storage", f"{DOMAIN}_cache.json")
         self._detected_separator = '|'  # Default to new format (pipe)
@@ -87,7 +87,7 @@ class CSVStationManager:
                 "Accept": "text/csv,application/csv,text/plain,*/*",
             }
 
-            async with self.session.get(CSV_URL, headers=headers, timeout=60) as response:
+            async with self.session.get(CSV_URL, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response:
                 if response.status != 200:
                     _LOGGER.error("Failed to download CSV: HTTP %s", response.status)
                     return False
@@ -132,52 +132,41 @@ class CSVStationManager:
         self._detected_separator = separator
         return separator
 
-    def _parse_csv_data_sync(self, csv_content: str) -> bool:
-        """Parse CSV content and populate station cache (synchronous helper)."""
+    def _parse_csv_lines(self, lines: list[str]) -> bool:
+        """Parse CSV lines and populate station cache (synchronous helper)."""
         try:
-            # Parse CSV content
-            lines = csv_content.splitlines()
-            if len(lines) < 3:  # Need at least extraction date, headers, and one data row
+            if len(lines) < 3:
                 _LOGGER.error("CSV file has insufficient data")
                 return False
 
-            # Skip extraction date line (line 0) and use headers from line 1
             header_line = lines[1]
-
-            # Detect separator automatically
             separator = self._detect_separator(header_line)
             headers = [h.strip().strip('"') for h in header_line.split(separator)]
 
-            # Find column indices
             col_indices = {}
             for csv_col, internal_col in CSV_COLUMNS.items():
                 try:
                     col_indices[internal_col] = headers.index(csv_col)
-                    _LOGGER.debug("Found column '%s' -> '%s' at index %d", csv_col, internal_col, col_indices[internal_col])
                 except ValueError:
                     _LOGGER.warning("Column '%s' not found in CSV", csv_col)
                     col_indices[internal_col] = -1
 
-            # Parse station data
-            stations_cache = {}
-            for line_num, line in enumerate(lines[2:], 3):  # Start from line 3 (after extraction date and headers)
+            stations_cache: dict[str, dict[str, Any]] = {}
+            for line_num, line in enumerate(lines[2:], 3):
                 try:
                     values = [v.strip().strip('"') for v in line.split(separator)]
                     if len(values) < len(headers):
                         continue
 
-                    station_data = {}
+                    station_data: dict[str, Any] = {}
 
-                    # Extract data using column mapping
                     for csv_col, internal_col in CSV_COLUMNS.items():
                         idx = col_indices.get(internal_col, -1)
                         if idx >= 0 and idx < len(values):
                             value = values[idx]
 
-                            # Convert coordinates to float
                             if internal_col in ['latitude', 'longitude']:
                                 try:
-                                    # Handle Italian decimal format (comma as decimal separator)
                                     if ',' in value:
                                         value = value.replace(',', '.')
                                     station_data[internal_col] = float(value)
@@ -186,84 +175,6 @@ class CSVStationManager:
                             else:
                                 station_data[internal_col] = value if value else None
 
-                    # Only include stations with valid coordinates
-                    station_id = station_data.get('id')
-                    if station_id and station_data.get('latitude') and station_data.get('longitude'):
-                        stations_cache[station_id] = station_data
-
-                except Exception as err:
-                    _LOGGER.warning("Error parsing CSV line %d: %s", line_num, err)
-                    continue
-
-            self._stations_cache = stations_cache
-            _LOGGER.info("Parsed %d stations from CSV", len(stations_cache))
-            return True
-
-        except Exception as err:
-            _LOGGER.error("Error parsing CSV data: %s", err)
-            return False
-
-    async def _parse_csv_data(self, csv_content: str) -> bool:
-        """Parse CSV content and populate station cache."""
-        return await self.hass.async_add_executor_job(self._parse_csv_data_sync, csv_content)
-
-    def _parse_csv_data_sync_from_file(self) -> bool:
-        """Parse CSV from disk file and populate station cache (synchronous helper)."""
-        try:
-            # Read file line-by-line to reduce memory pressure
-            with open(self._csv_path, 'r', encoding='utf-8') as f:
-                lines = [line.rstrip('\n') for line in f]
-
-            if len(lines) < 3:  # Need at least extraction date, headers, and one data row
-                _LOGGER.error("CSV file has insufficient data")
-                return False
-
-            # Skip extraction date line (line 0) and use headers from line 1
-            header_line = lines[1]
-
-            # Detect separator automatically
-            separator = self._detect_separator(header_line)
-            headers = [h.strip().strip('"') for h in header_line.split(separator)]
-
-            # Find column indices
-            col_indices = {}
-            for csv_col, internal_col in CSV_COLUMNS.items():
-                try:
-                    col_indices[internal_col] = headers.index(csv_col)
-                    _LOGGER.debug("Found column '%s' -> '%s' at index %d", csv_col, internal_col, col_indices[internal_col])
-                except ValueError:
-                    _LOGGER.warning("Column '%s' not found in CSV", csv_col)
-                    col_indices[internal_col] = -1
-
-            # Parse station data
-            stations_cache = {}
-            for line_num, line in enumerate(lines[2:], 3):  # Start from line 3 (after extraction date and headers)
-                try:
-                    values = [v.strip().strip('"') for v in line.split(separator)]
-                    if len(values) < len(headers):
-                        continue
-
-                    station_data = {}
-
-                    # Extract data using column mapping
-                    for csv_col, internal_col in CSV_COLUMNS.items():
-                        idx = col_indices.get(internal_col, -1)
-                        if idx >= 0 and idx < len(values):
-                            value = values[idx]
-
-                            # Convert coordinates to float
-                            if internal_col in ['latitude', 'longitude']:
-                                try:
-                                    # Handle Italian decimal format (comma as decimal separator)
-                                    if ',' in value:
-                                        value = value.replace(',', '.')
-                                    station_data[internal_col] = float(value)
-                                except (ValueError, TypeError):
-                                    station_data[internal_col] = None
-                            else:
-                                station_data[internal_col] = value if value else None
-
-                    # Only include stations with valid coordinates
                     station_id = station_data.get('id')
                     if station_id and station_data.get('latitude') and station_data.get('longitude'):
                         stations_cache[station_id] = station_data
@@ -282,7 +193,11 @@ class CSVStationManager:
 
     async def _parse_csv_data_from_file(self) -> bool:
         """Parse CSV from disk and populate station cache."""
-        return await self.hass.async_add_executor_job(self._parse_csv_data_sync_from_file)
+        def _read_and_parse() -> bool:
+            with open(self._csv_path, 'r', encoding='utf-8') as f:
+                lines = [line.rstrip('\n') for line in f]
+            return self._parse_csv_lines(lines)
+        return await self.hass.async_add_executor_job(_read_and_parse)
     
     async def async_load_cached_data(self) -> bool:
         """Load cached station data from local file."""
@@ -350,29 +265,28 @@ class CSVStationManager:
             _LOGGER.error("Error saving cached data: %s", err)
             return False
     
-    def get_station_by_id(self, station_id: str) -> Optional[Dict[str, Any]]:
+    def get_station_by_id(self, station_id: str) -> dict[str, Any] | None:
         """Get station data by ID."""
         return self._stations_cache.get(station_id)
     
-    def get_sample_station_ids(self, count: int = 5) -> List[str]:
+    def get_sample_station_ids(self, count: int = 5) -> list[str]:
         """Get a sample of station IDs for debugging."""
         station_ids = list(self._stations_cache.keys())
         return station_ids[:count]
     
-    def get_station_id_stats(self) -> Dict[str, Any]:
+    def get_station_id_stats(self) -> dict[str, Any]:
         """Get statistics about station ID formats."""
         if not self._stations_cache:
             return {"total": 0, "formats": {}}
         
-        id_lengths = {}
-        id_types = {}
-        sample_ids = []
+        id_lengths: dict[int, int] = {}
+        id_types: dict[str, int] = {}
+        sample_ids: list[str] = []
         
-        for station_id in list(self._stations_cache.keys())[:100]:  # Sample first 100
+        for station_id in list(self._stations_cache.keys())[:100]:
             length = len(station_id)
             id_lengths[length] = id_lengths.get(length, 0) + 1
             
-            # Check if ID is numeric
             if station_id.isdigit():
                 id_types["numeric"] = id_types.get("numeric", 0) + 1
             else:
@@ -388,7 +302,7 @@ class CSVStationManager:
             "sample_ids": sample_ids
         }
     
-    def _get_all_stations(self) -> Dict[str, Dict[str, Any]]:
+    def _get_all_stations(self) -> dict[str, dict[str, Any]]:
         """Get all cached stations."""
         return self._stations_cache.copy()
 
@@ -396,7 +310,7 @@ class CSVStationManager:
         """Check if station data is available."""
         return len(self._stations_cache) > 0
 
-    def _get_last_update(self) -> Optional[datetime]:
+    def _get_last_update(self) -> datetime | None:
         """Get last update timestamp."""
         return self._last_update
     

@@ -1,11 +1,17 @@
 from __future__ import annotations
+
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import TYPE_CHECKING
+
 from homeassistant.util import dt as dt_util
-try:
+
+if TYPE_CHECKING:
     from cronsim import CronSim
-except ImportError:
-    CronSim = None
+else:
+    try:
+        from cronsim import CronSim
+    except ImportError:
+        CronSim = None  # type: ignore[assignment,misc]
 
 def validate_cron_expression(cron_expr: str) -> bool:
     """Validate a cron expression using CronSim."""
@@ -17,7 +23,7 @@ def validate_cron_expression(cron_expr: str) -> bool:
     except Exception:
         return False
 
-def get_next_run_time(cron_expr: str, base_time: Optional[datetime] = None) -> datetime:
+def get_next_run_time(cron_expr: str, base_time: datetime | None = None) -> datetime:
     """Get the next run time for a cron expression."""
     if CronSim is None:
         raise ImportError("cronsim is required for cron scheduling")

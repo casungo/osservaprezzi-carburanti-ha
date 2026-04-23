@@ -41,13 +41,6 @@
   },
   "entity": {
     "sensor": {
-      "station_open_closed": {
-        "name": "Station Open",
-        "state": {
-          "on": "Open",
-          "off": "Closed"
-        }
-      },
       "next_change": {
         "name": "Next Schedule Change",
         "state": {
@@ -60,6 +53,9 @@
       },
       "location": {
         "name": "Station Location"
+      },
+      "station_geolocation": {
+        "name": "Station Geo Location"
       },
       "info": {
         "name": "Name",
@@ -74,52 +70,71 @@
       }
     },
     "binary_sensor": {
-      "service": {
-        "food_beverage": {
-          "name": "Food&Beverage",
-          "description": "Bar, restaurant or refreshment point"
-        },
-        "workshop": {
-          "name": "Workshop",
-          "description": "Repair and maintenance service"
-        },
-        "parking": {
-          "name": "Camper/Truck Parking",
-          "description": "Parking area for campers and trucks"
-        },
-        "dump_station": {
-          "name": "Camper Dump Station",
-          "description": "Black/gray water dump point"
-        },
-        "playground": {
-          "name": "Children's Area",
-          "description": "Playground for children"
-        },
-        "atm": {
-          "name": "ATM",
-          "description": "Automatic teller machine"
-        },
-        "disabled_access": {
-          "name": "Disabled Services",
-          "description": "Services accessible for disabled people"
-        },
-        "wifi": {
-          "name": "Wi-Fi",
-          "description": "Free or paid Wi-Fi connection"
-        },
-        "tire_service": {
-          "name": "Tire Service",
-          "description": "Tire and tire service"
-        },
-        "car_wash": {
-          "name": "Car Wash",
-          "description": "Car washing service"
-        },
-        "ev_charging": {
-          "name": "EV Charging",
-          "description": "Charging stations for electric vehicles"
+      "station_open_closed": {
+        "name": "Station Open",
+        "state": {
+          "on": "Open",
+          "off": "Closed"
         }
+      },
+      "food_beverage": {
+        "name": "Food&Beverage",
+        "description": "Bar, restaurant or refreshment point"
+      },
+      "workshop": {
+        "name": "Workshop",
+        "description": "Repair and maintenance service"
+      },
+      "parking": {
+        "name": "Camper/Truck Parking",
+        "description": "Parking area for campers and trucks"
+      },
+      "dump_station": {
+        "name": "Camper Dump Station",
+        "description": "Black/gray water dump point"
+      },
+      "playground": {
+        "name": "Children's Area",
+        "description": "Playground for children"
+      },
+      "atm": {
+        "name": "ATM",
+        "description": "Automatic teller machine"
+      },
+      "disabled_access": {
+        "name": "Disabled Services",
+        "description": "Services accessible for disabled people"
+      },
+      "wifi": {
+        "name": "Wi-Fi",
+        "description": "Free or paid Wi-Fi connection"
+      },
+      "tire_service": {
+        "name": "Tire Service",
+        "description": "Tire and tire service"
+      },
+      "car_wash": {
+        "name": "Car Wash",
+        "description": "Car washing service"
+      },
+      "ev_charging": {
+        "name": "EV Charging",
+        "description": "Charging stations for electric vehicles"
       }
+    }
+  },
+  "services": {
+    "force_csv_update": {
+      "name": "Force CSV update",
+      "description": "Forces an immediate download and refresh of the CSV station database for all configured stations."
+    },
+    "clear_cache": {
+      "name": "Clear CSV cache",
+      "description": "Clears the cached CSV station data and re-downloads a fresh copy."
+    },
+    "compare_stations": {
+      "name": "Compare station prices",
+      "description": "Returns a comparison of fuel prices across all configured stations."
     }
   },
   "title": "Osservaprezzi Carburanti"

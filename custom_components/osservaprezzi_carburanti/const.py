@@ -10,6 +10,7 @@ DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 07:30
 # API
 BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
 STATION_ENDPOINT = "/registry/servicearea/{station_id}"
+API_REQUEST_INTERVAL_SECONDS = 2
 
 # CSV data source
 CSV_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"

@@ -18,6 +18,7 @@ def _mock_ha_modules():
         "homeassistant.components",
         "homeassistant.components.sensor",
         "homeassistant.components.binary_sensor",
+        "homeassistant.components.geo_location",
         "homeassistant.config_entries",
         "homeassistant.core",
         "homeassistant.helpers",
@@ -32,7 +33,6 @@ def _mock_ha_modules():
         "homeassistant.const",
         "homeassistant.exceptions",
         "homeassistant.data_entry_flow",
-        "aiohttp",
         "voluptuous",
     ]
     for mod_name in ha_modules:
@@ -44,7 +44,10 @@ def _mock_ha_modules():
         MEASUREMENT="measurement"
     )
     sys.modules["homeassistant.components.binary_sensor"].BinarySensorEntity = _MockBinarySensorEntity
+    sys.modules["homeassistant.components.geo_location"].GeolocationEvent = _MockEntity
     sys.modules["homeassistant.helpers.update_coordinator"].CoordinatorEntity = _MockCoordinatorEntity
+    sys.modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = _MockCoordinatorEntity
+    sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = Exception
     sys.modules["homeassistant.helpers.entity"].DeviceInfo = dict
     sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock(
         DIAGNOSTIC="diagnostic"

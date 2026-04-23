@@ -26,7 +26,7 @@ _NEXT_ALLOWED_REQUEST_AT = 0.0
 async def fetch_station_data(
     hass: HomeAssistant,
     station_id: str,
-    timeout: int = 30
+    timeout: int = 30,
 ) -> dict[str, Any]:
     """Fetch station data from the API.
 
@@ -84,11 +84,8 @@ async def fetch_station_data(
                     message=f"Service error: {response.status} - {response.reason}",
                     headers=response.headers,
                 )
-    except aiohttp.ClientError:
-        raise  # Re-raise aiohttp errors as-is (ClientResponseError, ClientError, etc.)
-    except Exception as e:
-        _LOGGER.error("Unexpected error fetching station data: %s", e)
-        raise aiohttp.ClientError(f"Unexpected error: {e}")
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        raise
 
 
 async def _wait_for_request_slot(station_id: str) -> None:

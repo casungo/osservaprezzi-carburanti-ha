@@ -41,13 +41,6 @@
   },
   "entity": {
     "sensor": {
-      "station_open_closed": {
-        "name": "Stazione Aperta",
-        "state": {
-          "on": "Aperta",
-          "off": "Chiusa"
-        }
-      },
       "next_change": {
         "name": "Prossimo Cambio Orario",
         "state": {
@@ -77,6 +70,13 @@
       }
     },
     "binary_sensor": {
+      "station_open_closed": {
+        "name": "Stazione Aperta",
+        "state": {
+          "on": "Aperta",
+          "off": "Chiusa"
+        }
+      },
       "service": {
         "food_beverage": {
           "name": "Food&Beverage",

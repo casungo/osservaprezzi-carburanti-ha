@@ -9,7 +9,6 @@ import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -31,7 +30,6 @@ RETRY_DELAYS: list[int] = [30, 60, 120]
 class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.config_entry = entry
-        self.session = async_get_clientsession(hass)
         self.csv_manager = CSVStationManager(hass)
         self._csv_update_listener: Callable[[], None] | None = None
         self._previous_fuel_prices: dict[str, float | None] = {}
@@ -48,7 +46,8 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         if not self.csv_manager.is_data_available():
             _LOGGER.info("Initializing CSV station data")
-            await self.csv_manager.async_initialize()
+            if not await self.csv_manager.async_initialize():
+                _LOGGER.warning("CSV station data initialization failed; continuing without CSV enrichment")
 
         self._snapshot_previous_prices()
         return await self._async_fetch_station_data()
@@ -104,7 +103,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             if retry_after:
                 try:
                     parsed_delay = int(float(retry_after))
-                except ValueError:
+                except (TypeError, ValueError):
                     return default_delay
                 if parsed_delay > 0:
                     return parsed_delay
@@ -270,5 +269,8 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         to trigger an immediate refresh of CSV station data.
         """
         _LOGGER.info("Forcing immediate CSV data update")
-        return await self.csv_manager.async_update_csv_data(force_update=True)
+        success = await self.csv_manager.async_update_csv_data(force_update=True)
+        if success:
+            await self.csv_manager.async_save_cached_data()
+        return success
 

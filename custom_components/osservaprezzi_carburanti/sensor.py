@@ -434,6 +434,7 @@ class StationLocationSensor(CoordinatorEntity, SensorEntity):
 
 class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """Binary sensor indicating if the station is currently open."""
+    _attr_has_entity_name = True
     _attr_icon = "mdi:storefront"
     _attr_translation_key = "station_open_closed"
 
@@ -506,6 +507,7 @@ class StationOpenClosedBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
 class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
     """Sensor indicating when the station will next open or close."""
+    _attr_has_entity_name = True
     _attr_icon = "mdi:clock-time-eight"
     _attr_translation_key = "next_change"
 
@@ -686,6 +688,7 @@ class StationNextChangeSensor(CoordinatorEntity, SensorEntity):
 class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """Representation of a binary sensor for a specific station service."""
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry, service_id: str, service_info: dict) -> None:
         """Initialize the service binary sensor."""
@@ -697,8 +700,8 @@ class StationServiceBinarySensor(CoordinatorEntity, BinarySensorEntity):
         # Set unique_id, icon, and translation key from service info
         self._attr_unique_id = f"{self._station_id}_service_{service_id}"
         self._attr_icon = service_info["icon"]
-        # Use translation key for entity name localization
-        self._attr_translation_key = f"service.{SERVICE_ID_TO_TRANSLATION_KEY.get(service_id, service_id)}"
+        self._attr_name = service_info["name"]
+        self._attr_translation_key = SERVICE_ID_TO_TRANSLATION_KEY.get(service_id, service_id)
 
     @property
     def device_info(self) -> DeviceInfo:

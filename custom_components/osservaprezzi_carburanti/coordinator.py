@@ -1,21 +1,25 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable
+
 import aiohttp
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+
 from .const import (
-    DOMAIN,
-    CONF_STATION_ID,
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
+    CONF_STATION_ID,
     CSV_UPDATE_INTERVAL,
+    DOMAIN,
 )
 from .api import fetch_station_data
 from .csv_manager import CSVStationManager
@@ -71,18 +75,49 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                 last_err = err
 
             if attempt < len(RETRY_DELAYS):
-                delay = RETRY_DELAYS[attempt]
+                delay = self._get_retry_delay(last_err, RETRY_DELAYS[attempt])
                 _LOGGER.warning(
                     "Attempt %d/%d failed for station %s, retrying in %ds: %s",
                     attempt + 1, len(RETRY_DELAYS) + 1, station_id, delay, last_err,
                 )
                 await asyncio.sleep(delay)
 
+        if self.data and self._is_transient_error(last_err):
+            _LOGGER.warning(
+                "Keeping last known data for station %s after transient update failure: %s",
+                station_id,
+                last_err,
+            )
+            return self.data
+
         _LOGGER.error(
             "All %d attempts failed for station %s: %s",
             len(RETRY_DELAYS) + 1, station_id, last_err,
         )
         raise UpdateFailed(f"Error fetching station data after {len(RETRY_DELAYS) + 1} attempts: {last_err}")
+
+    @staticmethod
+    def _get_retry_delay(err: Exception | None, default_delay: int) -> int:
+        """Return the retry delay, preferring Retry-After when available."""
+        if isinstance(err, aiohttp.ClientResponseError) and err.status == 429 and err.headers:
+            retry_after = err.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    parsed_delay = int(float(retry_after))
+                except ValueError:
+                    return default_delay
+                if parsed_delay > 0:
+                    return parsed_delay
+        return default_delay
+
+    @staticmethod
+    def _is_transient_error(err: Exception | None) -> bool:
+        """Return True for recoverable request failures."""
+        if isinstance(err, asyncio.TimeoutError):
+            return True
+        if isinstance(err, aiohttp.ClientResponseError):
+            return err.status != 404
+        return isinstance(err, aiohttp.ClientError)
 
 
 

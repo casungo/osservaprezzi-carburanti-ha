@@ -77,51 +77,49 @@
           "off": "Chiusa"
         }
       },
-      "service": {
-        "food_beverage": {
-          "name": "Food&Beverage",
-          "description": "Bar, ristorante o punto ristoro"
-        },
-        "workshop": {
-          "name": "Officina",
-          "description": "Servizio di riparazione e manutenzione"
-        },
-        "parking": {
-          "name": "Sosta Camper/Tir",
-          "description": "Area di sosta per camper e autotreni"
-        },
-        "dump_station": {
-          "name": "Scarico per camper",
-          "description": "Punto di scarico acque nere/grigie"
-        },
-        "playground": {
-          "name": "Area bambini",
-          "description": "Area giochi per bambini"
-        },
-        "atm": {
-          "name": "Bancomat",
-          "description": "Sportello automatico ATM"
-        },
-        "disabled_access": {
-          "name": "Servizi per disabili",
-          "description": "Servizi accessibili per persone con disabilità"
-        },
-        "wifi": {
-          "name": "Wi-Fi",
-          "description": "Connessione Wi-Fi gratuita o a pagamento"
-        },
-        "tire_service": {
-          "name": "Gommista",
-          "description": "Servizio pneumatici e gommista"
-        },
-        "car_wash": {
-          "name": "Autolavaggio",
-          "description": "Servizio di lavaggio auto"
-        },
-        "ev_charging": {
-          "name": "Ricarica elettrica",
-          "description": "Colonnine per ricarica veicoli elettrici"
-        }
+      "food_beverage": {
+        "name": "Food&Beverage",
+        "description": "Bar, ristorante o punto ristoro"
+      },
+      "workshop": {
+        "name": "Officina",
+        "description": "Servizio di riparazione e manutenzione"
+      },
+      "parking": {
+        "name": "Sosta Camper/Tir",
+        "description": "Area di sosta per camper e autotreni"
+      },
+      "dump_station": {
+        "name": "Scarico per camper",
+        "description": "Punto di scarico acque nere/grigie"
+      },
+      "playground": {
+        "name": "Area bambini",
+        "description": "Area giochi per bambini"
+      },
+      "atm": {
+        "name": "Bancomat",
+        "description": "Sportello automatico ATM"
+      },
+      "disabled_access": {
+        "name": "Servizi per disabili",
+        "description": "Servizi accessibili per persone con disabilità"
+      },
+      "wifi": {
+        "name": "Wi-Fi",
+        "description": "Connessione Wi-Fi gratuita o a pagamento"
+      },
+      "tire_service": {
+        "name": "Gommista",
+        "description": "Servizio pneumatici e gommista"
+      },
+      "car_wash": {
+        "name": "Autolavaggio",
+        "description": "Servizio di lavaggio auto"
+      },
+      "ev_charging": {
+        "name": "Ricarica elettrica",
+        "description": "Colonnine per ricarica veicoli elettrici"
       }
     }
   },

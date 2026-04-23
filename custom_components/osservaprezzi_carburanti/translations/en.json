@@ -77,51 +77,49 @@
           "off": "Closed"
         }
       },
-      "service": {
-        "food_beverage": {
-          "name": "Food&Beverage",
-          "description": "Bar, restaurant or refreshment point"
-        },
-        "workshop": {
-          "name": "Workshop",
-          "description": "Repair and maintenance service"
-        },
-        "parking": {
-          "name": "Camper/Truck Parking",
-          "description": "Parking area for campers and trucks"
-        },
-        "dump_station": {
-          "name": "Camper Dump Station",
-          "description": "Black/gray water dump point"
-        },
-        "playground": {
-          "name": "Children's Area",
-          "description": "Playground for children"
-        },
-        "atm": {
-          "name": "ATM",
-          "description": "Automatic teller machine"
-        },
-        "disabled_access": {
-          "name": "Disabled Services",
-          "description": "Services accessible for disabled people"
-        },
-        "wifi": {
-          "name": "Wi-Fi",
-          "description": "Free or paid Wi-Fi connection"
-        },
-        "tire_service": {
-          "name": "Tire Service",
-          "description": "Tire and tire service"
-        },
-        "car_wash": {
-          "name": "Car Wash",
-          "description": "Car washing service"
-        },
-        "ev_charging": {
-          "name": "EV Charging",
-          "description": "Charging stations for electric vehicles"
-        }
+      "food_beverage": {
+        "name": "Food&Beverage",
+        "description": "Bar, restaurant or refreshment point"
+      },
+      "workshop": {
+        "name": "Workshop",
+        "description": "Repair and maintenance service"
+      },
+      "parking": {
+        "name": "Camper/Truck Parking",
+        "description": "Parking area for campers and trucks"
+      },
+      "dump_station": {
+        "name": "Camper Dump Station",
+        "description": "Black/gray water dump point"
+      },
+      "playground": {
+        "name": "Children's Area",
+        "description": "Playground for children"
+      },
+      "atm": {
+        "name": "ATM",
+        "description": "Automatic teller machine"
+      },
+      "disabled_access": {
+        "name": "Disabled Services",
+        "description": "Services accessible for disabled people"
+      },
+      "wifi": {
+        "name": "Wi-Fi",
+        "description": "Free or paid Wi-Fi connection"
+      },
+      "tire_service": {
+        "name": "Tire Service",
+        "description": "Tire and tire service"
+      },
+      "car_wash": {
+        "name": "Car Wash",
+        "description": "Car washing service"
+      },
+      "ev_charging": {
+        "name": "EV Charging",
+        "description": "Charging stations for electric vehicles"
       }
     }
   },

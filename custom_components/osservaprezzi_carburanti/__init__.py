@@ -20,7 +20,7 @@ from .coordinator import CarburantiDataUpdateCoordinator
 from .cron_helper import get_schedule_interval
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.GEO_LOCATION]
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _SERVICES_REGISTERED = f"{DOMAIN}_services_registered"
 

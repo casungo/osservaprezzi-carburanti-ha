@@ -31,7 +31,6 @@ from .const import (
     ATTR_VALIDITY_DATE,
     CONF_STATION_ID,
     DOMAIN,
-    SERVICE_ID_TO_TRANSLATION_KEY,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 
@@ -44,7 +43,6 @@ INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
     ("name", "station_name", "mdi:gas-station"),
     ("nomeImpianto", "station_display_name", "mdi:gas-station"),
     ("id", "station_id", "mdi:identifier"),
-    ("address", "station_address", "mdi:map-marker"),
     ("brand", "station_brand", "mdi:tag"),
     ("company", "station_company", "mdi:office-building"),
     ("phoneNumber", "station_phone", "mdi:phone"),
@@ -372,6 +370,7 @@ class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
 class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
     """Representation of a sensor for station location."""
 
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_icon = "mdi:map-marker"
     _attr_translation_key = "location"
@@ -383,8 +382,8 @@ class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
 
     @property
     def native_value(self) -> StateType:
-        """Return the station name for map cards and diagnostics."""
-        return self.station_info.get("nomeImpianto") or self.station_info.get("name")
+        """Return the station address for map cards and diagnostics."""
+        return self.station_info.get("address") or self.station_info.get("nomeImpianto") or self.station_info.get("name")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -622,7 +621,7 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
     """Representation of a binary sensor for a specific station service."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
 
     def __init__(
         self,
@@ -636,8 +635,8 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
         self._service_id = service_id
         self._service_info = service_info
         self._attr_unique_id = f"{self._station_id}_service_{service_id}"
+        self._attr_name = service_info["name"]
         self._attr_icon = service_info["icon"]
-        self._attr_translation_key = SERVICE_ID_TO_TRANSLATION_KEY.get(service_id, service_id)
 
     @property
     def is_on(self) -> bool:

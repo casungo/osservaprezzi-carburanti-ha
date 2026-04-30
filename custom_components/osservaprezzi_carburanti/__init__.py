@@ -30,16 +30,17 @@ _SERVICES_REGISTERED = f"{DOMAIN}_services_registered"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Osservaprezzi Carburanti from a config entry."""
     coordinator = CarburantiDataUpdateCoordinator(hass, entry)
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
         await coordinator.async_shutdown()
         raise
-    
+
     cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
     _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
-    
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
         "listener": None,
@@ -48,7 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def _schedule_next_refresh() -> None:
         try:
             next_run_time = get_next_run_time(cron_expression)
-        except Exception as err:
+        except (ImportError, TypeError, ValueError) as err:
             _LOGGER.error("Failed to compute next cron schedule for %s: %s", entry.title, err)
             raise
 
@@ -73,7 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         _schedule_next_refresh()
-    except Exception:
+    except (ImportError, TypeError, ValueError):
         await coordinator.async_shutdown()
         hass.data[DOMAIN].pop(entry.entry_id, None)
         return False
@@ -86,18 +87,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
+    """Register integration services once per Home Assistant instance."""
     if hass.data.get(_SERVICES_REGISTERED):
         return
     hass.data[_SERVICES_REGISTERED] = True
 
-    async def _handle_force_csv_update(call: ServiceCall) -> None:
-        _LOGGER.info("Service force_csv_update triggered")
+    def _iter_coordinators() -> list[tuple[str, CarburantiDataUpdateCoordinator]]:
+        coordinators: list[tuple[str, CarburantiDataUpdateCoordinator]] = []
         for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
             if not isinstance(entry_data, dict):
                 continue
-            coordinator: CarburantiDataUpdateCoordinator = entry_data.get("coordinator")  # type: ignore[assignment]
-            if coordinator is None:
-                continue
+            coordinator = entry_data.get("coordinator")
+            if isinstance(coordinator, CarburantiDataUpdateCoordinator):
+                coordinators.append((entry_id, coordinator))
+        return coordinators
+
+    async def _handle_force_csv_update(call: ServiceCall) -> None:
+        _LOGGER.info("Service force_csv_update triggered")
+        for entry_id, coordinator in _iter_coordinators():
             success = await coordinator.async_force_csv_update()
             if success:
                 await coordinator.async_request_refresh()
@@ -107,12 +114,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_clear_cache(call: ServiceCall) -> None:
         _LOGGER.info("Service clear_cache triggered")
-        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
-            if not isinstance(entry_data, dict):
-                continue
-            coordinator: CarburantiDataUpdateCoordinator = entry_data.get("coordinator")  # type: ignore[assignment]
-            if coordinator is None:
-                continue
+        for entry_id, coordinator in _iter_coordinators():
             await coordinator.csv_manager.async_clear_cache()
             await coordinator.csv_manager.async_initialize()
             await coordinator.async_request_refresh()
@@ -121,11 +123,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _handle_compare_stations(call: ServiceCall) -> ServiceResponse:
         _LOGGER.info("Service compare_stations triggered")
         comparison: dict[str, Any] = {}
-        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
-            if not isinstance(entry_data, dict):
-                continue
-            coordinator: CarburantiDataUpdateCoordinator = entry_data.get("coordinator")  # type: ignore[assignment]
-            if coordinator is None or not coordinator.data:
+        for entry_id, coordinator in _iter_coordinators():
+            if not coordinator.data:
                 continue
             station_info = coordinator.data.get("station_info", {})
             station_name = station_info.get("nomeImpianto") or station_info.get("name") or entry_id
@@ -160,6 +159,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate older config entries to the current schema."""
     _LOGGER.debug("Migrating config entry from version %s", config_entry.version)
 
     if config_entry.version == 1:
@@ -171,10 +171,14 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
     return True
 
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-        entry_data["listener"]()
+        listener = entry_data.get("listener")
+        if listener is not None:
+            listener()
         await entry_data["coordinator"].async_shutdown()
 
         if not hass.data[DOMAIN]:
@@ -186,5 +190,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload a config entry when options change."""
     _LOGGER.info("Reloading entry %s to apply new cron schedule", entry.title)
     await hass.config_entries.async_reload(entry.entry_id)

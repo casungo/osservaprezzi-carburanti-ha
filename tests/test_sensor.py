@@ -1,7 +1,8 @@
 """Tests for pure sensor helper functions."""
 from __future__ import annotations
 import sys
-from datetime import date, time
+from datetime import date, datetime, time
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,14 +10,16 @@ import pytest
 sys.path.insert(0, ".")
 
 from custom_components.osservaprezzi_carburanti.sensor import (
-    _parse_time,
-    _is_italian_holiday,
     _compute_easter,
-    _is_schedule_open,
     _find_schedule_for_day,
-    _has_valid_opening_hours,
+    _get_available_service_ids,
     _get_fuel_icon,
+    _has_valid_opening_hours,
+    _is_italian_holiday,
+    _is_schedule_open,
+    _parse_time,
     HOLIDAY_SCHEDULE_ID,
+    StationNextChangeSensor,
 )
 
 
@@ -233,6 +236,11 @@ class TestHasValidOpeningHours:
             "opening_hours": [{"flagH24": True}]
         }) is True
 
+    def test_non_communicated_hours_are_not_valid(self):
+        assert _has_valid_opening_hours({
+            "opening_hours": [{"flagNonComunicato": True, "flagH24": True}]
+        }) is False
+
     def test_continuous_hours(self):
         assert _has_valid_opening_hours({
             "opening_hours": [{
@@ -281,3 +289,47 @@ class TestGetFuelIcon:
 
     def test_other(self):
         assert _get_fuel_icon("Unknown Fuel") == "mdi:currency-eur"
+
+
+class TestGetAvailableServiceIds:
+    def test_normalizes_mixed_service_payloads(self):
+        services = [{"id": 1}, "2", 3, {"id": "4"}, {"other": "ignored"}]
+        assert _get_available_service_ids(services) == {"1", "2", "3", "4"}
+
+
+class TestNextChangeH24:
+    def test_h24_only_today_closes_at_next_closed_midnight(self, monkeypatch):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        opening_hours = [
+            {"giornoSettimanaId": 1, "flagH24": True},
+            {"giornoSettimanaId": 2, "flagChiusura": True},
+        ]
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": opening_hours})
+        fixed_now = datetime(2025, 3, 17, 12, 0)
+
+        import custom_components.osservaprezzi_carburanti.sensor as sensor_module
+
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: fixed_now)
+
+        change_type, change_time = sensor._compute_next_change()
+
+        assert change_type == "closes_at"
+        assert change_time == datetime(2025, 3, 18, 0, 0)
+
+    def test_all_week_h24_is_always_open(self, monkeypatch):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        opening_hours = [
+            {"giornoSettimanaId": weekday, "flagH24": True}
+            for weekday in range(1, 8)
+        ]
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": opening_hours})
+        fixed_now = datetime(2025, 3, 17, 12, 0)
+
+        import custom_components.osservaprezzi_carburanti.sensor as sensor_module
+
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: fixed_now)
+
+        change_type, change_time = sensor._compute_next_change()
+
+        assert change_type == "always_open"
+        assert change_time is None

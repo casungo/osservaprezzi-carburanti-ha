@@ -2,7 +2,7 @@
 
 [🇬🇧 Read this in English / Leggi in Inglese](./README.md)
 
-Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizio Osservaprezzi del Ministero delle Imprese e del Made in Italy (MISE).
+Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizio Osservaprezzi del Ministero delle Imprese e del Made in Italy (MIMIT).
 
 ## ✨ Caratteristiche
 
@@ -12,7 +12,7 @@ Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizi
 
 🏷️ **Informazioni Complete sulla Stazione**: I sensori includono attributi dettagliati come nome della stazione, marchio, indirizzo e data dell'ultimo aggiornamento.
 
-📍 **Sensore di Posizione**: Crea un sensore marcatore sulla mappa che mostra la posizione della stazione.
+📍 **Sensore di Posizione**: Crea un sensore diagnostico di posizione per la stazione con coordinate GPS.
 
 🕐 **Sensori degli Orari di Apertura**: Fornisce sensori per stato aperto/chiuso e prossimo orario di apertura/chiusura quando disponibili.
 

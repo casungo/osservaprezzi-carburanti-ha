@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
 import aiohttp
 
@@ -13,6 +14,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .api import fetch_station_data
 from .const import (
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
@@ -20,55 +22,64 @@ from .const import (
     CSV_UPDATE_INTERVAL,
     DOMAIN,
 )
-from .api import fetch_station_data
 from .csv_manager import CSVStationManager
 
 _LOGGER = logging.getLogger(__name__)
 
 RETRY_DELAYS: list[int] = [30, 60, 120]
 
+
 class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
+    """Coordinate API and CSV enrichment updates for a single station."""
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize the coordinator."""
         self.config_entry = entry
         self.csv_manager = CSVStationManager(hass)
         self._csv_update_listener: Callable[[], None] | None = None
         self._previous_fuel_prices: dict[str, float | None] = {}
 
-        unique_id = entry.unique_id
         super().__init__(
             hass,
             _LOGGER,
-            name=f"{DOMAIN}_{unique_id}",
+            name=f"{DOMAIN}_{entry.unique_id or entry.entry_id}",
             update_interval=None,
         )
         self._schedule_csv_updates()
 
     async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch and enrich the latest station payload."""
         if not self.csv_manager.is_data_available():
             _LOGGER.info("Initializing CSV station data")
             if not await self.csv_manager.async_initialize():
-                _LOGGER.warning("CSV station data initialization failed; continuing without CSV enrichment")
+                _LOGGER.warning(
+                    "CSV station data initialization failed; continuing without CSV enrichment"
+                )
 
         self._snapshot_previous_prices()
         return await self._async_fetch_station_data()
 
     def _snapshot_previous_prices(self) -> None:
-        if not self.data or "fuels" not in self.data:
+        """Capture the previous price values before a refresh."""
+        if not self.data:
             return
-        for fuel_key, fuel_info in self.data["fuels"].items():
+
+        for fuel_key, fuel_info in self.data.get("fuels", {}).items():
             self._previous_fuel_prices[fuel_key] = fuel_info.get("price")
 
     async def _async_fetch_station_data(self) -> dict[str, Any]:
+        """Fetch station data with retry handling."""
         station_id = self.config_entry.data[CONF_STATION_ID]
         last_err: Exception | None = None
+
         for attempt in range(len(RETRY_DELAYS) + 1):
             try:
                 data = await fetch_station_data(self.hass, station_id)
-                return await self._process_station_data(data)
+                return self._process_station_data(data)
             except aiohttp.ClientResponseError as err:
                 if err.status == 404:
                     _LOGGER.error("Station with ID %s not found", station_id)
-                    raise UpdateFailed(f"Station with ID {station_id} not found")
+                    raise UpdateFailed(f"Station with ID {station_id} not found") from err
                 last_err = err
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 last_err = err
@@ -77,7 +88,11 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                 delay = self._get_retry_delay(last_err, RETRY_DELAYS[attempt])
                 _LOGGER.warning(
                     "Attempt %d/%d failed for station %s, retrying in %ds: %s",
-                    attempt + 1, len(RETRY_DELAYS) + 1, station_id, delay, last_err,
+                    attempt + 1,
+                    len(RETRY_DELAYS) + 1,
+                    station_id,
+                    delay,
+                    last_err,
                 )
                 await asyncio.sleep(delay)
 
@@ -91,9 +106,13 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
 
         _LOGGER.error(
             "All %d attempts failed for station %s: %s",
-            len(RETRY_DELAYS) + 1, station_id, last_err,
+            len(RETRY_DELAYS) + 1,
+            station_id,
+            last_err,
         )
-        raise UpdateFailed(f"Error fetching station data after {len(RETRY_DELAYS) + 1} attempts: {last_err}")
+        raise UpdateFailed(
+            f"Error fetching station data after {len(RETRY_DELAYS) + 1} attempts: {last_err}"
+        )
 
     @staticmethod
     def _get_retry_delay(err: Exception | None, default_delay: int) -> int:
@@ -118,135 +137,109 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             return err.status != 404
         return isinstance(err, aiohttp.ClientError)
 
-
-
-
-    async def _async_get_station_coordinates(self, station_id: str | None) -> dict[str, Any] | None:
+    def _get_station_coordinates(self, station_id: str | None) -> dict[str, float | str] | None:
         """Get station coordinates using CSV data only."""
         if not station_id:
             _LOGGER.warning("No station ID provided for coordinate lookup")
             return None
 
-        station_id_str = str(station_id)
+        csv_station = self.csv_manager.get_station_by_id(str(station_id))
+        if not csv_station:
+            _LOGGER.warning("Station %s not found in CSV data", station_id)
+            return None
 
-        csv_station = self.csv_manager.get_station_by_id(station_id_str)
-        if csv_station:
-            lat = csv_station.get('latitude')
-            lon = csv_station.get('longitude')
-            if lat is not None and lon is not None:
-                _LOGGER.debug("Found coordinates for station %s: %s, %s", station_id_str, lat, lon)
-                return {
-                    "latitude": float(lat),
-                    "longitude": float(lon),
-                    "source": "csv"
-                }
-            else:
-                _LOGGER.warning("Station %s found in CSV but missing coordinates", station_id_str)
-        else:
-            _LOGGER.warning("Station %s not found in CSV data", station_id_str)
+        latitude = csv_station.get("latitude")
+        longitude = csv_station.get("longitude")
+        if latitude is None or longitude is None:
+            _LOGGER.warning("Station %s found in CSV but missing coordinates", station_id)
+            return None
 
-        return None
-
+        _LOGGER.debug("Found coordinates for station %s: %s, %s", station_id, latitude, longitude)
+        return {
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "source": "csv",
+        }
 
     def _parse_iso_datetime(self, datetime_str: str | None) -> str | None:
-        """Parse ISO 8601 datetime string and return it in a consistent format.
-
-        Note: Python 3.11+ handles 'Z' natively in fromisoformat, but we use
-        the replace() approach for compatibility with older Python versions.
-        """
+        """Normalize an ISO datetime string for entity attributes."""
         if not datetime_str:
             return None
 
-        try:
-            # Handle various ISO 8601 formats
-            if datetime_str.endswith('Z'):
-                # UTC format - replace Z with +00:00 for compatibility
-                dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
-            else:
-                # Already has timezone info
-                dt = datetime.fromisoformat(datetime_str)
+        parsed_dt = dt_util.parse_datetime(datetime_str)
+        if parsed_dt is None:
+            try:
+                parsed_dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                _LOGGER.warning("Failed to parse datetime: %s", datetime_str)
+                return datetime_str
 
-            # Return in ISO format without microseconds for consistency
-            return dt.replace(microsecond=0).isoformat()
-        except (ValueError, TypeError):
-            _LOGGER.warning("Failed to parse datetime: %s", datetime_str)
-            return datetime_str  # Return original if parsing fails
+        return parsed_dt.replace(microsecond=0).isoformat()
 
-    async def _process_station_data(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _process_station_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Process the raw data from a single station API call."""
-        address = data.get("address")
         station_id = data.get("id")
+        coordinates = self._get_station_coordinates(str(station_id) if station_id is not None else None)
+        csv_station = self.csv_manager.get_station_by_id(str(station_id)) if station_id is not None else None
+        now_iso = dt_util.now().replace(microsecond=0).isoformat()
 
-        _LOGGER.debug("Processing station data - ID: %s, Name: %s, Address: %s", station_id, data.get("nomeImpianto"), address)
-
-        # Get coordinates using CSV data
-        coordinates = await self._async_get_station_coordinates(station_id)
-
-        # Get additional station data from CSV if available
-        # Convert station_id to string because CSV cache keys are strings
-        csv_station = self.csv_manager.get_station_by_id(str(station_id)) if station_id else None
-        
         processed_data = {
             "station_info": {
-                "id": data.get("id"),
+                "id": station_id,
                 "name": data.get("name"),
                 "nomeImpianto": data.get("nomeImpianto"),
-                "address": address,
+                "address": data.get("address"),
                 "brand": data.get("brand"),
                 "company": data.get("company"),
                 "phoneNumber": data.get("phoneNumber"),
                 "email": data.get("email"),
                 "website": data.get("website"),
-                # Add coordinates from CSV data
                 ATTR_LATITUDE: coordinates["latitude"] if coordinates else None,
                 ATTR_LONGITUDE: coordinates["longitude"] if coordinates else None,
-                # Add CSV data if available
                 "operator": csv_station.get("operator") if csv_station else None,
                 "station_type": csv_station.get("station_type") if csv_station else None,
                 "municipality": csv_station.get("municipality") if csv_station else None,
                 "province": csv_station.get("province") if csv_station else None,
-                "coordinate_source": coordinates.get("source", "csv") if coordinates else None,
+                "coordinate_source": coordinates.get("source") if coordinates else None,
             },
             "fuels": {},
             "services": data.get("services", []),
             "opening_hours": data.get("orariapertura", []),
-            "last_update": dt_util.now().isoformat(),
+            "last_update": now_iso,
         }
-        now_iso = dt_util.now().isoformat()
+
         for fuel in data.get("fuels", []):
-            fuel_id = fuel.get("fuelId")
             fuel_name = fuel.get("name", "Unknown")
             service_type = "self" if fuel.get("isSelf") else "servito"
             fuel_key = f"{fuel_name}_{service_type}"
             new_price = fuel.get("price")
             previous_price = self._previous_fuel_prices.get(fuel_key)
-            price_changed_at: str | None = None
-            if new_price != previous_price and previous_price is not None:
-                price_changed_at = now_iso
+            price_changed_at = now_iso if new_price != previous_price and previous_price is not None else None
+
             processed_data["fuels"][fuel_key] = {
                 "price": new_price,
                 "last_update": self._parse_iso_datetime(fuel.get("insertDate")),
                 "validity_date": self._parse_iso_datetime(fuel.get("validityDate")),
-                "fuel_id": fuel_id,
+                "fuel_id": fuel.get("fuelId"),
                 "is_self": fuel.get("isSelf"),
                 "service_area_id": fuel.get("serviceAreaId"),
                 "previous_price": previous_price,
                 "price_changed_at": price_changed_at,
             }
+
         return processed_data
 
     def _schedule_csv_updates(self) -> None:
         """Schedule periodic CSV updates."""
-        # Schedule CSV update every 24 hours
         self._csv_update_listener = async_track_time_interval(
             self.hass,
             self._async_csv_update_callback,
-            timedelta(hours=CSV_UPDATE_INTERVAL)
+            timedelta(hours=CSV_UPDATE_INTERVAL),
         )
 
     async def _async_csv_update_callback(self, now: datetime) -> None:
         """Callback for periodic CSV data update."""
-        _LOGGER.info("Performing periodic CSV data update")
+        _LOGGER.info("Performing periodic CSV data update at %s", now)
         success = await self.csv_manager.async_periodic_update()
         if success:
             _LOGGER.info("Periodic CSV update completed successfully")
@@ -255,22 +248,15 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def async_shutdown(self) -> None:
         """Clean up resources when shutting down."""
-        # Cancel CSV update listener if active
         if self._csv_update_listener:
             self._csv_update_listener()
             self._csv_update_listener = None
-        # Call parent shutdown
         await super().async_shutdown()
 
     async def async_force_csv_update(self) -> bool:
-        """Force an immediate CSV update.
-
-        This method can be called externally (e.g., via a service call)
-        to trigger an immediate refresh of CSV station data.
-        """
+        """Force an immediate CSV update."""
         _LOGGER.info("Forcing immediate CSV data update")
         success = await self.csv_manager.async_update_csv_data(force_update=True)
         if success:
             await self.csv_manager.async_save_cached_data()
         return success
-

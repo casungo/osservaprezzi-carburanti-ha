@@ -2,7 +2,7 @@
 
 [🇮🇹 Read this in Italian / Leggi in Italiano](./README.it.md)
 
-Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi service provided by the Italian Ministry of Enterprises and Made in Italy (MISE).
+Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi service provided by the Italian Ministry of Enterprises and Made in Italy (MIMIT).
 
 ## ✨ Features
 
@@ -12,7 +12,7 @@ Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi
 
 🏷️ **Complete Station Information**: Sensors include detailed attributes such as station name, brand, address, and last update time.
 
-📍 **Location Sensor**: Creates a map marker sensor showing the station's location.
+📍 **Location Sensor**: Creates a diagnostic location sensor for the station with GPS coordinates.
 
 🕐 **Opening Hours Sensors**: Provides sensors for open/closed status and next opening/closing time when available.
 

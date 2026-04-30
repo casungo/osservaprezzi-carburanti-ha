@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.5] - 2025-01-XX
+## [2.1.6] - 2026-04-30
+
+### Fixed
+- Keep opening-hours entities fresh during the day instead of only updating them on price refresh
+- Normalize service payload handling so binary service sensors are created for mixed API formats
+- Compute H24 opening-hours next changes from the current schedule instead of any H24 day in the payload
+- Parse quoted CSV fields correctly when a station field contains the detected separator
+
+### Changed
+- Refactor sensor entities around shared station helpers and translated diagnostic entity names
+- Tighten exception handling in config flow, cron helpers, setup scheduling, and CSV cache management
+- Remove unused geolocation platform code, unused translation keys, and debug-only CSV helper methods
+- Deduplicate service coordinator iteration during service handling
+
+## [2.1.5] - 2026-03-22
 
 ### Added
 - HA services: `force_csv_update` and `clear_cache` for manual CSV data management

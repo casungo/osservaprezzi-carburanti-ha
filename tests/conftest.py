@@ -53,11 +53,12 @@ def _mock_ha_modules():
         DIAGNOSTIC="diagnostic"
     )
     sys.modules["homeassistant.helpers.typing"].StateType = object
-    sys.modules["homeassistant.const"].Platform = MagicMock(SENSOR="sensor")
+    sys.modules["homeassistant.const"].Platform = MagicMock(SENSOR="sensor", GEO_LOCATION="geo_location")
     sys.modules["homeassistant.exceptions"].HomeAssistantError = Exception
     sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = Exception
     sys.modules["homeassistant.data_entry_flow"].FlowResult = dict
     sys.modules["homeassistant.config_entries"].ConfigFlow = _MockConfigFlow
+    sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict
     sys.modules["homeassistant.config_entries"].OptionsFlowWithConfigEntry = _MockOptionsFlow
     sys.modules["homeassistant.core"].callback = lambda f: f
 

@@ -3,14 +3,7 @@
     "step": {
       "user": {
         "title": "Setup Osservaprezzi Carburanti",
-        "description": "Enter the station ID to monitor fuel prices.\n\nHow to find ID:\n1. Go to carburanti.mise.gov.it/ospzSearch/zona\n2. Search and click your station\n3. Copy ID from URL (e.g: 1111 from .../dettaglio/1111)",
-        "data": {
-          "station_id": "Station ID"
-        }
-      },
-      "station": {
-        "title": "Single Station Configuration",
-        "description": "Enter the station ID to monitor fuel prices.",
+        "description": "Enter the station ID to monitor fuel prices.\n\nHow to find the station ID:\n1. Go to carburanti.mise.gov.it/ospzSearch/zona\n2. Search for and open the station details page\n3. Copy the ID from the URL (for example, 1111 from .../dettaglio/1111)",
         "data": {
           "station_id": "Station ID"
         }
@@ -29,7 +22,7 @@
     "step": {
       "init": {
         "title": "Osservaprezzi Carburanti Options",
-        "description": "Configure integration options.\n\nYou can use https://crontab.guru to help build and validate your cron expressions.",
+        "description": "Configure integration options.\n\nYou can use https://crontab.guru to help build and validate cron expressions.",
         "data": {
           "cron_expression": "Cron expression"
         }
@@ -41,6 +34,9 @@
   },
   "entity": {
     "sensor": {
+      "location": {
+        "name": "Location"
+      },
       "next_change": {
         "name": "Next Schedule Change",
         "state": {
@@ -51,34 +47,44 @@
           "no_opening": "No opening scheduled"
         }
       },
-      "location": {
-        "name": "Station Location"
+      "station_name": {
+        "name": "Name"
       },
-      "station_geolocation": {
-        "name": "Station Geo Location"
+      "station_display_name": {
+        "name": "Station Name"
       },
-      "info": {
-        "name": "Name",
-        "nome_impianto": "Station Name",
-        "id": "Osservaprezzi ID",
-        "address": "Address",
-        "brand": "Brand",
-        "company": "Company",
-        "phone": "Phone",
-        "email": "Email",
-        "website": "Website"
+      "station_id": {
+        "name": "Osservaprezzi ID"
+      },
+      "station_address": {
+        "name": "Address"
+      },
+      "station_brand": {
+        "name": "Brand"
+      },
+      "station_company": {
+        "name": "Company"
+      },
+      "station_phone": {
+        "name": "Phone"
+      },
+      "station_email": {
+        "name": "Email"
+      },
+      "station_website": {
+        "name": "Website"
       }
     },
     "binary_sensor": {
       "station_open_closed": {
-        "name": "Station Open",
+        "name": "Open",
         "state": {
           "on": "Open",
           "off": "Closed"
         }
       },
       "food_beverage": {
-        "name": "Food&Beverage",
+        "name": "Food & Beverage",
         "description": "Bar, restaurant or refreshment point"
       },
       "workshop": {
@@ -91,7 +97,7 @@
       },
       "dump_station": {
         "name": "Camper Dump Station",
-        "description": "Black/gray water dump point"
+        "description": "Black or gray water dump point"
       },
       "playground": {
         "name": "Children's Area",

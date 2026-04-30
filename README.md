@@ -109,6 +109,67 @@ During configuration, you will be asked to enter the **Station ID** of the facil
 
 The integration will create sensors for every possible fuel type.
 
+## 🧩 Dashboard Examples
+
+### Battery State Card
+
+You can display fuel prices with the custom [Battery State Card](https://github.com/maxwroc/battery-state-card). The following example shows diesel prices from all `osservaprezzi_carburanti` entities, sorted from the cheapest to the most expensive:
+
+```yaml
+grid_options:
+  columns: full
+  rows: auto
+type: custom:battery-state-card
+title: Diesel
+secondary_info: "{attributes.station_brand} - {attributes.station_address}"
+icon: mdi:fuel
+filter:
+  include:
+    - and:
+        - or:
+            - name: attributes.fuel_type_name
+              value: Gasolio
+            - name: attributes.fuel_type_name
+              value: Blue*
+        - name: entity.platform
+          value: osservaprezzi_carburanti
+  exclude:
+    - name: attributes.validity_date
+      operator: ">"
+      value: 24h
+sort:
+  - by: state
+    desc: false
+collapse: 6
+colors:
+  steps:
+    - value: 1.6
+      color: "#00ff00"
+    - value: 2
+      color: "#ffff00"
+    - value: 2.4
+      color: "#ff0000"
+  gradient: true
+tap_action:
+  action: navigate
+  navigation_path: /config/devices/device/{entity.device_id}
+```
+
+To show all fuel types and group them by fuel name, replace the `filter` section and add `group`:
+
+```yaml
+filter:
+  include:
+    - and:
+        - or:
+            - name: attributes.fuel_type_name
+              value: "*"
+        - name: entity.platform
+          value: osservaprezzi_carburanti
+group:
+  - by: attributes.fuel_type_name
+```
+
 ## 📞 Support
 
 For issues or suggestions, open an issue on GitHub.

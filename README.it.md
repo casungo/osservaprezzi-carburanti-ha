@@ -109,6 +109,67 @@ Durante la configurazione, ti verrà richiesto di inserire l'**ID Stazione** del
 
 L'integrazione creerà sensori per ogni possibile carburante.
 
+## 🧩 Esempi Dashboard
+
+### Battery State Card
+
+Puoi mostrare i prezzi dei carburanti con la custom card [Battery State Card](https://github.com/maxwroc/battery-state-card). L'esempio seguente mostra i prezzi del gasolio di tutte le entità `osservaprezzi_carburanti`, ordinati dal più economico al più costoso:
+
+```yaml
+grid_options:
+  columns: full
+  rows: auto
+type: custom:battery-state-card
+title: Diesel
+secondary_info: "{attributes.station_brand} - {attributes.station_address}"
+icon: mdi:fuel
+filter:
+  include:
+    - and:
+        - or:
+            - name: attributes.fuel_type_name
+              value: Gasolio
+            - name: attributes.fuel_type_name
+              value: Blue*
+        - name: entity.platform
+          value: osservaprezzi_carburanti
+  exclude:
+    - name: attributes.validity_date
+      operator: ">"
+      value: 24h
+sort:
+  - by: state
+    desc: false
+collapse: 6
+colors:
+  steps:
+    - value: 1.6
+      color: "#00ff00"
+    - value: 2
+      color: "#ffff00"
+    - value: 2.4
+      color: "#ff0000"
+  gradient: true
+tap_action:
+  action: navigate
+  navigation_path: /config/devices/device/{entity.device_id}
+```
+
+Per mostrare tutti i carburanti e raggrupparli per nome carburante, sostituisci la sezione `filter` e aggiungi `group`:
+
+```yaml
+filter:
+  include:
+    - and:
+        - or:
+            - name: attributes.fuel_type_name
+              value: "*"
+        - name: entity.platform
+          value: osservaprezzi_carburanti
+group:
+  - by: attributes.fuel_type_name
+```
+
 ## 📞 Supporto
 
 Per problemi o suggerimenti apri una issue su GitHub.

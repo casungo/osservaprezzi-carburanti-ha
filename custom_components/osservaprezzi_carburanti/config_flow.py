@@ -5,47 +5,55 @@ from typing import Any
 
 import aiohttp
 import voluptuous as vol
+
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
-from homeassistant.core import callback, HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+
+from .api import fetch_station_data
 from .const import (
     DOMAIN,
-    CONF_STATION_ID,
     CONF_CRON_EXPRESSION,
+    CONF_STATION_ID,
     DEFAULT_CRON_EXPRESSION,
 )
-from .api import fetch_station_data
 from .cron_helper import validate_cron_expression
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""
+
 
 class InvalidStation(HomeAssistantError):
     """Error to indicate there is an invalid station."""
 
+
 async def _validate_station(hass: HomeAssistant, station_id: str) -> dict[str, Any]:
     """Validate the station_id by making an API call."""
+    normalized_station_id = station_id.strip()
+    if not normalized_station_id:
+        raise InvalidStation("Station ID is empty")
+
     try:
-        data = await fetch_station_data(hass, station_id)
+        data = await fetch_station_data(hass, normalized_station_id)
         if not data.get("id") or not data.get("name"):
             raise InvalidStation("Invalid station data received")
         return {"name": data["name"]}
     except aiohttp.ClientResponseError as err:
         if err.status == 404:
             raise InvalidStation("Station not found")
-        else:
-            raise CannotConnect(f"Service error: {err.status}")
-    except aiohttp.ClientError as err:
+        raise CannotConnect(f"Service error: {err.status}") from err
+    except (aiohttp.ClientError, TimeoutError) as err:
         raise CannotConnect(f"Connection error: {err}")
 
 
 class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
+    """Handle the config flow for Osservaprezzi Carburanti."""
+
     VERSION = 2
-
-
 
     @staticmethod
     @callback
@@ -61,7 +69,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                station_id = user_input[CONF_STATION_ID]
+                station_id = user_input[CONF_STATION_ID].strip()
                 await self.async_set_unique_id(f"station_{station_id}")
                 self._abort_if_unique_id_configured()
 
@@ -75,8 +83,8 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 errors["base"] = "invalid_station"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
+            except (TypeError, ValueError) as err:
+                _LOGGER.exception("Unexpected station validation error for %s: %s", station_id, err)
                 errors["base"] = "unknown"
 
         return self.async_show_form(
@@ -91,9 +99,6 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         """Handle the initial step - directly ask for station ID."""
         return await self._handle_station_input(user_input, "user")
 
-
-
-
 class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
     """Handle an options flow for Osservaprezzi Carburanti."""
 
@@ -107,11 +112,20 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
             old_cron_expr = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
             if validate_cron_expression(cron_expr):
                 if cron_expr != old_cron_expr:
-                    _LOGGER.info("Cron expression updated from '%s' to '%s' for %s", old_cron_expr, cron_expr, self.config_entry.title)
+                    _LOGGER.info(
+                        "Cron expression updated from '%s' to '%s' for %s",
+                        old_cron_expr,
+                        cron_expr,
+                        self.config_entry.title,
+                    )
                 return self.async_create_entry(title="", data=user_input)
-            else:
-                _LOGGER.warning("Invalid cron expression submitted: '%s' for %s", cron_expr, self.config_entry.title)
-                errors["base"] = "invalid_cron_expression"
+
+            _LOGGER.warning(
+                "Invalid cron expression submitted: '%s' for %s",
+                cron_expr,
+                self.config_entry.title,
+            )
+            errors["base"] = "invalid_cron_expression"
 
         schema = vol.Schema(
             {

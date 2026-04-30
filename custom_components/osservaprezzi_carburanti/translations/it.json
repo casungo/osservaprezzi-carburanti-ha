@@ -3,16 +3,9 @@
     "step": {
       "user": {
         "title": "Configurazione Osservaprezzi Carburanti",
-        "description": "Inserisci l'ID della stazione per monitorare i prezzi.\n\nCome trovare l'ID:\n1. Vai a carburanti.mise.gov.it/ospzSearch/zona\n2. Cerca e clicca sulla tua stazione\n3. Copia l'ID dall'URL (es: 1111 da .../dettaglio/1111)",
+        "description": "Inserisci l'ID della stazione da monitorare.\n\nCome trovare l'ID stazione:\n1. Vai su carburanti.mise.gov.it/ospzSearch/zona\n2. Cerca e apri la pagina di dettaglio della stazione\n3. Copia l'ID dall'URL (per esempio 1111 da .../dettaglio/1111)",
         "data": {
-          "station_id": "ID Stazione"
-        }
-      },
-      "station": {
-        "title": "Configurazione Stazione Singola",
-        "description": "Inserisci l'ID della stazione per monitorare i prezzi dei carburanti.",
-        "data": {
-          "station_id": "ID Stazione"
+          "station_id": "ID stazione"
         }
       }
     },
@@ -29,18 +22,21 @@
     "step": {
       "init": {
         "title": "Opzioni Osservaprezzi Carburanti",
-        "description": "Configura le opzioni dell'integrazione.\n\nPuoi usare https://crontab.guru per aiutarti a costruire e validare le tue espressioni cron.",
+        "description": "Configura le opzioni dell'integrazione.\n\nPuoi usare https://crontab.guru per aiutarti a creare e validare le espressioni cron.",
         "data": {
           "cron_expression": "Espressione cron"
         }
       }
     },
     "error": {
-      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (giornalmente alle 07:30). Visita https://crontab.guru per aiuto nella creazione di espressioni valide."
+      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (ogni giorno alle 07:30). Visita https://crontab.guru per aiuto nella creazione di espressioni valide."
     }
   },
   "entity": {
     "sensor": {
+      "location": {
+        "name": "Posizione"
+      },
       "next_change": {
         "name": "Prossimo Cambio Orario",
         "state": {
@@ -51,34 +47,44 @@
           "no_opening": "Nessuna apertura prevista"
         }
       },
-      "location": {
-        "name": "Posizione Stazione"
+      "station_name": {
+        "name": "Nome"
       },
-      "station_geolocation": {
-        "name": "Geolocalizzazione Stazione"
+      "station_display_name": {
+        "name": "Nome impianto"
       },
-      "info": {
-        "name": "Nome",
-        "nome_impianto": "Nome Impianto",
-        "id": "ID Osservaprezzi",
-        "address": "Indirizzo",
-        "brand": "Marchio",
-        "company": "Società",
-        "phone": "Telefono",
-        "email": "Email",
-        "website": "Sito Web"
+      "station_id": {
+        "name": "ID Osservaprezzi"
+      },
+      "station_address": {
+        "name": "Indirizzo"
+      },
+      "station_brand": {
+        "name": "Marchio"
+      },
+      "station_company": {
+        "name": "Società"
+      },
+      "station_phone": {
+        "name": "Telefono"
+      },
+      "station_email": {
+        "name": "Email"
+      },
+      "station_website": {
+        "name": "Sito web"
       }
     },
     "binary_sensor": {
       "station_open_closed": {
-        "name": "Stazione Aperta",
+        "name": "Aperta",
         "state": {
           "on": "Aperta",
           "off": "Chiusa"
         }
       },
       "food_beverage": {
-        "name": "Food&Beverage",
+        "name": "Food & Beverage",
         "description": "Bar, ristorante o punto ristoro"
       },
       "workshop": {
@@ -86,12 +92,12 @@
         "description": "Servizio di riparazione e manutenzione"
       },
       "parking": {
-        "name": "Sosta Camper/Tir",
-        "description": "Area di sosta per camper e autotreni"
+        "name": "Sosta camper/tir",
+        "description": "Area di sosta per camper e camion"
       },
       "dump_station": {
-        "name": "Scarico per camper",
-        "description": "Punto di scarico acque nere/grigie"
+        "name": "Scarico camper",
+        "description": "Punto di scarico acque nere o grigie"
       },
       "playground": {
         "name": "Area bambini",
@@ -119,7 +125,7 @@
       },
       "ev_charging": {
         "name": "Ricarica elettrica",
-        "description": "Colonnine per ricarica veicoli elettrici"
+        "description": "Colonnine per ricarica di veicoli elettrici"
       }
     }
   },

@@ -31,6 +31,7 @@ from .const import (
     ATTR_VALIDITY_DATE,
     CONF_STATION_ID,
     DOMAIN,
+    SERVICE_ID_TO_TRANSLATION_KEY,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 
@@ -291,6 +292,7 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
 class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
     """Representation of a single fuel price for a specific station."""
 
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "€/L"
 
@@ -613,7 +615,7 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
     """Representation of a binary sensor for a specific station service."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -627,7 +629,9 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
         self._service_id = service_id
         self._service_info = service_info
         self._attr_unique_id = f"{self._station_id}_service_{service_id}"
-        self._attr_name = service_info["name"]
+        self._attr_translation_key = SERVICE_ID_TO_TRANSLATION_KEY.get(service_id)
+        if self._attr_translation_key is None:
+            self._attr_name = service_info["name"]
         self._attr_icon = service_info["icon"]
 
     @property

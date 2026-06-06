@@ -1,15 +1,45 @@
 """Shared test fixtures and mock helpers."""
 from __future__ import annotations
+
 import sys
 from unittest.mock import MagicMock
 
 
-class _MockEntity: pass
-class _MockSensorEntity(_MockEntity): pass
-class _MockBinarySensorEntity(_MockEntity): pass
-class _MockCoordinatorEntity(_MockEntity): pass
-class _MockConfigFlow: pass
-class _MockOptionsFlow: pass
+class _MockEntity:
+    """Minimal Home Assistant entity test double."""
+
+    hass = None
+
+    async def async_added_to_hass(self):
+        """Mock add hook."""
+
+    async def async_will_remove_from_hass(self):
+        """Mock remove hook."""
+
+
+class _MockSensorEntity(_MockEntity):
+    """Minimal sensor entity test double."""
+
+
+class _MockBinarySensorEntity(_MockEntity):
+    """Minimal binary sensor entity test double."""
+
+
+class _MockCoordinatorEntity(_MockEntity):
+    """Minimal coordinator entity test double."""
+
+    def __init__(self, coordinator=None):
+        """Store coordinator and hass like Home Assistant's CoordinatorEntity."""
+        self.coordinator = coordinator
+        self.hass = getattr(coordinator, "hass", None)
+
+
+class _MockConfigFlow:
+    """Minimal config flow test double."""
+
+
+class _MockOptionsFlow:
+    """Minimal options flow test double."""
 
 
 def _mock_ha_modules():

@@ -170,6 +170,22 @@ group:
   - by: attributes.fuel_type_name
 ```
 
+## Test di Regressione Locali
+
+Esegui la suite automatica con:
+
+```bash
+python -m pytest -q
+```
+
+Se Docker Desktop è avviato in locale, puoi anche eseguire uno smoke test contro il container ufficiale di Home Assistant:
+
+```bash
+python scripts/ha_docker_regression.py --timeout 240
+```
+
+Il test Docker è pensato solo per validazione locale e non fa parte del workflow GitHub Actions.
+
 ## 📞 Supporto
 
 Per problemi o suggerimenti apri una issue su GitHub.

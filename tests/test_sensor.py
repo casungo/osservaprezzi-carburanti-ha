@@ -1,5 +1,7 @@
 """Tests for pure sensor helper functions."""
 from __future__ import annotations
+
+import asyncio
 import sys
 from datetime import date, datetime, time
 from types import SimpleNamespace
@@ -19,8 +21,155 @@ from custom_components.osservaprezzi_carburanti.sensor import (
     _is_schedule_open,
     _parse_time,
     HOLIDAY_SCHEDULE_ID,
+    OsservaprezziStationSensor,
+    StationLocationSensor,
     StationNextChangeSensor,
+    StationOpenClosedBinarySensor,
+    StationServiceBinarySensor,
+    async_setup_entry,
 )
+from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
+
+
+def _sample_station_data():
+    return {
+        "fuels": {
+            "gasolio_self": {
+                "price": 1.701,
+                "last_update": "2026-06-01T08:00:00+02:00",
+                "validity_date": "2026-06-01T08:00:00+02:00",
+                "previous_price": 1.755,
+                "price_changed_at": "2026-05-31T08:00:00+02:00",
+            },
+            "benzina_servito": {"price": 1.899},
+        },
+        "station_info": {
+            "id": "12345",
+            "name": "Station Alpha",
+            "nomeImpianto": "Alpha Fuel",
+            "brand": "Brand X",
+            "address": "Via Roma 1",
+            "station_type": "Stradale",
+            "latitude": 41.902782,
+            "longitude": 12.496366,
+        },
+        "opening_hours": [
+            {
+                "giornoSettimanaId": 1,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            }
+        ],
+        "services": [{"id": 1}, "8"],
+    }
+
+
+class TestEntitySetupRegression:
+    def test_setup_entry_creates_expected_entities_and_unique_ids(self):
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            data={CONF_STATION_ID: "12345"},
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
+        added_entities = []
+
+        def _add_entities(entities, update_before_add=False):
+            added_entities.extend(entities)
+            assert update_before_add is True
+
+        asyncio.run(async_setup_entry(hass, entry, _add_entities))
+
+        unique_ids = {entity._attr_unique_id for entity in added_entities}
+        assert {
+            "12345_gasolio_self",
+            "12345_benzina_servito",
+            "12345_name",
+            "12345_nomeImpianto",
+            "12345_id",
+            "12345_brand",
+            "12345_location",
+            "12345_open_closed",
+            "12345_next_change",
+            "12345_service_1",
+            "12345_service_8",
+        } <= unique_ids
+        assert sum(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities) == 2
+        assert any(isinstance(entity, StationLocationSensor) for entity in added_entities)
+        assert any(isinstance(entity, StationOpenClosedBinarySensor) for entity in added_entities)
+        assert sum(isinstance(entity, StationServiceBinarySensor) for entity in added_entities) == 2
+
+    def test_price_sensor_keeps_state_and_attributes_contract(self):
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = OsservaprezziStationSensor(coordinator, entry, "gasolio_self")
+
+        assert entity._attr_unique_id == "12345_gasolio_self"
+        assert entity._attr_has_entity_name is True
+        assert entity.native_value == 1.701
+        assert entity.extra_state_attributes["fuel_type_name"] == "Gasolio"
+        assert entity.extra_state_attributes["is_self_service"] is True
+        assert entity.extra_state_attributes["station_brand"] == "Brand X"
+        assert entity.device_info["identifiers"] == {(DOMAIN, "12345")}
+        assert entity.device_info["name"] == "Alpha Fuel"
+
+    def test_service_entity_uses_translation_for_known_service(self):
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = StationServiceBinarySensor(
+            coordinator,
+            entry,
+            "8",
+            {
+                "name": "Wi-Fi",
+                "icon": "mdi:wifi",
+                "description": "Wireless",
+                "image_url": "https://example.test/8.gif",
+            },
+        )
+
+        assert entity._attr_unique_id == "12345_service_8"
+        assert entity._attr_has_entity_name is True
+        assert entity._attr_translation_key == "wifi"
+        assert not hasattr(entity, "_attr_name")
+        assert entity.is_on is True
+
+    def test_service_entity_falls_back_to_name_for_unknown_service(self):
+        coordinator = SimpleNamespace(data={"services": ["99"], "station_info": {}}, hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = StationServiceBinarySensor(
+            coordinator,
+            entry,
+            "99",
+            {
+                "name": "Custom Service",
+                "icon": "mdi:star",
+                "description": "Custom upstream service",
+                "image_url": "https://example.test/99.gif",
+            },
+        )
+
+        assert entity._attr_translation_key is None
+        assert entity._attr_name == "Custom Service"
+        assert entity.is_on is True
+
+    @pytest.mark.parametrize("entity_cls", [StationOpenClosedBinarySensor, StationNextChangeSensor])
+    def test_schedule_tick_uses_thread_safe_state_update(self, entity_cls):
+        entity = entity_cls.__new__(entity_cls)
+        calls = []
+
+        def _schedule_update_ha_state():
+            calls.append("scheduled")
+
+        entity.schedule_update_ha_state = _schedule_update_ha_state
+
+        entity._handle_time_tick(datetime(2026, 6, 1, 12, 0))
+
+        assert calls == ["scheduled"]
 
 
 class TestParseTime:

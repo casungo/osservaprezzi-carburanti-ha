@@ -29,8 +29,16 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 _SERVICES_REGISTERED = f"{DOMAIN}_services_registered"
 
 
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up integration-level services."""
+    _async_register_services(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Osservaprezzi Carburanti from a config entry."""
+    _async_register_services(hass)
+
     coordinator = CarburantiDataUpdateCoordinator(hass, entry)
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -79,8 +87,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         return False
 
-    _async_register_services(hass)
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
@@ -104,19 +110,39 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_force_csv_update(call: ServiceCall) -> None:
         _LOGGER.info("Service force_csv_update triggered")
-        for entry_id, coordinator in _iter_coordinators():
-            success = await coordinator.async_force_csv_update()
-            if success:
-                await coordinator.async_request_refresh()
-                _LOGGER.info("CSV update and refresh completed for entry %s", entry_id)
-            else:
-                _LOGGER.warning("CSV update failed for entry %s", entry_id)
+        coordinators = _iter_coordinators()
+        if not coordinators:
+            return
+
+        entry_id, primary_coordinator = coordinators[0]
+        success = await primary_coordinator.async_force_csv_update()
+        if not success:
+            _LOGGER.warning("CSV update failed for entry %s", entry_id)
+            return
+
+        for _, coordinator in coordinators[1:]:
+            await coordinator.csv_manager.async_load_cached_data()
+
+        for entry_id, coordinator in coordinators:
+            await coordinator.async_request_refresh()
+            _LOGGER.info("CSV update and refresh completed for entry %s", entry_id)
 
     async def _handle_clear_cache(call: ServiceCall) -> None:
         _LOGGER.info("Service clear_cache triggered")
-        for entry_id, coordinator in _iter_coordinators():
-            await coordinator.csv_manager.async_clear_cache()
-            await coordinator.csv_manager.async_initialize()
+        coordinators = _iter_coordinators()
+        if not coordinators:
+            return
+
+        _, primary_coordinator = coordinators[0]
+        await primary_coordinator.csv_manager.async_clear_cache()
+        if not await primary_coordinator.csv_manager.async_initialize():
+            _LOGGER.warning("Cache cleared but CSV re-initialization failed")
+
+        for _, coordinator in coordinators[1:]:
+            if not await coordinator.csv_manager.async_load_cached_data():
+                await coordinator.csv_manager.async_initialize()
+
+        for entry_id, coordinator in coordinators:
             await coordinator.async_request_refresh()
             _LOGGER.info("Cache cleared and re-initialized for entry %s", entry_id)
 

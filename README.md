@@ -170,6 +170,22 @@ group:
   - by: attributes.fuel_type_name
 ```
 
+## Local Regression Tests
+
+Run the automated unit regression suite with:
+
+```bash
+python -m pytest -q
+```
+
+If Docker Desktop is running locally, you can also run a Home Assistant smoke regression against the official Home Assistant container:
+
+```bash
+python scripts/ha_docker_regression.py --timeout 240
+```
+
+The Docker regression is intended for local validation only and is not part of the GitHub Actions workflow.
+
 ## 📞 Support
 
 For issues or suggestions, open an issue on GitHub.

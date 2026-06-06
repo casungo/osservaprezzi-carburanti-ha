@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,6 +19,10 @@ def csv_manager():
     hass = MagicMock()
     hass.config.path.return_value = "/tmp/test_storage"
     return CSVStationManager(hass)
+
+
+async def _run_in_executor(func, *args):
+    return func(*args)
 
 
 PIPE_CSV_LINES = [
@@ -49,6 +54,17 @@ class TestCSVParsing:
         assert len(csv_manager._stations_cache) == 2
         assert "12345" in csv_manager._stations_cache
         assert "67890" in csv_manager._stations_cache
+
+    def test_parse_lines_to_cache_does_not_mutate_manager_state(self, csv_manager):
+        csv_manager._detected_separator = ";"
+
+        success, separator, stations_cache = csv_manager._parse_csv_lines_to_cache(PIPE_CSV_LINES)
+
+        assert success is True
+        assert separator == "|"
+        assert "12345" in stations_cache
+        assert csv_manager._detected_separator == ";"
+        assert csv_manager._stations_cache == {}
 
     def test_parse_semicolon_separated(self, csv_manager):
         result = csv_manager._parse_csv_lines(SEMICOLON_CSV_LINES)
@@ -115,9 +131,6 @@ class TestCSVParsing:
         hass = MagicMock()
         hass.config.path.return_value = str(tmp_path / "unused")
 
-        async def _run_in_executor(func, *args):
-            return func(*args)
-
         hass.async_add_executor_job.side_effect = _run_in_executor
 
         csv_manager = CSVStationManager(hass)
@@ -174,3 +187,74 @@ class TestCSVCacheValidation:
         assert result is True
         assert csv_manager._csv_etag == '"abc123"'
         assert csv_manager._csv_last_modified == "Wed, 01 Jan 2025 00:00:00 GMT"
+
+    def test_outdated_cache_does_not_replace_existing_memory_state(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+
+        csv_manager = CSVStationManager(hass)
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        csv_manager._stations_cache = {"existing": {"id": "existing"}}
+        csv_manager._detected_separator = ";"
+
+        cache_payload = {
+            "stations": {"12345": {"id": "12345"}},
+            "last_update": "2025-01-15T10:00:00+00:00",
+            "version": "1.0",
+            "csv_separator": "|",
+        }
+        (tmp_path / "cache.json").write_text(json.dumps(cache_payload), encoding="utf-8")
+
+        result = asyncio.run(csv_manager.async_load_cached_data())
+
+        assert result is False
+        assert csv_manager._stations_cache == {"existing": {"id": "existing"}}
+        assert csv_manager._detected_separator == ";"
+
+    def test_save_cached_data_preserves_station_and_http_metadata(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+
+        csv_manager = CSVStationManager(hass)
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        csv_manager._stations_cache = {"12345": {"id": "12345", "name": "Station Alpha"}}
+        csv_manager._last_update = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
+        csv_manager._detected_separator = ";"
+        csv_manager._csv_etag = '"abc123"'
+        csv_manager._csv_last_modified = "Wed, 01 Jan 2025 00:00:00 GMT"
+
+        result = asyncio.run(csv_manager.async_save_cached_data())
+
+        assert result is True
+        saved = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+        assert saved["stations"] == {"12345": {"id": "12345", "name": "Station Alpha"}}
+        assert saved["last_update"] == "2026-06-01T08:30:00+00:00"
+        assert saved["version"] == "2.0"
+        assert saved["csv_separator"] == ";"
+        assert saved["csv_etag"] == '"abc123"'
+        assert saved["csv_last_modified"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+
+    def test_clear_cache_removes_files_and_resets_memory_metadata(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+
+        csv_manager = CSVStationManager(hass)
+        csv_manager._csv_path = str(tmp_path / "stations.csv")
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        csv_manager._stations_cache = {"12345": {"id": "12345"}}
+        csv_manager._last_update = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
+        csv_manager._csv_etag = '"abc123"'
+        csv_manager._csv_last_modified = "Wed, 01 Jan 2025 00:00:00 GMT"
+        (tmp_path / "stations.csv").write_text("csv", encoding="utf-8")
+        (tmp_path / "cache.json").write_text("{}", encoding="utf-8")
+
+        result = asyncio.run(csv_manager.async_clear_cache())
+
+        assert result is True
+        assert csv_manager._stations_cache == {}
+        assert csv_manager._last_update is None
+        assert csv_manager._csv_etag is None
+        assert csv_manager._csv_last_modified is None
+        assert not (tmp_path / "stations.csv").exists()
+        assert not (tmp_path / "cache.json").exists()

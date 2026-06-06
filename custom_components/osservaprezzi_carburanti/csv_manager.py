@@ -23,6 +23,7 @@ from .const import CSV_UPDATE_INTERVAL, CSV_URL, DEFAULT_HEADERS, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 CACHE_VERSION = "2.0"
+_CSV_IO_LOCK = asyncio.Lock()
 
 CSV_COLUMNS = {
     "idImpianto": "id",
@@ -55,6 +56,22 @@ def _replace_file_sync(source_path: str, destination_path: str) -> None:
     os.replace(source_path, destination_path)
 
 
+def _create_temp_file_sync(directory: str, prefix: str) -> str:
+    """Create a temporary file and return its path."""
+    temp_file = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        newline="",
+        delete=False,
+        dir=directory,
+        prefix=prefix,
+        suffix=".tmp",
+    )
+    temp_path = temp_file.name
+    temp_file.close()
+    return temp_path
+
+
 class CSVStationManager:
     """Manager for CSV station data."""
 
@@ -75,67 +92,69 @@ class CSVStationManager:
         old_csv = self.hass.config.path("osservaprezzi_stations.csv")
         old_cache = self.hass.config.path("osservaprezzi_cache.json")
 
-        for old_path, new_path in ((old_csv, self._csv_path), (old_cache, self._cache_path)):
-            old_exists = await self.hass.async_add_executor_job(os.path.exists, old_path)
-            if not old_exists:
-                continue
+        async with _CSV_IO_LOCK:
+            for old_path, new_path in ((old_csv, self._csv_path), (old_cache, self._cache_path)):
+                old_exists = await self.hass.async_add_executor_job(os.path.exists, old_path)
+                if not old_exists:
+                    continue
 
-            new_exists = await self.hass.async_add_executor_job(os.path.exists, new_path)
-            if new_exists:
-                continue
+                new_exists = await self.hass.async_add_executor_job(os.path.exists, new_path)
+                if new_exists:
+                    continue
 
-            try:
-                await self.hass.async_add_executor_job(shutil.move, old_path, new_path)
-                _LOGGER.info("Migrated legacy file: %s -> %s", old_path, new_path)
-            except OSError as err:
-                _LOGGER.warning("Failed to migrate %s: %s", old_path, err)
+                try:
+                    await self.hass.async_add_executor_job(shutil.move, old_path, new_path)
+                    _LOGGER.info("Migrated legacy file: %s -> %s", old_path, new_path)
+                except OSError as err:
+                    _LOGGER.warning("Failed to migrate %s: %s", old_path, err)
 
     async def async_update_csv_data(self, force_update: bool = False) -> bool:
         """Update CSV data from the remote source."""
-        now = dt_util.now()
-        if (
-            not force_update
-            and self._last_update
-            and now - self._last_update < timedelta(hours=CSV_UPDATE_INTERVAL)
-        ):
-            _LOGGER.debug("CSV data is recent, skipping update")
-            return True
+        async with _CSV_IO_LOCK:
+            now = dt_util.now()
+            if (
+                not force_update
+                and self._last_update
+                and now - self._last_update < timedelta(hours=CSV_UPDATE_INTERVAL)
+            ):
+                _LOGGER.debug("CSV data is recent, skipping update")
+                return True
 
-        try:
-            _LOGGER.info("Downloading station data from CSV: %s", CSV_URL)
-            headers = self._build_csv_request_headers(force_update)
+            try:
+                _LOGGER.info("Downloading station data from CSV: %s", CSV_URL)
+                headers = self._build_csv_request_headers(force_update)
 
-            async with self.session.get(
-                CSV_URL,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as response:
-                if response.status == 304:
-                    self._last_update = now
-                    _LOGGER.debug("CSV not modified, keeping cached station data")
-                    return True
+                async with self.session.get(
+                    CSV_URL,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 304:
+                        self._last_update = now
+                        _LOGGER.debug("CSV not modified, keeping cached station data")
+                        return True
 
-                if response.status != 200:
-                    _LOGGER.error("Failed to download CSV: HTTP %s", response.status)
+                    if response.status != 200:
+                        _LOGGER.error("Failed to download CSV: HTTP %s", response.status)
+                        return False
+
+                    content = await response.text()
+                    await self._async_write_csv_file(content)
+                    self._csv_etag = response.headers.get("ETag")
+                    self._csv_last_modified = response.headers.get("Last-Modified")
+
+                success = await self._parse_csv_data_from_file()
+                if not success:
+                    _LOGGER.error("Failed to parse CSV data")
                     return False
 
-                content = await response.text()
-                await self._async_write_csv_file(content)
-                self._csv_etag = response.headers.get("ETag")
-                self._csv_last_modified = response.headers.get("Last-Modified")
+                self._last_update = now
+                _LOGGER.info("Successfully updated CSV station data")
+                return True
 
-            success = await self._parse_csv_data_from_file()
-            if not success:
-                _LOGGER.error("Failed to parse CSV data")
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as err:
+                _LOGGER.error("Error updating CSV data: %s", err)
                 return False
-
-            self._last_update = now
-            _LOGGER.info("Successfully updated CSV station data")
-            return True
-
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as err:
-            _LOGGER.error("Error updating CSV data: %s", err)
-            return False
 
     def _build_csv_request_headers(self, force_update: bool) -> dict[str, str]:
         """Build request headers for the CSV download."""
@@ -152,17 +171,11 @@ class CSVStationManager:
 
     async def _async_write_csv_file(self, content: str) -> None:
         """Write the downloaded CSV atomically to disk."""
-        temp_file = tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="",
-            delete=False,
-            dir=os.path.dirname(self._csv_path),
+        temp_path = await asyncio.to_thread(
+            _create_temp_file_sync,
+            os.path.dirname(self._csv_path),
             prefix=f"{DOMAIN}_stations_",
-            suffix=".tmp",
         )
-        temp_path = temp_file.name
-        temp_file.close()
 
         try:
             await asyncio.to_thread(_write_file_sync, temp_path, content)
@@ -242,11 +255,22 @@ class CSVStationManager:
 
     def _parse_csv_lines(self, lines: list[str]) -> bool:
         """Parse CSV lines and populate station cache."""
+        success, separator, stations_cache = self._parse_csv_lines_to_cache(lines)
+        if success:
+            self._detected_separator = separator
+            self._stations_cache = stations_cache
+        return success
+
+    def _parse_csv_lines_to_cache(
+        self,
+        lines: list[str],
+    ) -> tuple[bool, str, dict[str, dict[str, Any]]]:
+        """Parse CSV lines into a station cache without mutating manager state."""
         if len(lines) < 3:
             _LOGGER.error("CSV file has insufficient data")
-            return False
+            return False, self._detected_separator, {}
 
-        separator = self._detect_separator(lines[1])
+        separator = self._get_separator(lines[1])
         col_indices = self._build_column_indices(lines[1], separator)
         stations_cache: dict[str, dict[str, Any]] = {}
 
@@ -261,9 +285,26 @@ class CSVStationManager:
             except (IndexError, TypeError, ValueError) as err:
                 _LOGGER.warning("Error parsing CSV line %d: %s", line_num, err)
 
-        self._stations_cache = stations_cache
         _LOGGER.info("Parsed %d stations from CSV", len(stations_cache))
-        return True
+        return True, separator, stations_cache
+
+    @staticmethod
+    def _get_separator(header_line: str) -> str:
+        """Return the detected CSV separator without mutating manager state."""
+        pipe_count = header_line.count("|")
+        semicolon_count = header_line.count(";")
+
+        if pipe_count > semicolon_count:
+            separator = "|"
+            _LOGGER.debug("Detected pipe (|) separator in CSV file")
+        elif semicolon_count > pipe_count:
+            separator = ";"
+            _LOGGER.debug("Detected semicolon (;) separator in CSV file")
+        else:
+            separator = "|"
+            _LOGGER.debug("Separator count equal or none detected, defaulting to pipe (|)")
+
+        return separator
 
     @staticmethod
     def _parse_coordinate(value: str) -> float | None:
@@ -278,16 +319,16 @@ class CSVStationManager:
 
     async def _parse_csv_data_from_file(self) -> bool:
         """Parse CSV from disk and populate station cache."""
-        def _read_and_parse_streaming() -> bool:
+        def _read_and_parse_streaming() -> tuple[bool, str, dict[str, dict[str, Any]]]:
             try:
                 with open(self._csv_path, "r", encoding="utf-8") as file_handle:
                     next(file_handle, None)
                     header_line = next(file_handle, None)
                     if header_line is None:
                         _LOGGER.error("CSV file has insufficient data")
-                        return False
+                        return False, self._detected_separator, {}
 
-                    separator = self._detect_separator(header_line.rstrip("\n"))
+                    separator = self._get_separator(header_line.rstrip("\n"))
                     col_indices = self._build_column_indices(header_line.rstrip("\n"), separator)
                     stations_cache: dict[str, dict[str, Any]] = {}
 
@@ -302,50 +343,56 @@ class CSVStationManager:
                         except (IndexError, TypeError, ValueError) as err:
                             _LOGGER.warning("Error parsing CSV line %d: %s", line_num, err)
 
-                    self._stations_cache = stations_cache
                     _LOGGER.info("Parsed %d stations from CSV", len(stations_cache))
-                    return True
+                    return True, separator, stations_cache
             except OSError as err:
                 _LOGGER.error("Error reading CSV data from disk: %s", err)
-                return False
+                return False, self._detected_separator, {}
 
-        return await self.hass.async_add_executor_job(_read_and_parse_streaming)
+        success, separator, stations_cache = await self.hass.async_add_executor_job(
+            _read_and_parse_streaming
+        )
+        if success:
+            self._detected_separator = separator
+            self._stations_cache = stations_cache
+        return success
 
     async def async_load_cached_data(self) -> bool:
         """Load cached station data from local file."""
-        try:
-            _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
-            content = await asyncio.to_thread(_read_file_sync, self._cache_path)
-            data = json.loads(content)
+        async with _CSV_IO_LOCK:
+            try:
+                _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
+                content = await asyncio.to_thread(_read_file_sync, self._cache_path)
+                data = json.loads(content)
 
-            cache_version = data.get("version", "1.0")
-            if cache_version != CACHE_VERSION:
+                cache_version = data.get("version", "1.0")
+                if cache_version != CACHE_VERSION:
+                    _LOGGER.info(
+                        "Cache version %s is outdated (expected %s), forcing update",
+                        cache_version,
+                        CACHE_VERSION,
+                    )
+                    return False
+
+                self._stations_cache = data.get("stations", {})
+                self._last_update = self._parse_cached_datetime(data.get("last_update"))
+                self._detected_separator = data.get("csv_separator", "|")
+                self._csv_etag = data.get("csv_etag")
+                self._csv_last_modified = data.get("csv_last_modified")
                 _LOGGER.info(
-                    "Cache version %s is outdated (expected %s), forcing update",
+                    "Loaded %d stations from cache (version %s, separator: %s)",
+                    len(self._stations_cache),
                     cache_version,
-                    CACHE_VERSION,
+                    self._detected_separator,
                 )
+                return True
+
+            except FileNotFoundError:
+                _LOGGER.info("No cached data found, will download from CSV")
                 return False
-
-            self._stations_cache = data.get("stations", {})
-            self._last_update = self._parse_cached_datetime(data.get("last_update"))
-            self._detected_separator = data.get("csv_separator", "|")
-            self._csv_etag = data.get("csv_etag")
-            self._csv_last_modified = data.get("csv_last_modified")
-            _LOGGER.info(
-                "Loaded %d stations from cache (version %s, separator: %s)",
-                len(self._stations_cache),
-                cache_version,
-                self._detected_separator,
-            )
-            return True
-
-        except FileNotFoundError:
-            _LOGGER.info("No cached data found, will download from CSV")
-            return False
-        except (json.JSONDecodeError, OSError, TypeError, ValueError) as err:
-            _LOGGER.error("Error loading cached data: %s", err)
-            return False
+            except (json.JSONDecodeError, OSError, TypeError, ValueError) as err:
+                _LOGGER.error("Error loading cached data: %s", err)
+                return False
 
     def _parse_cached_datetime(self, value: str | None) -> datetime | None:
         """Parse the cached last update datetime."""
@@ -367,27 +414,28 @@ class CSVStationManager:
 
     async def async_save_cached_data(self) -> bool:
         """Save station data to local cache file."""
-        try:
-            data = {
-                "stations": self._stations_cache,
-                "last_update": self._last_update.isoformat() if self._last_update else None,
-                "version": CACHE_VERSION,
-                "csv_separator": self._detected_separator,
-                "csv_etag": self._csv_etag,
-                "csv_last_modified": self._csv_last_modified,
-            }
-            content = json.dumps(data, ensure_ascii=False, indent=2)
-            await asyncio.to_thread(_write_file_sync, self._cache_path, content)
-            _LOGGER.debug(
-                "Saved station data to cache (version %s, separator: %s)",
-                CACHE_VERSION,
-                self._detected_separator,
-            )
-            return True
+        async with _CSV_IO_LOCK:
+            try:
+                data = {
+                    "stations": self._stations_cache,
+                    "last_update": self._last_update.isoformat() if self._last_update else None,
+                    "version": CACHE_VERSION,
+                    "csv_separator": self._detected_separator,
+                    "csv_etag": self._csv_etag,
+                    "csv_last_modified": self._csv_last_modified,
+                }
+                content = json.dumps(data, ensure_ascii=False, indent=2)
+                await asyncio.to_thread(_write_file_sync, self._cache_path, content)
+                _LOGGER.debug(
+                    "Saved station data to cache (version %s, separator: %s)",
+                    CACHE_VERSION,
+                    self._detected_separator,
+                )
+                return True
 
-        except (OSError, TypeError, ValueError) as err:
-            _LOGGER.error("Error saving cached data: %s", err)
-            return False
+            except (OSError, TypeError, ValueError) as err:
+                _LOGGER.error("Error saving cached data: %s", err)
+                return False
 
     def get_station_by_id(self, station_id: str) -> dict[str, Any] | None:
         """Get station data by ID."""
@@ -439,21 +487,22 @@ class CSVStationManager:
 
     async def async_clear_cache(self) -> bool:
         """Clear the CSV cache files and in-memory data."""
-        try:
-            self._stations_cache.clear()
-            self._last_update = None
-            self._csv_etag = None
-            self._csv_last_modified = None
+        async with _CSV_IO_LOCK:
+            try:
+                self._stations_cache.clear()
+                self._last_update = None
+                self._csv_etag = None
+                self._csv_last_modified = None
 
-            for file_path in (self._cache_path, self._csv_path):
-                exists = await self.hass.async_add_executor_job(os.path.exists, file_path)
-                if exists:
-                    await self.hass.async_add_executor_job(os.remove, file_path)
-                    _LOGGER.info("Removed cache file: %s", file_path)
+                for file_path in (self._cache_path, self._csv_path):
+                    exists = await self.hass.async_add_executor_job(os.path.exists, file_path)
+                    if exists:
+                        await self.hass.async_add_executor_job(os.remove, file_path)
+                        _LOGGER.info("Removed cache file: %s", file_path)
 
-            _LOGGER.info("CSV cache cleared successfully")
-            return True
+                _LOGGER.info("CSV cache cleared successfully")
+                return True
 
-        except OSError as err:
-            _LOGGER.error("Error clearing CSV cache: %s", err)
-            return False
+            except OSError as err:
+                _LOGGER.error("Error clearing CSV cache: %s", err)
+                return False

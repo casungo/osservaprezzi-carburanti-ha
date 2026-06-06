@@ -283,9 +283,9 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
             self._time_listener = None
         await super().async_will_remove_from_hass()
 
-    @staticmethod
-    def _handle_time_tick(_: datetime) -> None:
-        """Placeholder overridden by subclasses."""
+    def _handle_time_tick(self, _: datetime) -> None:
+        """Refresh state as time passes even when prices do not change."""
+        self.schedule_update_ha_state()
 
 
 class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
@@ -440,10 +440,6 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
     def available(self) -> bool:
         """Return True if schedule data is available."""
         return _has_valid_opening_hours(self.coordinator.data)
-
-    def _handle_time_tick(self, _: datetime) -> None:
-        """Refresh state as time passes even when prices do not change."""
-        self.async_write_ha_state()
 
 
 class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
@@ -611,10 +607,6 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
     def available(self) -> bool:
         """Return True if schedule data is available."""
         return _has_valid_opening_hours(self.coordinator.data)
-
-    def _handle_time_tick(self, _: datetime) -> None:
-        """Refresh state as time passes even when prices do not change."""
-        self.async_write_ha_state()
 
 
 class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):

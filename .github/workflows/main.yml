@@ -13,27 +13,91 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install test dependencies
         run: python -m pip install -r requirements-test.txt
+
       - name: Run tests
         run: python -m pytest -q
 
-  validate-hacs:
+      - name: Run coverage
+        run: python -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
+
+      - name: Enforce 100% coverage
+        run: python -m coverage report --fail-under=100
+
+  static:
     runs-on: ubuntu-latest
     steps:
-      - name: HACS validation
-        uses: hacs/action@22.5.0
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          category: "integration" # o plugin/theme/appdaemon/python_script/template
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Run mypy
+        run: python -m mypy
 
   hassfest:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
+
       - name: Validate with hassfest
         uses: home-assistant/actions/hassfest@master
+
+  validate-hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: HACS validation
+        uses: hacs/action@22.5.0
+        with:
+          category: integration
+
+  home-assistant-docker:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Run real Home Assistant Docker regression
+        run: python scripts/ha_docker_regression.py
+
+  live-api-contract:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Run live upstream contract
+        env:
+          OSSERVAPREZZI_LIVE_API: "1"
+        run: python -m pytest tests/test_live_api_contract.py -q

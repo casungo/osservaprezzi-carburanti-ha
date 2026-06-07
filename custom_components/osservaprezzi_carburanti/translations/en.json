@@ -22,14 +22,14 @@
     "step": {
       "init": {
         "title": "Osservaprezzi Carburanti Options",
-        "description": "Configure integration options.\n\nYou can use https://crontab.guru to help build and validate cron expressions.",
+        "description": "Configure integration options.\n\nUse a standard five-field cron expression such as 30 7 * * *.",
         "data": {
           "cron_expression": "Cron expression"
         }
       }
     },
     "error": {
-      "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30). Visit https://crontab.guru for help building valid expressions."
+      "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30)."
     }
   },
   "entity": {
@@ -84,48 +84,37 @@
         }
       },
       "food_beverage": {
-        "name": "Food & Beverage",
-        "description": "Bar, restaurant or refreshment point"
+        "name": "Food & Beverage"
       },
       "workshop": {
-        "name": "Workshop",
-        "description": "Repair and maintenance service"
+        "name": "Workshop"
       },
       "parking": {
-        "name": "Camper/Truck Parking",
-        "description": "Parking area for campers and trucks"
+        "name": "Camper/Truck Parking"
       },
       "dump_station": {
-        "name": "Camper Dump Station",
-        "description": "Black or gray water dump point"
+        "name": "Camper Dump Station"
       },
       "playground": {
-        "name": "Children's Area",
-        "description": "Playground for children"
+        "name": "Children's Area"
       },
       "atm": {
-        "name": "ATM",
-        "description": "Automatic teller machine"
+        "name": "ATM"
       },
       "disabled_access": {
-        "name": "Disabled Services",
-        "description": "Services accessible for disabled people"
+        "name": "Disabled Services"
       },
       "wifi": {
-        "name": "Wi-Fi",
-        "description": "Free or paid Wi-Fi connection"
+        "name": "Wi-Fi"
       },
       "tire_service": {
-        "name": "Tire Service",
-        "description": "Tire and tire service"
+        "name": "Tire Service"
       },
       "car_wash": {
-        "name": "Car Wash",
-        "description": "Car washing service"
+        "name": "Car Wash"
       },
       "ev_charging": {
-        "name": "EV Charging",
-        "description": "Charging stations for electric vehicles"
+        "name": "EV Charging"
       }
     }
   },

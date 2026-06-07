@@ -6,28 +6,28 @@ import sys
 from datetime import date, datetime, time
 from types import SimpleNamespace
 
-import pytest
-
-
 sys.path.insert(0, ".")
 
-from custom_components.osservaprezzi_carburanti.sensor import (
+from custom_components.osservaprezzi_carburanti.entity import (
     _compute_easter,
     _find_schedule_for_day,
     _get_available_service_ids,
-    _get_fuel_icon,
     _has_valid_opening_hours,
     _is_italian_holiday,
     _is_schedule_open,
     _parse_time,
     HOLIDAY_SCHEDULE_ID,
+)
+from custom_components.osservaprezzi_carburanti.sensor import (
+    _get_fuel_icon,
     OsservaprezziStationSensor,
     StationLocationSensor,
+    StationInfoSensor,
     StationNextChangeSensor,
-    StationOpenClosedBinarySensor,
-    StationServiceBinarySensor,
     async_setup_entry,
 )
+from custom_components.osservaprezzi_carburanti import entity as entity_module
+from custom_components.osservaprezzi_carburanti import sensor as sensor_module
 from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
 
 
@@ -66,7 +66,7 @@ def _sample_station_data():
 
 
 class TestEntitySetupRegression:
-    def test_setup_entry_creates_expected_entities_and_unique_ids(self):
+    def test_setup_entry_creates_only_sensor_entities_and_unique_ids(self):
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
         entry = SimpleNamespace(
             entry_id="entry_1",
@@ -90,15 +90,13 @@ class TestEntitySetupRegression:
             "12345_id",
             "12345_brand",
             "12345_location",
-            "12345_open_closed",
             "12345_next_change",
-            "12345_service_1",
-            "12345_service_8",
         } <= unique_ids
+        assert "12345_open_closed" not in unique_ids
+        assert "12345_service_1" not in unique_ids
+        assert "12345_service_8" not in unique_ids
         assert sum(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities) == 2
         assert any(isinstance(entity, StationLocationSensor) for entity in added_entities)
-        assert any(isinstance(entity, StationOpenClosedBinarySensor) for entity in added_entities)
-        assert sum(isinstance(entity, StationServiceBinarySensor) for entity in added_entities) == 2
 
     def test_price_sensor_keeps_state_and_attributes_contract(self):
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
@@ -115,51 +113,55 @@ class TestEntitySetupRegression:
         assert entity.device_info["identifiers"] == {(DOMAIN, "12345")}
         assert entity.device_info["name"] == "Alpha Fuel"
 
-    def test_service_entity_uses_translation_for_known_service(self):
+    def test_base_entity_falls_back_to_station_id_for_device_name(self):
+        coordinator = SimpleNamespace(data={"station_info": {}}, hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = StationLocationSensor(coordinator, entry)
+
+        assert entity.device_info["name"] == "12345"
+        assert entity.device_info["model"] == "Fuel Station"
+
+    def test_price_sensor_handles_missing_data_and_unknown_fuel(self):
+        coordinator = SimpleNamespace(data=None, hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+        entity = OsservaprezziStationSensor(coordinator, entry, "gpl_self")
+
+        assert entity.native_value is None
+        assert entity.extra_state_attributes == {}
+
+        coordinator.data = {"fuels": {}, "station_info": {}}
+        assert entity.extra_state_attributes == {}
+
+    def test_info_and_location_sensor_properties(self):
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+        info = StationInfoSensor(coordinator, entry, "brand", "Marchio", "mdi:tag")
+        location = StationLocationSensor(coordinator, entry)
 
-        entity = StationServiceBinarySensor(
-            coordinator,
-            entry,
-            "8",
-            {
-                "name": "Wi-Fi",
-                "icon": "mdi:wifi",
-                "description": "Wireless",
-                "image_url": "https://example.test/8.gif",
-            },
+        assert info._attr_name == "Marchio"
+        assert not hasattr(info, "_attr_translation_key")
+        assert info.native_value == "Brand X"
+        assert location._attr_name == "Posizione"
+        assert not hasattr(location, "_attr_translation_key")
+        assert location.native_value == "Via Roma 1"
+        assert location.available is True
+        assert location.extra_state_attributes["latitude"] == 41.902782
+
+    def test_location_sensor_unavailable_without_coordinates(self):
+        coordinator = SimpleNamespace(
+            data={"station_info": {"name": "Station"}},
+            hass=SimpleNamespace(),
         )
-
-        assert entity._attr_unique_id == "12345_service_8"
-        assert entity._attr_has_entity_name is True
-        assert entity._attr_translation_key == "wifi"
-        assert not hasattr(entity, "_attr_name")
-        assert entity.is_on is True
-
-    def test_service_entity_falls_back_to_name_for_unknown_service(self):
-        coordinator = SimpleNamespace(data={"services": ["99"], "station_info": {}}, hass=SimpleNamespace())
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
 
-        entity = StationServiceBinarySensor(
-            coordinator,
-            entry,
-            "99",
-            {
-                "name": "Custom Service",
-                "icon": "mdi:star",
-                "description": "Custom upstream service",
-                "image_url": "https://example.test/99.gif",
-            },
-        )
+        entity = StationLocationSensor(coordinator, entry)
 
-        assert entity._attr_translation_key is None
-        assert entity._attr_name == "Custom Service"
-        assert entity.is_on is True
+        assert entity.native_value == "Station"
+        assert entity.available is False
 
-    @pytest.mark.parametrize("entity_cls", [StationOpenClosedBinarySensor, StationNextChangeSensor])
-    def test_schedule_tick_uses_thread_safe_state_update(self, entity_cls):
-        entity = entity_cls.__new__(entity_cls)
+    def test_schedule_tick_uses_thread_safe_state_update(self):
+        entity = StationNextChangeSensor.__new__(StationNextChangeSensor)
         calls = []
 
         def _schedule_update_ha_state():
@@ -170,6 +172,25 @@ class TestEntitySetupRegression:
         entity._handle_time_tick(datetime(2026, 6, 1, 12, 0))
 
         assert calls == ["scheduled"]
+
+    def test_schedule_entity_registers_and_removes_timer(self, monkeypatch):
+        listener = lambda: calls.append("removed")
+        calls = []
+
+        def fake_track_time_interval(hass, callback, interval):
+            calls.append((hass, callback, interval))
+            return listener
+
+        monkeypatch.setattr(entity_module, "async_track_time_interval", fake_track_time_interval)
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass="hass")
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+        entity = StationNextChangeSensor(coordinator, entry)
+
+        asyncio.run(entity.async_added_to_hass())
+        assert entity._time_listener is listener
+        asyncio.run(entity.async_will_remove_from_hass())
+        assert entity._time_listener is None
+        assert calls[-1] == "removed"
 
 
 class TestParseTime:
@@ -330,6 +351,9 @@ class TestIsScheduleOpen:
         }
         assert _is_schedule_open(schedule, time(15, 0)) is False
 
+    def test_continuous_hours_missing_time_is_closed(self):
+        assert _is_schedule_open({"flagOrarioContinuato": True}, time(12, 0)) is False
+
 
 class TestFindScheduleForDay:
     def test_finds_regular_weekday(self):
@@ -419,6 +443,14 @@ class TestHasValidOpeningHours:
             "opening_hours": [{}]
         }) is False
 
+    def test_continuous_hours_missing_close_is_not_valid(self):
+        assert _has_valid_opening_hours({
+            "opening_hours": [{
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+            }]
+        }) is False
+
 
 class TestGetFuelIcon:
     def test_benzina(self):
@@ -482,3 +514,170 @@ class TestNextChangeH24:
 
         assert change_type == "always_open"
         assert change_time is None
+
+
+class TestNextChangeSensor:
+    def _sensor(self, opening_hours):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": opening_hours})
+        return sensor
+
+    def test_no_schedule(self):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        sensor.coordinator = SimpleNamespace(data={})
+
+        assert sensor._compute_next_change() == ("no_schedule", None)
+        assert sensor.native_value == "no_schedule"
+        assert sensor.extra_state_attributes == {
+            "change_type": "no_schedule",
+            "next_change_time": None,
+        }
+
+    def test_currently_open_continuous_closes_today(self, monkeypatch):
+        sensor = self._sensor([
+            {
+                "giornoSettimanaId": 1,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            }
+        ])
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 12, 0))
+
+        assert sensor._compute_next_change() == ("closes_at", datetime(2025, 3, 17, 20, 0))
+        assert sensor.native_value == "20:00"
+        assert sensor.extra_state_attributes["minutes_until_change"] == 480
+        assert sensor.available is True
+
+    def test_currently_open_split_closes_next_period(self, monkeypatch):
+        sensor = self._sensor([
+            {
+                "giornoSettimanaId": 1,
+                "oraAperturaMattina": "08:00",
+                "oraChiusuraMattina": "12:00",
+                "oraAperturaPomeriggio": "15:00",
+                "oraChiusuraPomeriggio": "19:00",
+            }
+        ])
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 16, 0))
+
+        assert sensor._compute_next_change() == ("closes_at", datetime(2025, 3, 17, 19, 0))
+
+    def test_closed_now_opens_later_today(self, monkeypatch):
+        sensor = self._sensor([
+            {
+                "giornoSettimanaId": 1,
+                "oraAperturaMattina": "08:00",
+                "oraChiusuraMattina": "12:00",
+                "oraAperturaPomeriggio": "15:00",
+                "oraChiusuraPomeriggio": "19:00",
+            }
+        ])
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
+
+        assert sensor._compute_next_change() == ("opens_at", datetime(2025, 3, 17, 15, 0))
+
+    def test_closed_today_opens_tomorrow_and_formats_date(self, monkeypatch):
+        sensor = self._sensor([
+            {"giornoSettimanaId": 1, "flagChiusura": True},
+            {
+                "giornoSettimanaId": 2,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            },
+        ])
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
+
+        assert sensor.native_value == "08:00 (18/03)"
+
+    def test_no_opening_found(self, monkeypatch):
+        sensor = self._sensor([
+            {"giornoSettimanaId": weekday, "flagChiusura": True}
+            for weekday in range(1, 8)
+        ])
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
+
+        assert sensor._compute_next_change() == ("no_opening", None)
+
+    def test_make_open_datetime(self):
+        now = datetime(2025, 3, 17, 13, 0)
+        assert StationNextChangeSensor._make_open_datetime(None, 0, now, now) is None
+        assert StationNextChangeSensor._make_open_datetime(time(12, 0), 0, now, now) is None
+        assert StationNextChangeSensor._make_open_datetime(time(14, 0), 0, now, now) == datetime(
+            2025, 3, 17, 14, 0
+        )
+
+    def test_h24_next_day_open_at_midnight_finds_actual_closing(self):
+        sensor = self._sensor([])
+        opening_hours = [
+            {"giornoSettimanaId": 1, "flagH24": True},
+            {
+                "giornoSettimanaId": 2,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "00:00",
+                "oraChiusuraOrarioContinuato": "06:00",
+            },
+        ]
+
+        assert sensor._find_next_closing_after_h24(
+            opening_hours,
+            datetime(2025, 3, 17, 12, 0),
+        ) == ("closes_at", datetime(2025, 3, 18, 6, 0))
+
+    def test_continuous_closing_after_close_finds_next_opening(self):
+        sensor = self._sensor([
+            {
+                "giornoSettimanaId": 1,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "12:00",
+            },
+            {
+                "giornoSettimanaId": 2,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            },
+        ])
+
+        assert sensor._find_next_closing(
+            sensor.coordinator.data["opening_hours"][0],
+            datetime(2025, 3, 17, 13, 0),
+        ) == ("opens_at", datetime(2025, 3, 18, 8, 0))
+
+    def test_split_closing_after_all_closes_finds_next_opening(self):
+        sensor = self._sensor([
+            {
+                "giornoSettimanaId": 1,
+                "oraAperturaMattina": "08:00",
+                "oraChiusuraMattina": "12:00",
+            },
+            {
+                "giornoSettimanaId": 2,
+                "oraAperturaMattina": "08:00",
+                "oraChiusuraMattina": "12:00",
+            },
+        ])
+
+        assert sensor._find_next_closing(
+            sensor.coordinator.data["opening_hours"][0],
+            datetime(2025, 3, 17, 13, 0),
+        ) == ("opens_at", datetime(2025, 3, 18, 8, 0))
+
+    def test_h24_next_day_not_open_at_midnight_closes_at_midnight(self):
+        sensor = self._sensor([])
+        opening_hours = [
+            {"giornoSettimanaId": 1, "flagH24": True},
+            {
+                "giornoSettimanaId": 2,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            },
+        ]
+
+        assert sensor._find_next_closing_after_h24(
+            opening_hours,
+            datetime(2025, 3, 17, 12, 0),
+        ) == ("closes_at", datetime(2025, 3, 18, 0, 0))

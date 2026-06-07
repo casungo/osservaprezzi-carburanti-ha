@@ -28,18 +28,31 @@ class _MockBinarySensorEntity(_MockEntity):
 class _MockCoordinatorEntity(_MockEntity):
     """Minimal coordinator entity test double."""
 
-    def __init__(self, coordinator=None):
+    def __init__(self, coordinator=None, *args, **kwargs):
         """Store coordinator and hass like Home Assistant's CoordinatorEntity."""
         self.coordinator = coordinator
-        self.hass = getattr(coordinator, "hass", None)
+        self.hass = coordinator if args or kwargs else getattr(coordinator, "hass", None)
+        self.data = None
+
+    async def async_shutdown(self):
+        """Mock shutdown hook."""
 
 
 class _MockConfigFlow:
     """Minimal config flow test double."""
 
+    def __init_subclass__(cls, **kwargs):
+        """Accept Home Assistant's domain keyword during subclassing."""
+        super().__init_subclass__()
+
 
 class _MockOptionsFlow:
     """Minimal options flow test double."""
+
+    def __init__(self, config_entry=None):
+        """Store the config entry like Home Assistant's options flow base."""
+        self.config_entry = config_entry
+        self.options = getattr(config_entry, "options", {}) if config_entry else {}
 
 
 def _mock_ha_modules():
@@ -52,7 +65,9 @@ def _mock_ha_modules():
         "homeassistant.config_entries",
         "homeassistant.core",
         "homeassistant.helpers",
+        "homeassistant.helpers.config_validation",
         "homeassistant.helpers.entity",
+        "homeassistant.helpers.entity_registry",
         "homeassistant.helpers.entity_platform",
         "homeassistant.helpers.update_coordinator",
         "homeassistant.helpers.typing",
@@ -83,7 +98,11 @@ def _mock_ha_modules():
         DIAGNOSTIC="diagnostic"
     )
     sys.modules["homeassistant.helpers.typing"].StateType = object
-    sys.modules["homeassistant.const"].Platform = MagicMock(SENSOR="sensor", GEO_LOCATION="geo_location")
+    sys.modules["homeassistant.const"].Platform = MagicMock(
+        SENSOR="sensor",
+        BINARY_SENSOR="binary_sensor",
+        GEO_LOCATION="geo_location",
+    )
     sys.modules["homeassistant.exceptions"].HomeAssistantError = Exception
     sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = Exception
     sys.modules["homeassistant.data_entry_flow"].FlowResult = dict
@@ -91,6 +110,30 @@ def _mock_ha_modules():
     sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict
     sys.modules["homeassistant.config_entries"].OptionsFlowWithConfigEntry = _MockOptionsFlow
     sys.modules["homeassistant.core"].callback = lambda f: f
+
+    sys.modules["homeassistant"].config_entries = sys.modules["homeassistant.config_entries"]
+    sys.modules["homeassistant"].core = sys.modules["homeassistant.core"]
+    sys.modules["homeassistant"].exceptions = sys.modules["homeassistant.exceptions"]
+    sys.modules["homeassistant"].const = sys.modules["homeassistant.const"]
+    sys.modules["homeassistant"].util = sys.modules["homeassistant.util"]
+    sys.modules["homeassistant.util"].dt = sys.modules["homeassistant.util.dt"]
+    sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
+    sys.modules["homeassistant.helpers"].entity_registry = sys.modules[
+        "homeassistant.helpers.entity_registry"
+    ]
+    sys.modules["homeassistant.helpers"].aiohttp_client = sys.modules[
+        "homeassistant.helpers.aiohttp_client"
+    ]
+    sys.modules["homeassistant.helpers"].config_validation = sys.modules[
+        "homeassistant.helpers.config_validation"
+    ]
+    sys.modules["homeassistant.helpers.config_validation"].empty_config_schema = (
+        lambda domain: MagicMock()
+    )
+    sys.modules["homeassistant.helpers"].event = sys.modules["homeassistant.helpers.event"]
+    sys.modules["homeassistant.helpers"].update_coordinator = sys.modules[
+        "homeassistant.helpers.update_coordinator"
+    ]
 
 
 _mock_ha_modules()

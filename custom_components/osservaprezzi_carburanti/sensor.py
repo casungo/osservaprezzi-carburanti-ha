@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-import logging
-from collections.abc import Callable
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import StateType
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    ADDITIONAL_SERVICES,
     ATTR_FUEL_TYPE_NAME,
     ATTR_IS_SELF,
     ATTR_LAST_UPDATE,
@@ -29,123 +23,28 @@ from .const import (
     ATTR_STATION_BRAND,
     ATTR_STATION_NAME,
     ATTR_VALIDITY_DATE,
-    CONF_STATION_ID,
     DOMAIN,
-    SERVICE_ID_TO_TRANSLATION_KEY,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
-
-HOLIDAY_SCHEDULE_ID = 8
-SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=1)
-
-INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
-    ("name", "station_name", "mdi:gas-station"),
-    ("nomeImpianto", "station_display_name", "mdi:gas-station"),
-    ("id", "station_id", "mdi:identifier"),
-    ("brand", "station_brand", "mdi:tag"),
-    ("company", "station_company", "mdi:office-building"),
-    ("phoneNumber", "station_phone", "mdi:phone"),
-    ("email", "station_email", "mdi:email"),
-    ("website", "station_website", "mdi:web"),
+from .entity import (
+    OsservaprezziBaseEntity,
+    ScheduleAwareEntity,
+    _find_schedule_for_day,
+    _has_valid_opening_hours,
+    _is_schedule_open,
+    _parse_time,
 )
 
-
-def _is_italian_holiday(check_date: date) -> bool:
-    """Check if a date is an Italian national public holiday."""
-    fixed_holidays = {
-        (1, 1),
-        (1, 6),
-        (4, 25),
-        (5, 1),
-        (6, 2),
-        (8, 15),
-        (11, 1),
-        (12, 8),
-        (12, 25),
-        (12, 26),
-    }
-    if (check_date.month, check_date.day) in fixed_holidays:
-        return True
-
-    easter = _compute_easter(check_date.year)
-    return check_date in (easter, easter + timedelta(days=1))
-
-
-def _compute_easter(year: int) -> date:
-    """Compute Easter Sunday using the Anonymous Gregorian algorithm."""
-    a = year % 19
-    b = year // 100
-    c = year % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
-    return date(year, month, day)
-
-
-def _parse_time(time_str: str | None) -> time | None:
-    """Parse time strings used by the opening-hours API payload."""
-    if not time_str:
-        return None
-
-    try:
-        time_str_clean = str(time_str).strip()
-        if ":" in time_str_clean:
-            return time.fromisoformat(time_str_clean)
-        if "." in time_str_clean:
-            hour_str, minute_str = time_str_clean.split(".")
-            hour = int(hour_str)
-            minute = int(minute_str) if minute_str else 0
-            return time(0 if hour == 24 else hour, minute)
-
-        hour = int(time_str_clean)
-        return time(0 if hour == 24 else hour, 0)
-    except (TypeError, ValueError) as err:
-        _LOGGER.warning("Failed to parse time string '%s': %s", time_str, err)
-        return None
-
-
-def _has_valid_opening_hours(data: dict[str, Any] | None) -> bool:
-    """Check if opening hours data contains valid schedule information."""
-    if not data:
-        return False
-
-    for day in data.get("opening_hours", []):
-        if day.get("flagChiusura") or day.get("flagNonComunicato"):
-            continue
-        if day.get("flagH24"):
-            return True
-        if day.get("flagOrarioContinuato"):
-            if day.get("oraAperturaOrarioContinuato") and day.get("oraChiusuraOrarioContinuato"):
-                return True
-            continue
-        if (
-            day.get("oraAperturaMattina") and day.get("oraChiusuraMattina")
-        ) or (
-            day.get("oraAperturaPomeriggio") and day.get("oraChiusuraPomeriggio")
-        ):
-            return True
-    return False
-
-
-def _get_available_service_ids(services: list[Any]) -> set[str]:
-    """Normalize available service ids from the API payload."""
-    available_ids: set[str] = set()
-    for service in services:
-        if isinstance(service, dict) and service.get("id") is not None:
-            available_ids.add(str(service["id"]))
-        elif isinstance(service, (int, str)):
-            available_ids.add(str(service))
-    return available_ids
+INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
+    ("name", "Nome", "mdi:gas-station"),
+    ("nomeImpianto", "Nome impianto", "mdi:gas-station"),
+    ("id", "ID Osservaprezzi", "mdi:identifier"),
+    ("brand", "Marchio", "mdi:tag"),
+    ("company", "Società", "mdi:office-building"),
+    ("phoneNumber", "Telefono", "mdi:phone"),
+    ("email", "Email", "mdi:email"),
+    ("website", "Sito web", "mdi:web"),
+)
 
 
 def _get_fuel_icon(fuel_name: str) -> str:
@@ -162,131 +61,31 @@ def _get_fuel_icon(fuel_name: str) -> str:
     return "mdi:currency-eur"
 
 
-def _find_schedule_for_day(
-    opening_hours: list[dict[str, Any]],
-    weekday: int,
-    check_date: date,
-) -> dict[str, Any] | None:
-    """Find the schedule entry for a given weekday, considering holidays."""
-    if _is_italian_holiday(check_date):
-        for day in opening_hours:
-            if day.get("giornoSettimanaId") == HOLIDAY_SCHEDULE_ID:
-                return day
-
-    for day in opening_hours:
-        if day.get("giornoSettimanaId") == weekday:
-            return day
-    return None
-
-
-def _is_schedule_open(schedule: dict[str, Any], current_time: time) -> bool:
-    """Check if a station is open based on a schedule entry and current time."""
-    if schedule.get("flagOrarioContinuato"):
-        open_time = _parse_time(schedule.get("oraAperturaOrarioContinuato"))
-        close_time = _parse_time(schedule.get("oraChiusuraOrarioContinuato"))
-        if open_time and close_time:
-            if open_time <= close_time:
-                return open_time <= current_time <= close_time
-            return current_time >= open_time or current_time <= close_time
-        return False
-
-    morning_open = _parse_time(schedule.get("oraAperturaMattina"))
-    morning_close = _parse_time(schedule.get("oraChiusuraMattina"))
-    afternoon_open = _parse_time(schedule.get("oraAperturaPomeriggio"))
-    afternoon_close = _parse_time(schedule.get("oraChiusuraPomeriggio"))
-    if morning_open and morning_close and morning_open <= current_time <= morning_close:
-        return True
-    if afternoon_open and afternoon_close and afternoon_open <= current_time <= afternoon_close:
-        return True
-    return False
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up sensor and binary_sensor entities for a station."""
+    """Set up sensor entities for a station."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     data = coordinator.data or {}
 
-    entities: list[SensorEntity | BinarySensorEntity] = [
+    entities: list[SensorEntity] = [
         OsservaprezziStationSensor(coordinator, entry, fuel_key)
         for fuel_key in data.get("fuels", {})
     ]
 
     station_info = data.get("station_info", {})
-    for info_key, translation_key, icon in INFO_SENSOR_DESCRIPTORS:
+    for info_key, name, icon in INFO_SENSOR_DESCRIPTORS:
         if station_info.get(info_key):
-            entities.append(StationInfoSensor(coordinator, entry, info_key, translation_key, icon))
+            entities.append(StationInfoSensor(coordinator, entry, info_key, name, icon))
 
     entities.append(StationLocationSensor(coordinator, entry))
 
     if _has_valid_opening_hours(data):
-        entities.append(StationOpenClosedBinarySensor(coordinator, entry))
         entities.append(StationNextChangeSensor(coordinator, entry))
 
-    available_service_ids = _get_available_service_ids(data.get("services", []))
-    for service_id, service_info in ADDITIONAL_SERVICES.items():
-        if service_id in available_service_ids:
-            entities.append(StationServiceBinarySensor(coordinator, entry, service_id, service_info))
-
     async_add_entities(entities, update_before_add=True)
-
-
-class OsservaprezziBaseEntity(CoordinatorEntity):
-    """Shared entity helpers for this integration."""
-
-    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the shared entity base."""
-        super().__init__(coordinator)
-        self._station_id = entry.data[CONF_STATION_ID]
-
-    @property
-    def station_info(self) -> dict[str, Any]:
-        """Return cached station info."""
-        return self.coordinator.data.get("station_info", {}) if self.coordinator.data else {}
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return the device info shared by all station entities."""
-        station_info = self.station_info
-        station_name = station_info.get("nomeImpianto") or station_info.get("name") or self._station_id
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._station_id)},
-            name=station_name,
-            manufacturer=station_info.get("brand"),
-            model=station_info.get("station_type") or "Fuel Station",
-        )
-
-
-class ScheduleAwareEntity(OsservaprezziBaseEntity):
-    """Entity mixin for time-sensitive opening-hours sensors."""
-
-    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the schedule-aware entity."""
-        super().__init__(coordinator, entry)
-        self._time_listener: Callable[[], None] | None = None
-
-    async def async_added_to_hass(self) -> None:
-        """Start a lightweight timer so schedule entities stay fresh."""
-        await super().async_added_to_hass()
-        self._time_listener = async_track_time_interval(
-            self.hass,
-            self._handle_time_tick,
-            SCHEDULE_REFRESH_INTERVAL,
-        )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Clean up the periodic timer."""
-        if self._time_listener:
-            self._time_listener()
-            self._time_listener = None
-        await super().async_will_remove_from_hass()
-
-    def _handle_time_tick(self, _: datetime) -> None:
-        """Refresh state as time passes even when prices do not change."""
-        self.schedule_update_ha_state()
 
 
 class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
@@ -353,13 +152,13 @@ class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
         coordinator: CarburantiDataUpdateCoordinator,
         entry: ConfigEntry,
         info_key: str,
-        translation_key: str,
+        name: str,
         icon: str,
     ) -> None:
         """Initialize the info sensor."""
         super().__init__(coordinator, entry)
         self._info_key = info_key
-        self._attr_translation_key = translation_key
+        self._attr_name = name
         self._attr_unique_id = f"{self._station_id}_{info_key}"
         self._attr_icon = icon
 
@@ -375,11 +174,11 @@ class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_icon = "mdi:map-marker"
-    _attr_translation_key = "location"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize location sensor."""
         super().__init__(coordinator, entry)
+        self._attr_name = "Posizione"
         self._attr_unique_id = f"{self._station_id}_location"
 
     @property
@@ -407,53 +206,16 @@ class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
         )
 
 
-class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
-    """Binary sensor indicating if the station is currently open."""
-
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:storefront"
-    _attr_translation_key = "station_open_closed"
-
-    def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the open/closed binary sensor."""
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{self._station_id}_open_closed"
-
-    def _is_currently_open(self) -> bool:
-        """Check if the station is currently open."""
-        opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
-        if not opening_hours:
-            return False
-
-        now = dt_util.now()
-        today_schedule = _find_schedule_for_day(opening_hours, now.weekday() + 1, now.date())
-        if not today_schedule or today_schedule.get("flagChiusura"):
-            return False
-        if today_schedule.get("flagH24"):
-            return True
-        return _is_schedule_open(today_schedule, now.time())
-
-    @property
-    def is_on(self) -> bool:
-        """Return True if the station is currently open."""
-        return self._is_currently_open()
-
-    @property
-    def available(self) -> bool:
-        """Return True if schedule data is available."""
-        return _has_valid_opening_hours(self.coordinator.data)
-
-
 class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
     """Sensor indicating when the station will next open or close."""
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock-time-eight"
-    _attr_translation_key = "next_change"
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the next-change sensor."""
         super().__init__(coordinator, entry)
+        self._attr_name = "Prossimo cambio orario"
         self._attr_unique_id = f"{self._station_id}_next_change"
 
     def _compute_next_change(self) -> tuple[str, datetime | None]:
@@ -609,45 +371,3 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
     def available(self) -> bool:
         """Return True if schedule data is available."""
         return _has_valid_opening_hours(self.coordinator.data)
-
-
-class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
-    """Representation of a binary sensor for a specific station service."""
-
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: CarburantiDataUpdateCoordinator,
-        entry: ConfigEntry,
-        service_id: str,
-        service_info: dict[str, str],
-    ) -> None:
-        """Initialize the service binary sensor."""
-        super().__init__(coordinator, entry)
-        self._service_id = service_id
-        self._service_info = service_info
-        self._attr_unique_id = f"{self._station_id}_service_{service_id}"
-        self._attr_translation_key = SERVICE_ID_TO_TRANSLATION_KEY.get(service_id)
-        if self._attr_translation_key is None:
-            self._attr_name = service_info["name"]
-        self._attr_icon = service_info["icon"]
-
-    @property
-    def is_on(self) -> bool:
-        """Return True if the service is available at the station."""
-        if not self.coordinator.data:
-            return False
-        return self._service_id in _get_available_service_ids(self.coordinator.data.get("services", []))
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return service metadata."""
-        return {
-            "service_id": self._service_id,
-            "service_name": self._service_info.get("name"),
-            "service_description": self._service_info.get("description"),
-            "service_icon": self._service_info.get("icon"),
-            "service_image_url": self._service_info.get("image_url"),
-        }

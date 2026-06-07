@@ -137,7 +137,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Clean stale entity registry data left by pre-translation releases."""
+    """Clean stale entity registry data left by previous releases."""
     station_id = getattr(entry, "data", {}).get(CONF_STATION_ID)
     if not station_id:
         return
@@ -158,6 +158,10 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
         if not isinstance(unique_id, str) or not isinstance(entity_id, str):
             continue
         if not unique_id.startswith(f"{station_id}_"):
+            continue
+
+        if entity_id.startswith("sensor.") and unique_id.startswith(f"{station_id}_service_"):
+            entity_registry.async_remove(entity_id)
             continue
 
         if unique_id in removed_unique_ids:

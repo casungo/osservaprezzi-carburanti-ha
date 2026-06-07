@@ -535,6 +535,69 @@ def test_cleanup_legacy_entity_registry_removes_stale_address(monkeypatch) -> No
     assert registry.removed == ["sensor.station_address"]
 
 
+def test_cleanup_legacy_entity_registry_removes_legacy_service_sensors(monkeypatch) -> None:
+    registry = FakeEntityRegistry(
+        {
+            "sensor.station_service": SimpleNamespace(
+                entity_id="sensor.station_service",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_1",
+                unique_id="123_service_1",
+                name="Food & Beverage",
+            ),
+            "binary_sensor.station_service": SimpleNamespace(
+                entity_id="binary_sensor.station_service",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_1",
+                unique_id="123_service_1",
+                name=None,
+            ),
+        }
+    )
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
+    entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
+
+    init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
+
+    assert registry.updated == []
+    assert registry.removed == ["sensor.station_service"]
+
+
+def test_cleanup_legacy_entity_registry_keeps_unrelated_service_entities(monkeypatch) -> None:
+    registry = FakeEntityRegistry(
+        {
+            "sensor.other_station_service": SimpleNamespace(
+                entity_id="sensor.other_station_service",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_1",
+                unique_id="456_service_1",
+                name="Food & Beverage",
+            ),
+            "sensor.other_entry_service": SimpleNamespace(
+                entity_id="sensor.other_entry_service",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_2",
+                unique_id="123_service_1",
+                name="Food & Beverage",
+            ),
+            "binary_sensor.station_service": SimpleNamespace(
+                entity_id="binary_sensor.station_service",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_1",
+                unique_id="123_service_1",
+                name=None,
+            ),
+        }
+    )
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
+    entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
+
+    init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
+
+    assert registry.updated == []
+    assert registry.removed == []
+
+
 def test_platforms_include_sensor_and_binary_sensor() -> None:
     assert init_module.PLATFORMS == ["sensor", "binary_sensor"]
 

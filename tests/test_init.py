@@ -472,6 +472,48 @@ def test_cleanup_legacy_entity_registry_keeps_custom_name(monkeypatch) -> None:
     assert registry.removed == []
 
 
+def test_cleanup_legacy_entity_registry_skips_unrelated_or_invalid_entries(monkeypatch) -> None:
+    registry = FakeEntityRegistry(
+        {
+            "sensor.other_platform": SimpleNamespace(
+                entity_id="sensor.other_platform",
+                platform="other",
+                config_entry_id="entry_1",
+                unique_id="123_brand",
+                name="Brand",
+            ),
+            "sensor.other_entry": SimpleNamespace(
+                entity_id="sensor.other_entry",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_2",
+                unique_id="123_brand",
+                name="Brand",
+            ),
+            "sensor.invalid_ids": SimpleNamespace(
+                entity_id=None,
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_1",
+                unique_id=None,
+                name="Brand",
+            ),
+            "sensor.other_station": SimpleNamespace(
+                entity_id="sensor.other_station",
+                platform=init_module.DOMAIN,
+                config_entry_id="entry_1",
+                unique_id="456_brand",
+                name="Brand",
+            ),
+        }
+    )
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
+    entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
+
+    init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
+
+    assert registry.updated == []
+    assert registry.removed == []
+
+
 def test_cleanup_legacy_entity_registry_removes_stale_address(monkeypatch) -> None:
     registry = FakeEntityRegistry(
         {

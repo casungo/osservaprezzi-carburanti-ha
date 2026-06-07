@@ -1,0 +1,68 @@
+{
+  "id": 54233,
+  "name": "UNION - BORGHESANO LUCCHESE",
+  "nomeImpianto": "UNION - BORGHESANO LUCCHESE",
+  "address": "BORGHESANO LUCCHESE 2 - 00146 ROMA (RM)",
+  "brand": "PompeBianche",
+  "fuels": [
+    {
+      "id": 117203378,
+      "price": 1.798,
+      "name": "Benzina",
+      "fuelId": 1,
+      "isSelf": true,
+      "serviceAreaId": 54233,
+      "insertDate": "2026-06-06T18:15:30Z",
+      "validityDate": "2026-06-06T18:24:29Z"
+    },
+    {
+      "id": 117203379,
+      "price": 1.898,
+      "name": "Gasolio",
+      "fuelId": 2,
+      "isSelf": true,
+      "serviceAreaId": 54233,
+      "insertDate": "2026-06-06T18:15:30Z",
+      "validityDate": "2026-06-06T18:24:29Z"
+    }
+  ],
+  "phoneNumber": "0647543540",
+  "email": "amministrazione@uniongestioni.com",
+  "website": "https://prezzibenzina.it/distributori/7460?ref=ospz",
+  "company": "UNION GESTIONI SOCIETA' A RESPONSABILITA' LIMITATA",
+  "services": [],
+  "orariapertura": [
+    {
+      "orariAperturaId": 71972,
+      "giornoSettimanaId": 1,
+      "oraAperturaMattina": null,
+      "oraChiusuraMattina": null,
+      "oraAperturaPomeriggio": null,
+      "oraChiusuraPomeriggio": null,
+      "flagOrarioContinuato": false,
+      "oraAperturaOrarioContinuato": null,
+      "oraChiusuraOrarioContinuato": null,
+      "flagH24": false,
+      "flagChiusura": true,
+      "flagNonComunicato": false,
+      "flagServito": false,
+      "flagSelf": true
+    },
+    {
+      "orariAperturaId": 71979,
+      "giornoSettimanaId": 8,
+      "oraAperturaMattina": null,
+      "oraChiusuraMattina": null,
+      "oraAperturaPomeriggio": null,
+      "oraChiusuraPomeriggio": null,
+      "flagOrarioContinuato": false,
+      "oraAperturaOrarioContinuato": null,
+      "oraChiusuraOrarioContinuato": null,
+      "flagH24": false,
+      "flagChiusura": false,
+      "flagNonComunicato": false,
+      "flagServito": true,
+      "flagSelf": true
+    }
+  ]
+}

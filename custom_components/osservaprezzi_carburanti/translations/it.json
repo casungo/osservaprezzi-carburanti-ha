@@ -22,14 +22,14 @@
     "step": {
       "init": {
         "title": "Opzioni Osservaprezzi Carburanti",
-        "description": "Configura le opzioni dell'integrazione.\n\nPuoi usare https://crontab.guru per aiutarti a creare e validare le espressioni cron.",
+        "description": "Configura le opzioni dell'integrazione.\n\nUsa una normale espressione cron a cinque campi, ad esempio 30 7 * * *.",
         "data": {
           "cron_expression": "Espressione cron"
         }
       }
     },
     "error": {
-      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (ogni giorno alle 07:30). Visita https://crontab.guru per aiuto nella creazione di espressioni valide."
+      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (ogni giorno alle 07:30)."
     }
   },
   "entity": {
@@ -84,48 +84,37 @@
         }
       },
       "food_beverage": {
-        "name": "Food & Beverage",
-        "description": "Bar, ristorante o punto ristoro"
+        "name": "Food & Beverage"
       },
       "workshop": {
-        "name": "Officina",
-        "description": "Servizio di riparazione e manutenzione"
+        "name": "Officina"
       },
       "parking": {
-        "name": "Sosta camper/tir",
-        "description": "Area di sosta per camper e camion"
+        "name": "Sosta camper/tir"
       },
       "dump_station": {
-        "name": "Scarico camper",
-        "description": "Punto di scarico acque nere o grigie"
+        "name": "Scarico camper"
       },
       "playground": {
-        "name": "Area bambini",
-        "description": "Area giochi per bambini"
+        "name": "Area bambini"
       },
       "atm": {
-        "name": "Bancomat",
-        "description": "Sportello automatico ATM"
+        "name": "Bancomat"
       },
       "disabled_access": {
-        "name": "Servizi per disabili",
-        "description": "Servizi accessibili per persone con disabilità"
+        "name": "Servizi per disabili"
       },
       "wifi": {
-        "name": "Wi-Fi",
-        "description": "Connessione Wi-Fi gratuita o a pagamento"
+        "name": "Wi-Fi"
       },
       "tire_service": {
-        "name": "Gommista",
-        "description": "Servizio pneumatici e gommista"
+        "name": "Gommista"
       },
       "car_wash": {
-        "name": "Autolavaggio",
-        "description": "Servizio di lavaggio auto"
+        "name": "Autolavaggio"
       },
       "ev_charging": {
-        "name": "Ricarica elettrica",
-        "description": "Colonnine per ricarica di veicoli elettrici"
+        "name": "Ricarica elettrica"
       }
     }
   },

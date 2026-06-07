@@ -330,6 +330,7 @@ class TestCSVCacheValidation:
     def test_outdated_cache_does_not_replace_existing_memory_state(self, tmp_path):
         hass = MagicMock()
         hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
 
         csv_manager = CSVStationManager(hass)
         csv_manager._cache_path = str(tmp_path / "cache.json")

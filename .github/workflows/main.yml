@@ -4,18 +4,20 @@ on:
   push:
   pull_request:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "17 2 * * *" # daily: live-api-contract
+    - cron: "13 3 1,15 * *" # twice monthly (1st & 15th): home-assistant-docker
   workflow_dispatch:
 
 jobs:
   tests:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -32,13 +34,14 @@ jobs:
         run: python -m coverage report --fail-under=100
 
   static:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -52,19 +55,21 @@ jobs:
         run: python -m mypy
 
   hassfest:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate with hassfest
         uses: home-assistant/actions/hassfest@master
 
   validate-hacs:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: HACS validation
         uses: hacs/action@22.5.0
@@ -72,25 +77,24 @@ jobs:
           category: integration
 
   home-assistant-docker:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '13 3 1,15 * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run real Home Assistant Docker regression
         run: python scripts/ha_docker_regression.py
 
   live-api-contract:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    continue-on-error: true
+    if: github.event.schedule == '17 2 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 

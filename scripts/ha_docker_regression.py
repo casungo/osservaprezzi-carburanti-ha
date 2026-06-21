@@ -309,7 +309,8 @@ def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str])
     repo_root = Path(__file__).resolve().parents[1]
     container_name = f"ha-{DOMAIN}-regression-{uuid.uuid4().hex[:8]}"
 
-    with tempfile.TemporaryDirectory(prefix=f"{DOMAIN}_ha_") as temp_dir:
+    temp_dir = tempfile.mkdtemp(prefix=f"{DOMAIN}_ha_")
+    try:
         config_dir = Path(temp_dir)
         _copy_integration(repo_root, config_dir)
         _write_ha_config(config_dir)
@@ -352,6 +353,13 @@ def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str])
         finally:
             if started and not keep:
                 _run(["docker", "stop", container_name], timeout=30, check=False, env=docker_env)
+    finally:
+        # ponytail: HA runs as root and writes root-owned files into the bind-mounted config dir
+        # that the host user can't delete. ignore_errors keeps a passing regression from being
+        # reported as a cleanup failure. Ceiling: root-owned temp dirs linger in /tmp when run
+        # locally (CI runners are ephemeral). Reclaim with
+        # `docker run --rm -v <dir>:/c alpine chown -R $(id -u):$(id -g) /c` if that matters.
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def main() -> int:

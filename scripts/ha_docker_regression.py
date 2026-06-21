@@ -211,7 +211,7 @@ for module_name in modules:
     importlib.import_module(module_name)
 
 from custom_components.{DOMAIN}.const import ADDITIONAL_SERVICES, SERVICE_ID_TO_TRANSLATION_KEY
-from custom_components.{DOMAIN}.sensor import _get_available_service_ids
+from custom_components.{DOMAIN}.entity import _get_available_service_ids
 
 missing = set(ADDITIONAL_SERVICES) - set(SERVICE_ID_TO_TRANSLATION_KEY)
 if missing:

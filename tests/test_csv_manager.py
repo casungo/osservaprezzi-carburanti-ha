@@ -1,9 +1,11 @@
 """Tests for CSV manager parsing logic."""
 from __future__ import annotations
+
 import asyncio
 import json
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -29,7 +31,7 @@ def csv_manager():
 
 
 def _parse_csv_lines(csv_manager, lines):
-    success, separator, stations_cache = csv_manager._parse_csv_lines_to_cache(lines)
+    success, separator, stations_cache = csv_manager._parse_csv_content_to_cache("\n".join(lines))
     if success:
         csv_manager._detected_separator = separator
         csv_manager._stations_cache = stations_cache
@@ -101,7 +103,9 @@ class TestCSVParsing:
     def test_parse_lines_to_cache_does_not_mutate_manager_state(self, csv_manager):
         csv_manager._detected_separator = ";"
 
-        success, separator, stations_cache = csv_manager._parse_csv_lines_to_cache(PIPE_CSV_LINES)
+        success, separator, stations_cache = csv_manager._parse_csv_content_to_cache(
+            "\n".join(PIPE_CSV_LINES)
+        )
 
         assert success is True
         assert separator == "|"
@@ -211,44 +215,6 @@ class TestCSVParsing:
     def test_parse_coordinate_invalid_values(self):
         assert CSVStationManager._parse_coordinate("") is None
         assert CSVStationManager._parse_coordinate("not-a-number") is None
-
-    def test_parse_csv_data_from_file_streaming(self, tmp_path):
-        hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
-
-        hass.async_add_executor_job.side_effect = _run_in_executor
-
-        csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
-        csv_manager._cache_path = str(tmp_path / "cache.json")
-
-        csv_manager_path = tmp_path / "stations.csv"
-        csv_manager_path.write_text("\n".join(PIPE_CSV_LINES), encoding="utf-8")
-
-        result = asyncio.run(csv_manager._parse_csv_data_from_file())
-        assert result is True
-        assert "12345" in csv_manager._stations_cache
-        assert "67890" in csv_manager._stations_cache
-
-    def test_parse_csv_data_from_file_insufficient_data(self, tmp_path):
-        hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
-        hass.async_add_executor_job.side_effect = _run_in_executor
-        csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
-        (tmp_path / "stations.csv").write_text("only first line\n", encoding="utf-8")
-
-        assert asyncio.run(csv_manager._parse_csv_data_from_file()) is False
-
-    def test_parse_csv_data_from_file_missing_file(self, tmp_path):
-        hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
-        hass.async_add_executor_job.side_effect = _run_in_executor
-        csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "missing.csv")
-
-        assert asyncio.run(csv_manager._parse_csv_data_from_file()) is False
-
 
 class TestCSVCacheValidation:
     def test_builds_conditional_headers(self, csv_manager):
@@ -477,18 +443,17 @@ class TestCSVCacheValidation:
 
     def test_clear_cache_removes_files_and_resets_memory_metadata(self, tmp_path):
         hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
         hass.async_add_executor_job.side_effect = _run_in_executor
 
         csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
-        csv_manager._cache_path = str(tmp_path / "cache.json")
         csv_manager._stations_cache = {"12345": {"id": "12345"}}
         csv_manager._last_update = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
         csv_manager._csv_etag = '"abc123"'
         csv_manager._csv_last_modified = "Wed, 01 Jan 2025 00:00:00 GMT"
-        (tmp_path / "stations.csv").write_text("csv", encoding="utf-8")
-        (tmp_path / "cache.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".storage").mkdir()
+        for path in (*csv_manager._legacy_csv_paths, csv_manager._cache_path):
+            Path(path).write_text("{}", encoding="utf-8")
 
         result = asyncio.run(csv_manager.async_clear_cache())
 
@@ -497,26 +462,28 @@ class TestCSVCacheValidation:
         assert csv_manager._last_update is None
         assert csv_manager._csv_etag is None
         assert csv_manager._csv_last_modified is None
-        assert not (tmp_path / "stations.csv").exists()
-        assert not (tmp_path / "cache.json").exists()
+        assert not Path(csv_manager._cache_path).exists()
+        assert all(not Path(path).exists() for path in csv_manager._legacy_csv_paths)
 
     def test_clear_cache_handles_remove_error(self, tmp_path):
         async def raise_remove(func, *args):
-            if func is __import__("os").remove:
+            if func is __import__("os").remove and args[0] == csv_manager._cache_path:
                 raise OSError("nope")
             return func(*args)
 
         hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
         hass.async_add_executor_job.side_effect = raise_remove
+        (tmp_path / ".storage").mkdir()
         csv_manager = CSVStationManager(hass)
-        csv_manager._cache_path = str(tmp_path / "cache.json")
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
-        (tmp_path / "cache.json").write_text("{}", encoding="utf-8")
+        Path(csv_manager._cache_path).write_text("{}", encoding="utf-8")
+        for path in csv_manager._legacy_csv_paths:
+            Path(path).write_text("csv", encoding="utf-8")
 
         assert asyncio.run(csv_manager.async_clear_cache()) is False
+        assert all(not Path(path).exists() for path in csv_manager._legacy_csv_paths)
 
-    def test_migrate_legacy_files_moves_missing_new_files(self, tmp_path):
+    def test_migrate_legacy_files_moves_json_and_removes_all_raw_csv(self, tmp_path):
         hass = MagicMock()
 
         def path(*parts):
@@ -536,10 +503,16 @@ class TestCSVCacheValidation:
 
         assert not old_csv.exists()
         assert not old_cache.exists()
-        assert (storage / "osservaprezzi_carburanti_stations.csv").read_text(encoding="utf-8") == "csv"
+        released_raw = storage / "osservaprezzi_carburanti_stations.csv"
+        released_raw.write_text("csv", encoding="utf-8")
+
+        asyncio.run(csv_manager._async_migrate_legacy_files())
+
+        assert not old_csv.exists()
+        assert not released_raw.exists()
         assert (storage / "osservaprezzi_carburanti_cache.json").read_text(encoding="utf-8") == "cache"
 
-    def test_migrate_legacy_files_skips_existing_destination(self, tmp_path):
+    def test_legacy_raw_only_initialize_downloads_fresh(self, tmp_path, monkeypatch):
         hass = MagicMock()
         hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
         hass.async_add_executor_job.side_effect = _run_in_executor
@@ -547,15 +520,23 @@ class TestCSVCacheValidation:
         old_csv.write_text("old", encoding="utf-8")
         storage = tmp_path / ".storage"
         storage.mkdir()
-        (storage / "osservaprezzi_carburanti_stations.csv").write_text("new", encoding="utf-8")
         csv_manager = CSVStationManager(hass)
+        csv_manager.session = FakeCSVSession(
+            FakeCSVResponse(status=200, text="\n".join(PIPE_CSV_LINES))
+        )
+        monkeypatch.setattr(
+            csv_module.dt_util,
+            "now",
+            lambda: datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
 
-        asyncio.run(csv_manager._async_migrate_legacy_files())
+        assert asyncio.run(csv_manager.async_initialize()) is True
 
-        assert old_csv.exists()
-        assert (storage / "osservaprezzi_carburanti_stations.csv").read_text(encoding="utf-8") == "new"
+        assert not old_csv.exists()
+        assert "12345" in csv_manager._stations_cache
+        assert Path(csv_manager._cache_path).exists()
 
-    def test_migrate_legacy_files_ignores_move_error(self, tmp_path, monkeypatch):
+    def test_migrate_legacy_files_ignores_raw_cleanup_error(self, tmp_path, monkeypatch):
         hass = MagicMock()
         hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
         hass.async_add_executor_job.side_effect = _run_in_executor
@@ -563,11 +544,25 @@ class TestCSVCacheValidation:
         old_csv.write_text("old", encoding="utf-8")
         (tmp_path / ".storage").mkdir()
         csv_manager = CSVStationManager(hass)
-        monkeypatch.setattr(csv_module.shutil, "move", MagicMock(side_effect=OSError("nope")))
+        monkeypatch.setattr(csv_module.os, "remove", MagicMock(side_effect=OSError("nope")))
 
         asyncio.run(csv_manager._async_migrate_legacy_files())
 
         assert old_csv.exists()
+
+    def test_migrate_legacy_files_ignores_json_migration_error(self, tmp_path, monkeypatch):
+        hass = MagicMock()
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        old_cache = tmp_path / "osservaprezzi_cache.json"
+        old_cache.write_text("{}", encoding="utf-8")
+        (tmp_path / ".storage").mkdir()
+        csv_manager = CSVStationManager(hass)
+        monkeypatch.setattr(csv_module.os, "replace", MagicMock(side_effect=OSError("nope")))
+
+        asyncio.run(csv_manager._async_migrate_legacy_files())
+
+        assert old_cache.exists()
 
     def test_update_skips_recent_cache(self, csv_manager, monkeypatch):
         now = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
@@ -628,12 +623,16 @@ class TestCSVCacheValidation:
 
     def test_update_handles_parse_failure(self, tmp_path):
         hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
-        hass.async_add_executor_job = AsyncMock(return_value=(False, "|", {}))
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        (tmp_path / ".storage").mkdir()
         csv_manager = CSVStationManager(hass)
+        existing = '{"stations": {"existing": {"id": "existing"}}}'
+        Path(csv_manager._cache_path).write_text(existing, encoding="utf-8")
         csv_manager.session = FakeCSVSession(FakeCSVResponse(status=200, text="bad"))
 
         assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
+        assert Path(csv_manager._cache_path).read_text(encoding="utf-8") == existing
 
     def test_update_discards_download_after_generation_change(self, tmp_path):
         async def parse_and_clear(func, *args):
@@ -671,11 +670,10 @@ class TestCSVCacheValidation:
         csv_manager.session = FakeCSVSession(
             FakeCSVResponse(status=200, text="\n".join(PIPE_CSV_LINES))
         )
-        csv_manager._async_write_csv_file = AsyncMock()
         monkeypatch.setattr(csv_module.dt_util, "now", lambda: next(now_values))
 
         assert asyncio.run(csv_manager.async_update_csv_data()) is True
-        csv_manager._async_write_csv_file.assert_awaited_once()
+        assert Path(csv_manager._cache_path).exists()
 
     def test_update_handles_client_error(self, tmp_path):
         hass = MagicMock()
@@ -684,20 +682,6 @@ class TestCSVCacheValidation:
         csv_manager.session = FakeCSVSession(aiohttp.ClientError("boom"))
 
         assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
-
-    def test_write_csv_file_removes_temp_on_replace_error(self, tmp_path, monkeypatch):
-        temp_path = tmp_path / "temp.tmp"
-        hass = MagicMock(config=MagicMock(path=MagicMock(return_value=str(tmp_path / "x"))))
-        hass.async_add_executor_job.side_effect = _run_in_executor
-        csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
-        monkeypatch.setattr(csv_module, "_create_temp_file_sync", MagicMock(return_value=str(temp_path)))
-        monkeypatch.setattr(csv_module, "_replace_file_sync", MagicMock(side_effect=OSError("nope")))
-
-        with pytest.raises(OSError):
-            asyncio.run(csv_manager._async_write_csv_file("content"))
-
-        assert not temp_path.exists()
 
     def test_parse_csv_text_logs_bad_line_and_continues(self, csv_manager, monkeypatch):
         original = csv_manager._parse_station_values
@@ -713,40 +697,18 @@ class TestCSVCacheValidation:
         monkeypatch.setattr(csv_manager, "_parse_station_values", flaky_parse)
         content = "\n".join(PIPE_CSV_LINES[:2] + PIPE_CSV_LINES[2:4])
 
-        success, _, stations = csv_manager._parse_csv_text_to_cache(content)
+        success, _, stations = csv_manager._parse_csv_content_to_cache(content)
 
         assert success is True
         assert list(stations) == ["67890"]
 
-    def test_parse_csv_file_logs_bad_line_and_continues(self, tmp_path, monkeypatch):
-        hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
-        hass.async_add_executor_job.side_effect = _run_in_executor
-        csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
-        (tmp_path / "stations.csv").write_text("\n".join(PIPE_CSV_LINES[:4]), encoding="utf-8")
-        original = csv_manager._parse_station_values
-        calls = 0
-
-        def flaky_parse(values, indices):
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise ValueError("bad row")
-            return original(values, indices)
-
-        monkeypatch.setattr(csv_manager, "_parse_station_values", flaky_parse)
-
-        assert asyncio.run(csv_manager._parse_csv_data_from_file()) is True
-        assert list(csv_manager._stations_cache) == ["67890"]
-
     def test_update_success_writes_cache_and_metadata(self, tmp_path, monkeypatch):
         now = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
         hass = MagicMock()
-        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
         hass.async_add_executor_job.side_effect = _run_in_executor
+        (tmp_path / ".storage").mkdir()
         csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
         csv_manager.session = FakeCSVSession(
             FakeCSVResponse(
                 status=200,
@@ -760,7 +722,8 @@ class TestCSVCacheValidation:
         assert csv_manager._csv_etag == '"abc"'
         assert csv_manager._csv_last_modified == "today"
         assert "12345" in csv_manager._stations_cache
-        assert (tmp_path / "stations.csv").exists()
+        assert Path(csv_manager._cache_path).exists()
+        assert all(not Path(path).exists() for path in csv_manager._legacy_csv_paths)
 
     def test_initialize_uses_recent_cache(self, csv_manager, monkeypatch):
         now = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
@@ -855,7 +818,6 @@ class TestCSVCacheValidation:
         hass.config.path.return_value = str(tmp_path / "unused")
         hass.async_add_executor_job.side_effect = _run_in_executor
         csv_manager = CSVStationManager(hass)
-        csv_manager._csv_path = str(tmp_path / "stations.csv")
         csv_manager._cache_path = str(tmp_path / "cache.json")
         csv_manager._stations_cache = {"existing": {"id": "existing"}}
         csv_manager._last_update = datetime(2026, 5, 1, tzinfo=timezone.utc)
@@ -884,7 +846,6 @@ class TestCSVCacheValidation:
             hass.async_add_executor_job.side_effect = _run_in_executor
 
             csv_manager = CSVStationManager(hass)
-            csv_manager._csv_path = str(tmp_path / "stations.csv")
             csv_manager._cache_path = str(tmp_path / "cache.json")
 
             text_started = asyncio.Event()

@@ -20,9 +20,13 @@ python -m coverage run --source=custom_components/osservaprezzi_carburanti -m py
 python -m coverage report --fail-under=100
 python -m ruff check .
 python -m mypy
-hassfest --action validate --path .
-hacs validate integration custom_components/osservaprezzi_carburanti
+make hassfest
+make hacs
 ```
+
+Both commands use the official validator containers, so no global hassfest or HACS installation is
+required. Hassfest reads the local checkout. The HACS action validates the current branch on GitHub;
+push the branch first when validating unpublished changes.
 
 ## Real Home Assistant smoke
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from custom_components.osservaprezzi_carburanti import binary_sensor as binary_sensor_module
 from custom_components.osservaprezzi_carburanti.binary_sensor import (
@@ -114,6 +115,46 @@ class TestOpenClosedSensor:
             binary_sensor_module.dt_util,
             "now",
             lambda: datetime(2025, 3, 17, 12, 0),
+        )
+
+        assert sensor.is_on is True
+
+    def test_yesterday_overnight_spill_is_open_until_close_boundary(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = StationOpenClosedBinarySensor.__new__(StationOpenClosedBinarySensor)
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": [{
+            "giornoSettimanaId": 7,
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "22:00",
+            "oraChiusuraOrarioContinuato": "02:00",
+        }]})
+
+        monkeypatch.setattr(
+            binary_sensor_module.dt_util,
+            "now",
+            lambda: datetime(2025, 3, 17, 1, 59, tzinfo=timezone),
+        )
+        assert sensor.is_on is True
+
+        monkeypatch.setattr(
+            binary_sensor_module.dt_util,
+            "now",
+            lambda: datetime(2025, 3, 17, 2, 0, tzinfo=timezone),
+        )
+        assert sensor.is_on is False
+
+    def test_today_overnight_is_open_at_open_boundary(self, monkeypatch):
+        sensor = StationOpenClosedBinarySensor.__new__(StationOpenClosedBinarySensor)
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": [{
+            "giornoSettimanaId": 1,
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "22:00",
+            "oraChiusuraOrarioContinuato": "02:00",
+        }]})
+        monkeypatch.setattr(
+            binary_sensor_module.dt_util,
+            "now",
+            lambda: datetime(2025, 3, 17, 22, 0),
         )
 
         assert sensor.is_on is True

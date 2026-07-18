@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, ".")
 
@@ -16,6 +17,7 @@ from custom_components.osservaprezzi_carburanti.entity import (
     _is_italian_holiday,
     _is_schedule_open,
     _parse_time,
+    _schedule_intervals_for_date,
     HOLIDAY_SCHEDULE_ID,
 )
 from custom_components.osservaprezzi_carburanti.sensor import (
@@ -355,6 +357,33 @@ class TestIsScheduleOpen:
         assert _is_schedule_open({"flagOrarioContinuato": True}, time(12, 0)) is False
 
 
+class TestScheduleIntervals:
+    def test_overnight_interval_uses_next_local_date(self):
+        timezone = ZoneInfo("Europe/Rome")
+        schedule = {
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "22:00",
+            "oraChiusuraOrarioContinuato": "02:00",
+        }
+
+        assert _schedule_intervals_for_date(schedule, date(2025, 3, 29), timezone) == [
+            (
+                datetime(2025, 3, 29, 22, 0, tzinfo=timezone),
+                datetime(2025, 3, 30, 2, 0, tzinfo=timezone),
+            )
+        ]
+
+    def test_h24_respects_dst_local_midnights(self):
+        timezone = ZoneInfo("Europe/Rome")
+        [(opens_at, closes_at)] = _schedule_intervals_for_date(
+            {"flagH24": True}, date(2025, 3, 30), timezone
+        )
+
+        assert opens_at == datetime(2025, 3, 30, 0, 0, tzinfo=timezone)
+        assert closes_at == datetime(2025, 3, 31, 0, 0, tzinfo=timezone)
+        assert closes_at.utcoffset() != opens_at.utcoffset()
+
+
 class TestFindScheduleForDay:
     def test_finds_regular_weekday(self):
         opening_hours = [
@@ -599,6 +628,67 @@ class TestNextChangeSensor:
         monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
 
         assert sensor._compute_next_change() == ("no_opening", None)
+
+    def test_overnight_today_closes_tomorrow(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = self._sensor([{
+            "giornoSettimanaId": 1,
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "22:00",
+            "oraChiusuraOrarioContinuato": "02:00",
+        }])
+        now = datetime(2025, 3, 17, 23, 0, tzinfo=timezone)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "closes_at",
+            datetime(2025, 3, 18, 2, 0, tzinfo=timezone),
+        )
+
+    def test_overnight_yesterday_closes_today(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = self._sensor([{
+            "giornoSettimanaId": 1,
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "22:00",
+            "oraChiusuraOrarioContinuato": "02:00",
+        }])
+        now = datetime(2025, 3, 18, 1, 0, tzinfo=timezone)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "closes_at",
+            datetime(2025, 3, 18, 2, 0, tzinfo=timezone),
+        )
+
+    def test_finds_next_opening_exactly_seven_days_away(self, monkeypatch):
+        sensor = self._sensor([{
+            "giornoSettimanaId": 1,
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "08:00",
+            "oraChiusuraOrarioContinuato": "09:00",
+        }])
+        now = datetime(2025, 3, 17, 9, 0)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "opens_at",
+            now + timedelta(days=7, hours=-1),
+        )
+
+    def test_future_h24_opens_at_local_midnight(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = self._sensor([
+            {"giornoSettimanaId": 1, "flagChiusura": True},
+            {"giornoSettimanaId": 2, "flagH24": True},
+        ])
+        now = datetime(2025, 3, 17, 20, 0, tzinfo=timezone)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "opens_at",
+            datetime(2025, 3, 18, 0, 0, tzinfo=timezone),
+        )
 
     def test_make_open_datetime(self):
         now = datetime(2025, 3, 17, 13, 0)

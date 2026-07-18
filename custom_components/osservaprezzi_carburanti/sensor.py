@@ -33,6 +33,7 @@ from .entity import (
     _has_valid_opening_hours,
     _is_schedule_open,
     _parse_time,
+    _schedule_intervals_for_date,
 )
 
 INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
@@ -225,14 +226,33 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
             return "no_schedule", None
 
         now = dt_util.now()
-        today_schedule = _find_schedule_for_day(opening_hours, now.weekday() + 1, now.date())
-        if not today_schedule or today_schedule.get("flagChiusura"):
-            return self._find_next_opening(opening_hours, now)
-        if today_schedule.get("flagH24"):
-            return self._find_next_closing_after_h24(opening_hours, now)
-        if _is_schedule_open(today_schedule, now.time()):
-            return self._find_next_closing(today_schedule, now)
-        return self._find_next_opening(opening_hours, now)
+        intervals: list[tuple[datetime, datetime]] = []
+        for day_offset in range(-1, 8):
+            local_date = now.date() + timedelta(days=day_offset)
+            schedule = _find_schedule_for_day(
+                opening_hours,
+                local_date.weekday() + 1,
+                local_date,
+            )
+            intervals.extend(
+                _schedule_intervals_for_date(schedule, local_date, now.tzinfo)
+            )
+
+        merged: list[list[datetime]] = []
+        for opens_at, closes_at in sorted(intervals):
+            if merged and opens_at <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], closes_at)
+            else:
+                merged.append([opens_at, closes_at])
+
+        for opens_at, closes_at in merged:
+            if opens_at <= now < closes_at:
+                if closes_at > now + timedelta(days=7):
+                    return "always_open", None
+                return "closes_at", closes_at
+            if opens_at > now:
+                return "opens_at", opens_at
+        return "no_opening", None
 
     def _find_next_closing(
         self,

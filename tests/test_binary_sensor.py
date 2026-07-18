@@ -38,10 +38,13 @@ def _sample_station_data():
 
 class TestBinarySensorSetup:
     def test_setup_entry_creates_binary_entities_and_unique_ids(self):
-        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        listeners = []
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace(),
+                                      async_add_listener=lambda listener: listeners.append(listener) or listeners.pop)
         entry = SimpleNamespace(
             entry_id="entry_1",
             data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
         )
         hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         added_entities = []
@@ -60,6 +63,39 @@ class TestBinarySensorSetup:
         } == unique_ids
         assert any(isinstance(entity, StationOpenClosedBinarySensor) for entity in added_entities)
         assert sum(isinstance(entity, StationServiceBinarySensor) for entity in added_entities) == 2
+
+    def test_discovers_schedule_and_service_once_after_refresh(self):
+        listeners = []
+        unload_callbacks = []
+        coordinator = SimpleNamespace(
+            data={"station_info": {}, "opening_hours": [], "services": []}, hass=SimpleNamespace(),
+            async_add_listener=lambda listener: listeners.append(listener)
+            or (lambda: listeners.remove(listener)),
+        )
+        entry = SimpleNamespace(entry_id="entry_1", data={CONF_STATION_ID: "12345"},
+                                async_on_unload=unload_callbacks.append)
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
+        batches = []
+        asyncio.run(async_setup_entry(
+            hass, entry,
+            lambda entities, update_before_add=False: batches.append(list(entities)),
+        ))
+        assert batches == []
+        coordinator.data = _sample_station_data()
+        listeners[0]()
+        assert {entity._attr_unique_id for entity in batches[-1]} == {
+            "12345_open_closed", "12345_service_1", "12345_service_8",
+        }
+        batch_count = len(batches)
+        listeners[0]()
+        coordinator.data["services"] = []
+        coordinator.data["opening_hours"] = []
+        listeners[0]()
+        coordinator.data = _sample_station_data()
+        listeners[0]()
+        assert len(batches) == batch_count
+        unload_callbacks[0]()
+        assert listeners == []
 
 
 class TestOpenClosedSensor:

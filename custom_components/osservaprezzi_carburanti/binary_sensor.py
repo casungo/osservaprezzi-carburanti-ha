@@ -4,7 +4,7 @@ from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -42,18 +42,30 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensor entities for a station."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    data = coordinator.data or {}
+    known_unique_ids: set[str] = set()
+    initial_discovery = True
 
-    entities: list[BinarySensorEntity] = []
-    if _has_valid_opening_hours(data):
-        entities.append(StationOpenClosedBinarySensor(coordinator, entry))
+    @callback
+    def _async_discover_entities() -> None:
+        data = coordinator.data or {}
+        entities: list[BinarySensorEntity] = []
+        if _has_valid_opening_hours(data):
+            entities.append(StationOpenClosedBinarySensor(coordinator, entry))
+        available_service_ids = _get_available_service_ids(data.get("services", []))
+        for service_id, service_info in ADDITIONAL_SERVICES.items():
+            if service_id in available_service_ids:
+                entities.append(StationServiceBinarySensor(coordinator, entry, service_id, service_info))
+        new_entities = [
+            entity for entity in entities if entity._attr_unique_id not in known_unique_ids
+        ]
+        if not new_entities:
+            return
+        known_unique_ids.update(entity._attr_unique_id for entity in new_entities)
+        async_add_entities(new_entities, update_before_add=initial_discovery)
 
-    available_service_ids = _get_available_service_ids(data.get("services", []))
-    for service_id, service_info in ADDITIONAL_SERVICES.items():
-        if service_id in available_service_ids:
-            entities.append(StationServiceBinarySensor(coordinator, entry, service_id, service_info))
-
-    async_add_entities(entities, update_before_add=True)
+    _async_discover_entities()
+    initial_discovery = False
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):

@@ -67,10 +67,13 @@ def _sample_station_data():
 
 class TestEntitySetupRegression:
     def test_setup_entry_creates_only_sensor_entities_and_unique_ids(self):
-        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        listeners = []
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace(),
+                                      async_add_listener=lambda listener: listeners.append(listener) or listeners.pop)
         entry = SimpleNamespace(
             entry_id="entry_1",
             data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
         )
         hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         added_entities = []
@@ -97,6 +100,42 @@ class TestEntitySetupRegression:
         assert "12345_service_8" not in unique_ids
         assert sum(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities) == 2
         assert any(isinstance(entity, StationLocationSensor) for entity in added_entities)
+
+    def test_discovers_only_new_valid_entities_after_refresh(self):
+        listeners = []
+        unload_callbacks = []
+        coordinator = SimpleNamespace(
+            data=_sample_station_data(), hass=SimpleNamespace(),
+            async_add_listener=lambda listener: listeners.append(listener)
+            or (lambda: listeners.remove(listener)),
+        )
+        entry = SimpleNamespace(entry_id="entry_1", data={CONF_STATION_ID: "12345"},
+                                async_on_unload=unload_callbacks.append)
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
+        batches = []
+
+        asyncio.run(async_setup_entry(
+            hass, entry,
+            lambda entities, update_before_add=False: batches.append(list(entities)),
+        ))
+        initial_ids = {entity._attr_unique_id for entity in batches[0]}
+        coordinator.data["fuels"]["gpl_self"] = {"price": 0.799}
+        coordinator.data["fuels"]["malformed"] = {"price": 1.0}
+        coordinator.data["station_info"]["company"] = "Example Srl"
+        listeners[0]()
+        assert {entity._attr_unique_id for entity in batches[-1]} == {
+            "12345_gpl_self", "12345_company",
+        }
+        batch_count = len(batches)
+        listeners[0]()
+        del coordinator.data["fuels"]["gpl_self"]
+        listeners[0]()
+        coordinator.data["fuels"]["gpl_self"] = {"price": 0.8}
+        listeners[0]()
+        assert len(batches) == batch_count
+        assert initial_ids.isdisjoint({"12345_gpl_self", "12345_company"})
+        unload_callbacks[0]()
+        assert listeners == []
 
     def test_price_sensor_keeps_state_and_attributes_contract(self):
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())

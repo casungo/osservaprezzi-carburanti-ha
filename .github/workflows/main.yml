@@ -9,6 +9,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  ha-contract:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install Home Assistant test dependencies
+        run: python -m pip install -r requirements-ha-test.txt
+
+      - name: Run Home Assistant contract tests
+        run: python -m pytest -c pytest-ha.ini -q
+
   tests:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest

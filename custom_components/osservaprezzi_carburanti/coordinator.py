@@ -251,7 +251,4 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     async def async_force_csv_update(self) -> bool:
         """Force an immediate CSV update."""
         _LOGGER.info("Forcing immediate CSV data update")
-        success = await self.csv_manager.async_update_csv_data(force_update=True)
-        if success:
-            await self.csv_manager.async_save_cached_data()
-        return success
+        return await self.csv_manager.async_update_csv_data(force_update=True)

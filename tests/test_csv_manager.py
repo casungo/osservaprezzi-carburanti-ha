@@ -331,9 +331,68 @@ class TestCSVCacheValidation:
         hass.config.path.return_value = str(tmp_path / "unused")
         csv_manager = CSVStationManager(hass)
         csv_manager._cache_path = str(tmp_path / "cache.json")
+        csv_manager._stations_cache = {"existing": {"id": "existing"}}
         (tmp_path / "cache.json").write_text("{invalid", encoding="utf-8")
 
         assert asyncio.run(csv_manager.async_load_cached_data()) is False
+        assert csv_manager._stations_cache == {"existing": {"id": "existing"}}
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {"version": "2.0", "stations": []},
+            {"version": 2, "stations": {}},
+            {"version": "2.0", "stations": {}, "last_update": 1},
+            {"version": "2.0", "stations": {}, "csv_separator": 1},
+            {"version": "2.0", "stations": {}, "csv_etag": 1},
+            {"version": "2.0", "stations": {}, "csv_last_modified": 1},
+        ],
+    )
+    def test_load_cache_rejects_invalid_shapes_without_partial_state(self, tmp_path, payload):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        csv_manager = CSVStationManager(hass)
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        csv_manager._stations_cache = {"existing": {"id": "existing"}}
+        csv_manager._detected_separator = ";"
+        (tmp_path / "cache.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        assert asyncio.run(csv_manager.async_load_cached_data()) is False
+        assert csv_manager._stations_cache == {"existing": {"id": "existing"}}
+        assert csv_manager._detected_separator == ";"
+
+    def test_load_cache_accepts_optional_metadata_from_older_document(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        csv_manager = CSVStationManager(hass)
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        (tmp_path / "cache.json").write_text(
+            json.dumps({"version": "2.0", "stations": {"123": {"id": "123"}}}),
+            encoding="utf-8",
+        )
+
+        assert asyncio.run(csv_manager.async_load_cached_data()) is True
+        assert csv_manager._stations_cache == {"123": {"id": "123"}}
+        assert csv_manager._detected_separator == "|"
+
+    def test_load_cache_offloads_open_and_decode_together(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        csv_manager = CSVStationManager(hass)
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        (tmp_path / "cache.json").write_text(
+            json.dumps({"version": "2.0", "stations": {}}), encoding="utf-8"
+        )
+
+        assert asyncio.run(csv_manager.async_load_cached_data()) is True
+        assert hass.async_add_executor_job.call_args.args == (
+            csv_module._load_json_file_sync,
+            str(tmp_path / "cache.json"),
+        )
 
     def test_parse_cached_datetime_variants(self, csv_manager, monkeypatch):
         fixed_now = datetime(2026, 6, 1, tzinfo=timezone.utc)
@@ -399,6 +458,8 @@ class TestCSVCacheValidation:
         assert saved["csv_separator"] == ";"
         assert saved["csv_etag"] == '"abc123"'
         assert saved["csv_last_modified"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+        assert hass.async_add_executor_job.call_args.args[0] is csv_module._write_json_file_atomic_sync
+        assert hass.async_add_executor_job.call_args.args[1] == str(tmp_path / "cache.json")
 
     def test_save_cached_data_handles_write_error(self, tmp_path, monkeypatch):
         hass = MagicMock()
@@ -406,11 +467,38 @@ class TestCSVCacheValidation:
         csv_manager = CSVStationManager(hass)
         csv_manager._cache_path = str(tmp_path / "cache.json")
         monkeypatch.setattr(
-            "custom_components.osservaprezzi_carburanti.csv_manager._write_file_sync",
+            "custom_components.osservaprezzi_carburanti.csv_manager._write_json_file_atomic_sync",
             MagicMock(side_effect=OSError("nope")),
         )
 
         assert asyncio.run(csv_manager.async_save_cached_data()) is False
+
+    @pytest.mark.parametrize("failure", [TypeError("encode"), OSError("write")])
+    def test_atomic_cache_save_preserves_destination_on_json_failure(
+        self, tmp_path, monkeypatch, failure
+    ):
+        destination = tmp_path / "cache.json"
+        destination.write_bytes(b"old cache")
+        monkeypatch.setattr(csv_module.json, "dump", MagicMock(side_effect=failure))
+
+        with pytest.raises(type(failure)):
+            csv_module._write_json_file_atomic_sync(str(destination), {"stations": {}})
+
+        assert destination.read_bytes() == b"old cache"
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_atomic_cache_save_preserves_destination_on_replace_failure(
+        self, tmp_path, monkeypatch
+    ):
+        destination = tmp_path / "cache.json"
+        destination.write_bytes(b"old cache")
+        monkeypatch.setattr(csv_module.os, "replace", MagicMock(side_effect=OSError("replace")))
+
+        with pytest.raises(OSError):
+            csv_module._write_json_file_atomic_sync(str(destination), {"stations": {}})
+
+        assert destination.read_bytes() == b"old cache"
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_clear_cache_removes_files_and_resets_memory_metadata(self, tmp_path):
         hass = MagicMock()
@@ -734,17 +822,16 @@ class TestCSVCacheValidation:
         csv_manager._last_update = datetime(2026, 6, 1, tzinfo=timezone.utc)
         csv_manager._stations_cache = {"123": {"id": "123"}}
         csv_manager.async_update_csv_data = AsyncMock(return_value=True)
-        csv_manager.async_save_cached_data = AsyncMock()
 
         assert asyncio.run(csv_manager.async_initialize()) is True
         csv_manager.async_update_csv_data.assert_awaited_once_with(force_update=True)
 
     @pytest.mark.parametrize(
-        ("cache_loaded", "last_update", "stations", "update_result", "save_calls"),
+        ("cache_loaded", "last_update", "stations", "update_result"),
         [
-            (False, None, {}, True, 1),
-            (True, None, {"123": {"id": "123"}}, True, 1),
-            (True, datetime(2026, 6, 1, tzinfo=timezone.utc), {}, False, 0),
+            (False, None, {}, True),
+            (True, None, {"123": {"id": "123"}}, True),
+            (True, datetime(2026, 6, 1, tzinfo=timezone.utc), {}, False),
         ],
     )
     def test_initialize_forces_update_when_cache_unusable(
@@ -755,7 +842,6 @@ class TestCSVCacheValidation:
         last_update,
         stations,
         update_result,
-        save_calls,
     ):
         monkeypatch.setattr(
             csv_module.dt_util,
@@ -767,24 +853,46 @@ class TestCSVCacheValidation:
         csv_manager._last_update = last_update
         csv_manager._stations_cache = stations
         csv_manager.async_update_csv_data = AsyncMock(return_value=update_result)
-        csv_manager.async_save_cached_data = AsyncMock()
 
         assert asyncio.run(csv_manager.async_initialize()) is update_result
         csv_manager.async_update_csv_data.assert_awaited_once_with(force_update=True)
-        assert csv_manager.async_save_cached_data.await_count == save_calls
 
-    def test_periodic_update_saves_only_on_success(self, csv_manager):
+    def test_periodic_update_propagates_update_result(self, csv_manager):
         csv_manager.async_update_csv_data = AsyncMock(return_value=True)
-        csv_manager.async_save_cached_data = AsyncMock()
         assert asyncio.run(csv_manager.async_periodic_update()) is True
-        csv_manager.async_save_cached_data.assert_awaited_once()
 
         csv_manager.async_update_csv_data = AsyncMock(return_value=False)
-        csv_manager.async_save_cached_data = AsyncMock()
         assert asyncio.run(csv_manager.async_periodic_update()) is False
-        csv_manager.async_save_cached_data.assert_not_awaited()
 
-    def test_update_does_not_hold_io_lock_while_downloading(self, tmp_path):
+    def test_update_persistence_failure_preserves_memory_state(self, tmp_path, monkeypatch):
+        now = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        csv_manager = CSVStationManager(hass)
+        csv_manager._csv_path = str(tmp_path / "stations.csv")
+        csv_manager._cache_path = str(tmp_path / "cache.json")
+        csv_manager._stations_cache = {"existing": {"id": "existing"}}
+        csv_manager._last_update = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        csv_manager.session = FakeCSVSession(
+            FakeCSVResponse(status=200, text="\n".join(PIPE_CSV_LINES))
+        )
+        monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+        monkeypatch.setattr(
+            csv_module, "_write_json_file_atomic_sync", MagicMock(side_effect=OSError("full"))
+        )
+
+        assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
+        assert csv_manager._stations_cache == {"existing": {"id": "existing"}}
+        assert csv_manager._last_update == datetime(2026, 5, 1, tzinfo=timezone.utc)
+
+    def test_update_does_not_hold_io_lock_while_downloading(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            csv_module.dt_util,
+            "now",
+            lambda: datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc),
+        )
+
         async def _exercise():
             hass = MagicMock()
             hass.config.path.return_value = str(tmp_path / "unused")

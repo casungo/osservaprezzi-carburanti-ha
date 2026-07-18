@@ -402,22 +402,18 @@ class TestCoordinatorUpdates:
 
         coordinator.csv_manager.async_periodic_update.assert_awaited_once()
 
-    def test_async_force_csv_update_saves_on_success(self) -> None:
+    def test_async_force_csv_update_propagates_success(self) -> None:
         coordinator = _make_coordinator()
         coordinator.csv_manager.async_update_csv_data = AsyncMock(return_value=True)
-        coordinator.csv_manager.async_save_cached_data = AsyncMock()
 
         assert asyncio.run(coordinator.async_force_csv_update()) is True
         coordinator.csv_manager.async_update_csv_data.assert_awaited_once_with(force_update=True)
-        coordinator.csv_manager.async_save_cached_data.assert_awaited_once()
 
-    def test_async_force_csv_update_does_not_save_on_failure(self) -> None:
+    def test_async_force_csv_update_propagates_failure(self) -> None:
         coordinator = _make_coordinator()
         coordinator.csv_manager.async_update_csv_data = AsyncMock(return_value=False)
-        coordinator.csv_manager.async_save_cached_data = AsyncMock()
 
         assert asyncio.run(coordinator.async_force_csv_update()) is False
-        coordinator.csv_manager.async_save_cached_data.assert_not_awaited()
 
     def test_async_shutdown_calls_listener_and_base(self, monkeypatch: pytest.MonkeyPatch) -> None:
         coordinator = _make_coordinator()

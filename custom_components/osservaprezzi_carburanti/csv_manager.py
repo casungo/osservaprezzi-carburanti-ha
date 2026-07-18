@@ -39,6 +39,7 @@ CSV_COLUMNS = {
     "Latitudine": "latitude",
     "Longitudine": "longitude",
 }
+REQUIRED_CSV_COLUMNS = ("id", "latitude", "longitude")
 
 
 def _write_file_sync(path: str, content: str) -> None:
@@ -281,6 +282,12 @@ class CSVStationManager:
         header_line = header_line.rstrip("\r\n")
         separator = self._get_separator(header_line)
         col_indices = self._build_column_indices(header_line, separator)
+        missing_required = [
+            column for column in REQUIRED_CSV_COLUMNS if col_indices[column] < 0
+        ]
+        if missing_required:
+            _LOGGER.error("CSV is missing required columns: %s", ", ".join(missing_required))
+            return False, separator, {}
         stations_cache: dict[str, dict[str, Any]] = {}
 
         reader = csv.reader(text_stream, delimiter=separator)
@@ -295,6 +302,9 @@ class CSVStationManager:
                 _LOGGER.warning("Error parsing CSV line %d: %s", line_num, err)
 
         _LOGGER.info("Parsed %d stations from CSV", len(stations_cache))
+        if not stations_cache:
+            _LOGGER.error("CSV contains no valid stations")
+            return False, separator, {}
         return True, separator, stations_cache
 
     @staticmethod

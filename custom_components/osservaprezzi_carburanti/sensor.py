@@ -5,7 +5,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -69,24 +69,38 @@ async def async_setup_entry(
 ) -> None:
     """Set up sensor entities for a station."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    data = coordinator.data or {}
+    known_unique_ids: set[str] = set()
+    initial_discovery = True
 
-    entities: list[SensorEntity] = [
-        OsservaprezziStationSensor(coordinator, entry, fuel_key)
-        for fuel_key in data.get("fuels", {})
-    ]
+    @callback
+    def _async_discover_entities() -> None:
+        data = coordinator.data or {}
+        entities: list[SensorEntity] = []
+        fuels = data.get("fuels", {})
+        if isinstance(fuels, dict):
+            for fuel_key in fuels:
+                if not isinstance(fuel_key, str) or "_" not in fuel_key:
+                    continue
+                entities.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
+        station_info = data.get("station_info", {})
+        if isinstance(station_info, dict):
+            for info_key, name, icon in INFO_SENSOR_DESCRIPTORS:
+                if station_info.get(info_key):
+                    entities.append(StationInfoSensor(coordinator, entry, info_key, name, icon))
+        entities.append(StationLocationSensor(coordinator, entry))
+        if _has_valid_opening_hours(data):
+            entities.append(StationNextChangeSensor(coordinator, entry))
+        new_entities = [
+            entity for entity in entities if entity._attr_unique_id not in known_unique_ids
+        ]
+        if not new_entities:
+            return
+        known_unique_ids.update(entity._attr_unique_id for entity in new_entities)
+        async_add_entities(new_entities, update_before_add=initial_discovery)
 
-    station_info = data.get("station_info", {})
-    for info_key, name, icon in INFO_SENSOR_DESCRIPTORS:
-        if station_info.get(info_key):
-            entities.append(StationInfoSensor(coordinator, entry, info_key, name, icon))
-
-    entities.append(StationLocationSensor(coordinator, entry))
-
-    if _has_valid_opening_hours(data):
-        entities.append(StationNextChangeSensor(coordinator, entry))
-
-    async_add_entities(entities, update_before_add=True)
+    _async_discover_entities()
+    initial_discovery = False
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):

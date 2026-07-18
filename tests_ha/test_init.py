@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -90,6 +91,38 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert price_entity_id is not None and hass.states.get(price_entity_id).state == "1.798"
     assert open_entity_id is not None and hass.states.get(open_entity_id).state == "on"
     assert service_entity_id is not None and hass.states.get(service_entity_id).state == "on"
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    refreshed_data = deepcopy(coordinator.data)
+    refreshed_data["fuels"]["Gasolio_self"] = {
+        "price": 1.689,
+        "last_update": "2026-06-06T18:15:30Z",
+        "validity_date": "2026-06-06T18:24:29Z",
+    }
+    refreshed_data["station_info"]["phoneNumber"] = "+39 06 000000"
+    refreshed_data["services"].append({"id": 8})
+    coordinator.async_set_updated_data(refreshed_data)
+    await hass.async_block_till_done()
+    gasolio_entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{STATION_ID}_Gasolio_self")
+    phone_entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{STATION_ID}_phoneNumber")
+    wifi_entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, f"{STATION_ID}_service_8")
+    assert gasolio_entity_id is not None and hass.states.get(gasolio_entity_id).state == "1.689"
+    assert phone_entity_id is not None
+    assert wifi_entity_id is not None and hass.states.get(wifi_entity_id).state == "on"
+    dynamic_entity_ids = {gasolio_entity_id, phone_entity_id, wifi_entity_id}
+
+    coordinator.async_set_updated_data(refreshed_data)
+    await hass.async_block_till_done()
+    assert {entity.entity_id for entity in registry.entities.values()
+            if entity.config_entry_id == entry.entry_id}.issuperset(dynamic_entity_ids)
+    disappeared_data = deepcopy(refreshed_data)
+    del disappeared_data["fuels"]["Gasolio_self"]
+    disappeared_data["station_info"].pop("phoneNumber")
+    disappeared_data["services"] = [{"id": 1}]
+    coordinator.async_set_updated_data(disappeared_data)
+    coordinator.async_set_updated_data(refreshed_data)
+    await hass.async_block_till_done()
+    assert all(registry.async_get(entity_id) is not None for entity_id in dynamic_entity_ids)
 
     assert hass.services.has_service(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
     assert hass.services.has_service(DOMAIN, SERVICE_CLEAR_CACHE)

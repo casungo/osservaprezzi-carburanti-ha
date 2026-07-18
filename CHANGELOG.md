@@ -7,11 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-19
+
+### Added
+- Discover newly available station, opening-hours, and service entities after coordinator refreshes without requiring an integration reload
+- Add lifecycle contract tests against Home Assistant and regression coverage for reloads, dynamic entity discovery, shared cache behavior, and service responses
+- Add design documents for nearby-station discovery and ranked station comparisons
+
 ### Changed
-- Run the live upstream contract check daily and the Home Assistant Docker regression twice monthly, with both checks also available through manual workflow dispatch
+- Share one station registry and cache state across all configured entries instead of loading and maintaining a separate copy for every station
+- Validate station API payloads before publishing coordinator data and reduce verbose logging of raw upstream responses
+- Write cache metadata atomically and stop retaining the redundant raw station record in coordinator data
+- Pin GitHub Actions dependencies, add Dependabot updates, run the live upstream contract check daily, and run the Home Assistant Docker regression twice monthly
+- Expand the English and Italian documentation for global services, local validation, and release checks
 
 ### Fixed
+- Prevent an unloaded config entry from rearming its scheduled refresh while an update is still in progress
+- Preserve previous fuel prices and price-change timestamps across refreshes when prices do not change
+- Reject malformed or truncated CSV downloads without replacing the last valid station registry
+- Report cache update and clear failures as Home Assistant service errors instead of returning error fields
+- Handle opening-hours ranges that cross midnight and calculate their next state change correctly
 - Keep the Docker regression import check aligned with the current entity helper module
+
+### Removed
+- Remove superseded scheduling helpers and the redundant raw station cache
 
 ## [2.2.0] - 2026-06-08
 

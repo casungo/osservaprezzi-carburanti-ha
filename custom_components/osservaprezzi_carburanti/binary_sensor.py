@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -17,7 +18,7 @@ from .entity import (
     _find_schedule_for_day,
     _get_available_service_ids,
     _has_valid_opening_hours,
-    _is_schedule_open,
+    _schedule_intervals_for_date,
 )
 
 SERVICE_ID_TO_NAME = {
@@ -75,12 +76,21 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
             return False
 
         now = dt_util.now()
-        today_schedule = _find_schedule_for_day(opening_hours, now.weekday() + 1, now.date())
-        if not today_schedule or today_schedule.get("flagChiusura"):
-            return False
-        if today_schedule.get("flagH24"):
-            return True
-        return _is_schedule_open(today_schedule, now.time())
+        for day_offset in (-1, 0):
+            local_date = now.date() + timedelta(days=day_offset)
+            schedule = _find_schedule_for_day(
+                opening_hours,
+                local_date.weekday() + 1,
+                local_date,
+            )
+            if any(
+                opens_at <= now < closes_at
+                for opens_at, closes_at in _schedule_intervals_for_date(
+                    schedule, local_date, now.tzinfo
+                )
+            ):
+                return True
+        return False
 
     @property
     def is_on(self) -> bool:

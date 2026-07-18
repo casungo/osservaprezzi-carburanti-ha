@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -152,6 +152,40 @@ def _is_schedule_open(schedule: dict[str, Any], current_time: time) -> bool:
     if afternoon_open and afternoon_close and afternoon_open <= current_time <= afternoon_close:
         return True
     return False
+
+
+def _schedule_intervals_for_date(
+    schedule: dict[str, Any] | None,
+    local_date: date,
+    timezone: tzinfo | None,
+) -> list[tuple[datetime, datetime]]:
+    """Convert one schedule row into local, date-aware opening intervals."""
+    if not schedule or schedule.get("flagChiusura") or schedule.get("flagNonComunicato"):
+        return []
+
+    day_start = datetime.combine(local_date, time.min, timezone)
+    if schedule.get("flagH24"):
+        return [(day_start, datetime.combine(local_date + timedelta(days=1), time.min, timezone))]
+
+    pairs = (
+        (("oraAperturaOrarioContinuato", "oraChiusuraOrarioContinuato"),)
+        if schedule.get("flagOrarioContinuato")
+        else (
+            ("oraAperturaMattina", "oraChiusuraMattina"),
+            ("oraAperturaPomeriggio", "oraChiusuraPomeriggio"),
+        )
+    )
+    intervals: list[tuple[datetime, datetime]] = []
+    for open_key, close_key in pairs:
+        open_time = _parse_time(schedule.get(open_key))
+        close_time = _parse_time(schedule.get(close_key))
+        if open_time is None or close_time is None:
+            continue
+        opens_at = datetime.combine(local_date, open_time, timezone)
+        close_date = local_date + timedelta(days=close_time <= open_time)
+        closes_at = datetime.combine(close_date, close_time, timezone)
+        intervals.append((opens_at, closes_at))
+    return intervals
 
 
 class OsservaprezziBaseEntity(CoordinatorEntity):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -31,8 +31,6 @@ from .entity import (
     ScheduleAwareEntity,
     _find_schedule_for_day,
     _has_valid_opening_hours,
-    _is_schedule_open,
-    _parse_time,
     _schedule_intervals_for_date,
 )
 
@@ -266,115 +264,6 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
                 return "closes_at", closes_at
             if opens_at > now:
                 return "opens_at", opens_at
-        return "no_opening", None
-
-    def _find_next_closing(
-        self,
-        schedule: dict[str, Any],
-        now: datetime,
-    ) -> tuple[str, datetime | None]:
-        """Find the next closing time for the current schedule."""
-        current_time = now.time()
-        if schedule.get("flagOrarioContinuato"):
-            close_time = _parse_time(schedule.get("oraChiusuraOrarioContinuato"))
-            if close_time and close_time > current_time:
-                return "closes_at", now.replace(
-                    hour=close_time.hour,
-                    minute=close_time.minute,
-                    second=0,
-                    microsecond=0,
-                )
-            return self._find_next_opening(self.coordinator.data.get("opening_hours", []), now)
-
-        for key in ("oraChiusuraMattina", "oraChiusuraPomeriggio"):
-            close_time = _parse_time(schedule.get(key))
-            if close_time and close_time > current_time:
-                return "closes_at", now.replace(
-                    hour=close_time.hour,
-                    minute=close_time.minute,
-                    second=0,
-                    microsecond=0,
-                )
-
-        return self._find_next_opening(self.coordinator.data.get("opening_hours", []), now)
-
-    def _find_next_closing_after_h24(
-        self,
-        opening_hours: list[dict[str, Any]],
-        now: datetime,
-    ) -> tuple[str, datetime | None]:
-        """Find when a currently H24 schedule next stops being continuously open."""
-        current_weekday = now.weekday() + 1
-        for day_offset in range(1, 8):
-            check_datetime = now + timedelta(days=day_offset)
-            check_midnight = check_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-            check_weekday = (current_weekday + day_offset - 1) % 7 + 1
-            day = _find_schedule_for_day(opening_hours, check_weekday, check_datetime.date())
-
-            if day is None or day.get("flagChiusura") or day.get("flagNonComunicato"):
-                return "closes_at", check_midnight
-            if day.get("flagH24"):
-                continue
-            if _is_schedule_open(day, time(0, 0)):
-                return self._find_next_closing(day, check_midnight)
-            return "closes_at", check_midnight
-
-        return "always_open", None
-
-    @staticmethod
-    def _make_open_datetime(
-        open_time: time | None,
-        day_offset: int,
-        now: datetime,
-        check_datetime: datetime,
-    ) -> datetime | None:
-        """Create a datetime for an opening time, handling same-day vs future-day logic."""
-        if open_time is None:
-            return None
-        if day_offset == 0 and open_time <= now.time():
-            return None
-        return check_datetime.replace(
-            hour=open_time.hour,
-            minute=open_time.minute,
-            second=0,
-            microsecond=0,
-        )
-
-    def _find_next_opening(
-        self,
-        opening_hours: list[dict[str, Any]],
-        now: datetime,
-    ) -> tuple[str, datetime | None]:
-        """Find the next opening time."""
-        current_weekday = now.weekday() + 1
-        for day_offset in range(7):
-            check_datetime = now + timedelta(days=day_offset)
-            check_weekday = (current_weekday + day_offset - 1) % 7 + 1
-            day = _find_schedule_for_day(opening_hours, check_weekday, check_datetime.date())
-            if day is None or day.get("flagChiusura") or day.get("flagNonComunicato"):
-                continue
-
-            if day.get("flagOrarioContinuato"):
-                open_datetime = self._make_open_datetime(
-                    _parse_time(day.get("oraAperturaOrarioContinuato")),
-                    day_offset,
-                    now,
-                    check_datetime,
-                )
-                if open_datetime:
-                    return "opens_at", open_datetime
-                continue
-
-            for key in ("oraAperturaMattina", "oraAperturaPomeriggio"):
-                open_datetime = self._make_open_datetime(
-                    _parse_time(day.get(key)),
-                    day_offset,
-                    now,
-                    check_datetime,
-                )
-                if open_datetime:
-                    return "opens_at", open_datetime
-
         return "no_opening", None
 
     @property

@@ -422,6 +422,16 @@ class TestScheduleIntervals:
         assert closes_at == datetime(2025, 3, 31, 0, 0, tzinfo=timezone)
         assert closes_at.utcoffset() != opens_at.utcoffset()
 
+    def test_incomplete_interval_is_ignored(self):
+        assert _schedule_intervals_for_date(
+            {
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+            },
+            date(2025, 3, 30),
+            ZoneInfo("Europe/Rome"),
+        ) == []
+
 
 class TestFindScheduleForDay:
     def test_finds_regular_weekday(self):
@@ -728,85 +738,3 @@ class TestNextChangeSensor:
             "opens_at",
             datetime(2025, 3, 18, 0, 0, tzinfo=timezone),
         )
-
-    def test_make_open_datetime(self):
-        now = datetime(2025, 3, 17, 13, 0)
-        assert StationNextChangeSensor._make_open_datetime(None, 0, now, now) is None
-        assert StationNextChangeSensor._make_open_datetime(time(12, 0), 0, now, now) is None
-        assert StationNextChangeSensor._make_open_datetime(time(14, 0), 0, now, now) == datetime(
-            2025, 3, 17, 14, 0
-        )
-
-    def test_h24_next_day_open_at_midnight_finds_actual_closing(self):
-        sensor = self._sensor([])
-        opening_hours = [
-            {"giornoSettimanaId": 1, "flagH24": True},
-            {
-                "giornoSettimanaId": 2,
-                "flagOrarioContinuato": True,
-                "oraAperturaOrarioContinuato": "00:00",
-                "oraChiusuraOrarioContinuato": "06:00",
-            },
-        ]
-
-        assert sensor._find_next_closing_after_h24(
-            opening_hours,
-            datetime(2025, 3, 17, 12, 0),
-        ) == ("closes_at", datetime(2025, 3, 18, 6, 0))
-
-    def test_continuous_closing_after_close_finds_next_opening(self):
-        sensor = self._sensor([
-            {
-                "giornoSettimanaId": 1,
-                "flagOrarioContinuato": True,
-                "oraAperturaOrarioContinuato": "08:00",
-                "oraChiusuraOrarioContinuato": "12:00",
-            },
-            {
-                "giornoSettimanaId": 2,
-                "flagOrarioContinuato": True,
-                "oraAperturaOrarioContinuato": "08:00",
-                "oraChiusuraOrarioContinuato": "20:00",
-            },
-        ])
-
-        assert sensor._find_next_closing(
-            sensor.coordinator.data["opening_hours"][0],
-            datetime(2025, 3, 17, 13, 0),
-        ) == ("opens_at", datetime(2025, 3, 18, 8, 0))
-
-    def test_split_closing_after_all_closes_finds_next_opening(self):
-        sensor = self._sensor([
-            {
-                "giornoSettimanaId": 1,
-                "oraAperturaMattina": "08:00",
-                "oraChiusuraMattina": "12:00",
-            },
-            {
-                "giornoSettimanaId": 2,
-                "oraAperturaMattina": "08:00",
-                "oraChiusuraMattina": "12:00",
-            },
-        ])
-
-        assert sensor._find_next_closing(
-            sensor.coordinator.data["opening_hours"][0],
-            datetime(2025, 3, 17, 13, 0),
-        ) == ("opens_at", datetime(2025, 3, 18, 8, 0))
-
-    def test_h24_next_day_not_open_at_midnight_closes_at_midnight(self):
-        sensor = self._sensor([])
-        opening_hours = [
-            {"giornoSettimanaId": 1, "flagH24": True},
-            {
-                "giornoSettimanaId": 2,
-                "flagOrarioContinuato": True,
-                "oraAperturaOrarioContinuato": "08:00",
-                "oraChiusuraOrarioContinuato": "20:00",
-            },
-        ]
-
-        assert sensor._find_next_closing_after_h24(
-            opening_hours,
-            datetime(2025, 3, 17, 12, 0),
-        ) == ("closes_at", datetime(2025, 3, 18, 0, 0))

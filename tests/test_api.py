@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -35,7 +36,7 @@ class _FakeResponse:
     def __init__(
         self,
         status: int,
-        payload: dict[str, Any] | None = None,
+        payload: Any = None,
         reason: str = "reason",
     ) -> None:
         self.status = status
@@ -45,7 +46,7 @@ class _FakeResponse:
         self.history = ()
         self.headers = {"X-Test": "yes"}
 
-    async def json(self) -> dict[str, Any]:
+    async def json(self) -> Any:
         return self._payload
 
 
@@ -70,17 +71,57 @@ def reset_request_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(api, "API_REQUEST_INTERVAL_SECONDS", 0)
 
 
-def test_fetch_station_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    session = _FakeSession(_FakeResponse(200, {"id": "123", "name": "Station"}))
+def test_fetch_station_data_success(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    payload = {
+        "id": "123",
+        "name": "Distinctive Secret Station",
+        "address": "Private Street 987",
+        "latitude": 41.123456,
+        "longitude": 12.654321,
+        "prices": [{"fuel": "PrivateFuel", "price": 9.876}],
+    }
+    session = _FakeSession(_FakeResponse(200, payload))
     monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
 
-    result = asyncio.run(fetch_station_data(MagicMock(), "123", timeout=7))
+    with caplog.at_level(logging.DEBUG, logger=api.__name__):
+        result = asyncio.run(fetch_station_data(MagicMock(), "123", timeout=7))
 
-    assert result == {"id": "123", "name": "Station"}
+    assert result == payload
     assert "/123" in session.get_calls[0]["url"]
     assert session.get_calls[0]["headers"] == api.DEFAULT_HEADERS
     assert isinstance(session.get_calls[0]["timeout"], aiohttp.ClientTimeout)
     assert session.get_calls[0]["timeout"].total == 7
+    assert "response for 123" in caplog.text
+    assert "status=200" in caplog.text
+    assert "field_count=6" in caplog.text
+    assert "collection_counts={'lists': 1, 'mappings': 0}" in caplog.text
+    for private_value in (
+        "Distinctive Secret Station",
+        "Private Street 987",
+        "41.123456",
+        "12.654321",
+        "PrivateFuel",
+        "9.876",
+    ):
+        assert private_value not in caplog.text
+
+
+def test_fetch_station_data_does_not_log_malformed_payload(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    payload = ["Distinctive malformed station data"]
+    session = _FakeSession(_FakeResponse(200, payload))
+    monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
+
+    with caplog.at_level(logging.DEBUG, logger=api.__name__):
+        result = asyncio.run(fetch_station_data(MagicMock(), "456"))
+
+    assert result == payload
+    assert "response for 456" in caplog.text
+    assert "payload_type=list" in caplog.text
+    assert "Distinctive malformed station data" not in caplog.text
 
 
 @pytest.mark.parametrize(

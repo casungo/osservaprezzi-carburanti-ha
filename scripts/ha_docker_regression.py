@@ -29,6 +29,28 @@ ERROR_PATTERNS = (
     re.compile(r"Failed to load integration", re.IGNORECASE),
     re.compile(r"Traceback \(most recent call last\)", re.IGNORECASE),
 )
+LOG_TAIL_LINE_LIMIT = 80
+
+
+def _log_tail(logs: str, line_limit: int = LOG_TAIL_LINE_LIMIT) -> str:
+    """Return at most the last configured number of log lines."""
+    return "\n".join(logs.splitlines()[-line_limit:])
+
+
+def _log_failure_context(
+    stage: str,
+    logs: str,
+    container_name: str,
+    *,
+    return_code: int | None = None,
+) -> str:
+    """Format bounded logs while preserving failure-stage context."""
+    return_code_context = "" if return_code is None else f"\nReturn code: {return_code}"
+    return (
+        f"Failure stage: {stage}{return_code_context}\n"
+        f"Last {LOG_TAIL_LINE_LIMIT} log lines:\n{_log_tail(logs)}\n"
+        f"Full container log: docker logs {container_name}"
+    )
 
 
 def _run(
@@ -73,7 +95,7 @@ def _write_ha_config(config_dir: Path) -> None:
                 "logger:",
                 "  default: warning",
                 "  logs:",
-                f"    custom_components.{DOMAIN}: debug",
+                f"    custom_components.{DOMAIN}: info",
                 "",
                 f"{DOMAIN}:",
                 "",
@@ -154,11 +176,14 @@ def _combined_logs(container_name: str, docker_env: dict[str, str]) -> str:
     return _docker_logs(container_name, docker_env) + _home_assistant_logs(container_name, docker_env)
 
 
-def _assert_no_error_logs(logs: str) -> None:
+def _assert_no_error_logs(logs: str, container_name: str) -> None:
     """Fail if logs contain integration startup errors."""
     for pattern in ERROR_PATTERNS:
         if pattern.search(logs):
-            raise AssertionError(f"Home Assistant logs contain an error matching {pattern.pattern}:\n{logs}")
+            context = _log_failure_context("integration log check", logs, container_name)
+            raise AssertionError(
+                f"Home Assistant logs contain an error matching {pattern.pattern}:\n{context}"
+            )
 
 
 def _wait_for_startup(container_name: str, timeout: int, docker_env: dict[str, str]) -> str:
@@ -175,15 +200,23 @@ def _wait_for_startup(container_name: str, timeout: int, docker_env: dict[str, s
             raise RuntimeError(inspect.stderr)
         if inspect.stdout.strip().startswith("false"):
             logs = _combined_logs(container_name, docker_env)
-            raise RuntimeError(f"Home Assistant container exited early:\n{logs}")
+            return_code = None
+            inspect_parts = inspect.stdout.split()
+            if len(inspect_parts) > 1 and inspect_parts[1].isdigit():
+                return_code = int(inspect_parts[1])
+            context = _log_failure_context(
+                "container startup", logs, container_name, return_code=return_code
+            )
+            raise RuntimeError(f"Home Assistant container exited early:\n{context}")
 
         last_logs = _combined_logs(container_name, docker_env)
-        _assert_no_error_logs(last_logs)
+        _assert_no_error_logs(last_logs, container_name)
         if STARTUP_OK_PATTERN.search(last_logs) and DOMAIN in last_logs:
             return last_logs
         time.sleep(3)
 
-    raise TimeoutError(f"Timed out waiting for Home Assistant startup. Last logs:\n{last_logs}")
+    context = _log_failure_context("startup timeout", last_logs, container_name)
+    raise TimeoutError(f"Timed out waiting for Home Assistant startup.\n{context}")
 
 
 def _run_import_contract(container_name: str, docker_env: dict[str, str]) -> None:
@@ -280,7 +313,7 @@ def _wait_for_live_entities(
     last_logs = ""
     while time.monotonic() < deadline:
         last_logs = _combined_logs(container_name, docker_env)
-        _assert_no_error_logs(last_logs)
+        _assert_no_error_logs(last_logs, container_name)
         last_counts = _entity_counts(container_name, docker_env, station_ids)
         if last_counts and all(last_counts.get(station_id, 0) > 0 for station_id in station_ids):
             return last_counts
@@ -288,7 +321,8 @@ def _wait_for_live_entities(
 
     raise TimeoutError(
         "Timed out waiting for live station entities. "
-        f"Last counts: {last_counts}\nLast logs:\n{last_logs}"
+        f"Last counts: {last_counts}\n"
+        f"{_log_failure_context('live entity timeout', last_logs, container_name)}"
     )
 
 
@@ -341,7 +375,7 @@ def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str])
             logs = _wait_for_startup(container_name, timeout, docker_env)
             _run_import_contract(container_name, docker_env)
             entity_counts = _wait_for_live_entities(container_name, docker_env, station_ids, timeout)
-            _assert_no_error_logs(_combined_logs(container_name, docker_env))
+            _assert_no_error_logs(_combined_logs(container_name, docker_env), container_name)
             print("Home Assistant Docker regression passed")
             print(f"Image: {image}")
             print(f"Container: {container_name}")

@@ -55,11 +55,26 @@ async def fetch_station_data(
                 headers=DEFAULT_HEADERS,
                 timeout=aiohttp.ClientTimeout(total=timeout),
             ) as response:
-                _LOGGER.debug("Station API response status: %s", response.status)
+                _LOGGER.debug(
+                    "Station API response for %s: status=%s", station_id, response.status
+                )
 
                 if response.status == 200:
                     data = await response.json()
-                    _LOGGER.debug("Station API response data: %s", data)
+                    values = data.values() if isinstance(data, dict) else (data,)
+                    collection_counts = {
+                        "lists": sum(isinstance(value, list) for value in values),
+                        "mappings": sum(isinstance(value, dict) for value in values),
+                    }
+                    _LOGGER.debug(
+                        "Station API response for %s: status=%s, payload_type=%s, "
+                        "field_count=%s, collection_counts=%s",
+                        station_id,
+                        response.status,
+                        type(data).__name__,
+                        len(data) if isinstance(data, dict) else "n/a",
+                        collection_counts,
+                    )
                     return data
                 if response.status == 404:
                     raise aiohttp.ClientResponseError(

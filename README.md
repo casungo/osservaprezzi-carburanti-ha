@@ -170,7 +170,53 @@ group:
   - by: attributes.fuel_type_name
 ```
 
+## Global Services
+
+The integration registers these services globally. They take no input fields. Shared CSV cache
+operations run once and then synchronize and refresh every loaded station entry that can use the
+updated cache.
+
+### Force CSV update
+
+`osservaprezzi_carburanti.force_csv_update` immediately downloads the station registry CSV,
+synchronizes it across loaded entries, and refreshes their station data. It does not return response
+data.
+
+```yaml
+action: osservaprezzi_carburanti.force_csv_update
+```
+
+### Clear CSV cache
+
+`osservaprezzi_carburanti.clear_cache` clears the shared station registry cache, downloads and
+initializes a fresh copy, synchronizes it across loaded entries, and refreshes their station data. It
+does not return response data.
+
+```yaml
+action: osservaprezzi_carburanti.clear_cache
+```
+
+### Compare station prices
+
+`osservaprezzi_carburanti.compare_stations` reads, without changing it, the current coordinator data
+for each loaded station that has data. This response-only service returns a `stations` mapping keyed
+by config entry ID. Each station contains its name, ID, brand, address, and a `fuels` mapping with
+price, previous price, price-change time, service mode, and last-update time.
+
+```yaml
+action: osservaprezzi_carburanti.compare_stations
+response_variable: station_comparison
+```
+
 ## Local Regression Tests
+
+Create and activate a local Python environment, then install the validation dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-test.txt
+```
 
 Run the automated unit regression suite with:
 
@@ -184,7 +230,8 @@ If Docker Desktop is running locally, you can also run a Home Assistant smoke re
 python scripts/ha_docker_regression.py --timeout 240
 ```
 
-The Docker regression is intended for local validation only and is not part of the GitHub Actions workflow.
+The Docker regression also runs in GitHub Actions on the 1st and 15th of each month and is available
+through manual workflow dispatch.
 
 ## 📞 Support
 

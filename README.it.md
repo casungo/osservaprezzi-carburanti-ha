@@ -170,7 +170,53 @@ group:
   - by: attributes.fuel_type_name
 ```
 
+## Servizi Globali
+
+L'integrazione registra globalmente i seguenti servizi. Non accettano campi di input. Le operazioni
+sulla cache CSV condivisa vengono eseguite una sola volta, poi sincronizzano e aggiornano tutte le
+stazioni caricate che possono usare la nuova cache.
+
+### Forza aggiornamento CSV
+
+`osservaprezzi_carburanti.force_csv_update` scarica immediatamente il CSV dell'anagrafica,
+lo sincronizza tra le stazioni caricate e ne aggiorna i dati. Non restituisce dati di risposta.
+
+```yaml
+action: osservaprezzi_carburanti.force_csv_update
+```
+
+### Cancella cache CSV
+
+`osservaprezzi_carburanti.clear_cache` cancella la cache condivisa dell'anagrafica, scarica e
+inizializza una nuova copia, la sincronizza tra le stazioni caricate e ne aggiorna i dati. Non
+restituisce dati di risposta.
+
+```yaml
+action: osservaprezzi_carburanti.clear_cache
+```
+
+### Confronta prezzi stazioni
+
+`osservaprezzi_carburanti.compare_stations` legge senza modificarli i dati correnti del coordinator
+per ogni stazione caricata che dispone di dati. Questo servizio di sola risposta restituisce una
+mappa `stations` con chiave pari all'ID della config entry. Ogni stazione contiene nome, ID, marchio,
+indirizzo e una mappa `fuels` con prezzo, prezzo precedente, data del cambio prezzo, modalità di
+servizio e data dell'ultimo aggiornamento.
+
+```yaml
+action: osservaprezzi_carburanti.compare_stations
+response_variable: station_comparison
+```
+
 ## Test di Regressione Locali
+
+Crea e attiva un ambiente Python locale, poi installa le dipendenze di validazione:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-test.txt
+```
 
 Esegui la suite automatica con:
 
@@ -184,7 +230,8 @@ Se Docker Desktop è avviato in locale, puoi anche eseguire uno smoke test contr
 python scripts/ha_docker_regression.py --timeout 240
 ```
 
-Il test Docker è pensato solo per validazione locale e non fa parte del workflow GitHub Actions.
+Il test Docker viene eseguito anche da GitHub Actions il 1° e il 15 di ogni mese ed è disponibile
+tramite avvio manuale del workflow.
 
 ## 📞 Supporto
 

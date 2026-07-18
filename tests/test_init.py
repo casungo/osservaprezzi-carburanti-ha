@@ -638,6 +638,104 @@ def test_setup_entry_scheduled_refresh_reschedules(monkeypatch) -> None:
     assert len(callbacks) == 2
 
 
+def test_scheduled_refresh_does_not_rearm_after_unload(monkeypatch) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingCoordinator(FakeCoordinator):
+        async def async_request_refresh(self) -> None:
+            self.refresh_calls += 1
+            started.set()
+            await release.wait()
+
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", BlockingCoordinator)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+    callbacks = []
+
+    def fake_track(hass, callback, when):
+        callbacks.append(callback)
+        return lambda: None
+
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", fake_track)
+    monkeypatch.setattr(init_module.dt_util, "as_utc", lambda value: value)
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        unique_id="station_1",
+        options={},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(return_value=lambda: None),
+    )
+
+    async def run_race() -> None:
+        assert await init_module.async_setup_entry(hass, entry) is True
+        refresh = asyncio.create_task(callbacks[0](datetime(2026, 1, 1)))
+        await started.wait()
+        hass.data[init_module.DOMAIN].pop(entry.entry_id)
+        release.set()
+        await refresh
+
+    asyncio.run(run_race())
+
+    assert len(callbacks) == 1
+
+
+def test_old_scheduled_refresh_does_not_overwrite_reload_listener(monkeypatch) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingCoordinator(FakeCoordinator):
+        async def async_request_refresh(self) -> None:
+            self.refresh_calls += 1
+            started.set()
+            await release.wait()
+
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", BlockingCoordinator)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+    callbacks = []
+
+    def fake_track(hass, callback, when):
+        callbacks.append(callback)
+        return lambda: None
+
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", fake_track)
+    monkeypatch.setattr(init_module.dt_util, "as_utc", lambda value: value)
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        unique_id="station_1",
+        options={},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(return_value=lambda: None),
+    )
+    replacement = FakeCoordinator()
+    replacement_listener = MagicMock()
+
+    async def run_race() -> None:
+        assert await init_module.async_setup_entry(hass, entry) is True
+        refresh = asyncio.create_task(callbacks[0](datetime(2026, 1, 1)))
+        await started.wait()
+        hass.data[init_module.DOMAIN][entry.entry_id] = {
+            "coordinator": replacement,
+            "listener": replacement_listener,
+        }
+        release.set()
+        await refresh
+
+    asyncio.run(run_race())
+
+    assert len(callbacks) == 1
+    assert hass.data[init_module.DOMAIN][entry.entry_id]["listener"] is replacement_listener
+
+
 def test_setup_entry_returns_false_when_cron_schedule_fails(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     monkeypatch.setattr(init_module, "get_next_run_time", MagicMock(side_effect=ValueError("bad")))

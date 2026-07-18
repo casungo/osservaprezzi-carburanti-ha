@@ -151,6 +151,31 @@ class TestCSVParsing:
         assert _parse_csv_lines(csv_manager, ["header"]) is False
         assert _parse_csv_lines(csv_manager, []) is False
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "<html>\n<body>Service unavailable</body>",
+            "2025-01-15T10:00:00\nidImpianto|Latitudine|Longitudine",
+            "2025-01-15T10:00:00\nLatitudine|Longitudine\n41.9|12.5",
+            "2025-01-15T10:00:00\nidImpianto|Longitudine\n12345|12.5",
+            "2025-01-15T10:00:00\nidImpianto|Latitudine\n12345|41.9",
+        ],
+    )
+    def test_rejects_unusable_csv(self, csv_manager, content):
+        success, _, stations = csv_manager._parse_csv_content_to_cache(content)
+
+        assert success is False
+        assert stations == {}
+
+    def test_accepts_csv_without_optional_columns(self, csv_manager):
+        content = "2025-01-15T10:00:00\nidImpianto|Latitudine|Longitudine\n12345|41.9|12.5"
+
+        success, separator, stations = csv_manager._parse_csv_content_to_cache(content)
+
+        assert success is True
+        assert separator == "|"
+        assert stations == {"12345": {"id": "12345", "latitude": 41.9, "longitude": 12.5}}
+
     def test_station_data_fields(self, csv_manager):
         _parse_csv_lines(csv_manager, PIPE_CSV_LINES)
         station = csv_manager._stations_cache["12345"]
@@ -530,6 +555,33 @@ class TestCSVCacheValidation:
         csv_manager.session = FakeCSVSession(FakeCSVResponse(status=200, text="bad"))
 
         assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
+
+    def test_invalid_download_preserves_known_good_state(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        csv_manager = CSVStationManager(hass)
+        csv_manager._csv_path = str(tmp_path / "stations.csv")
+        csv_manager._stations_cache = {"existing": {"id": "existing"}}
+        csv_manager._detected_separator = ";"
+        csv_manager._csv_etag = '"old"'
+        csv_manager._csv_last_modified = "yesterday"
+        original_content = "known-good-csv"
+        (tmp_path / "stations.csv").write_text(original_content, encoding="utf-8")
+        csv_manager.session = FakeCSVSession(
+            FakeCSVResponse(
+                status=200,
+                text="<html>\n<body>Service unavailable</body>",
+                headers={"ETag": '"new"', "Last-Modified": "today"},
+            )
+        )
+
+        assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
+        assert csv_manager._stations_cache == {"existing": {"id": "existing"}}
+        assert csv_manager._detected_separator == ";"
+        assert csv_manager._csv_etag == '"old"'
+        assert csv_manager._csv_last_modified == "yesterday"
+        assert (tmp_path / "stations.csv").read_text(encoding="utf-8") == original_content
 
     def test_update_discards_download_after_cache_clear(self, tmp_path, monkeypatch):
         async def parse_and_clear(func, *args):

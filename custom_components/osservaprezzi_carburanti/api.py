@@ -23,6 +23,48 @@ _REQUEST_LOCK = asyncio.Lock()
 _NEXT_ALLOWED_REQUEST_AT = 0.0
 
 
+class InvalidStationPayloadError(aiohttp.ClientError):
+    """Raised when a successful station response has an unusable structure."""
+
+
+def normalize_station_data(data: Any, station_id: str) -> dict[str, Any]:
+    """Validate and normalize the station fields consumed by the integration."""
+    if not isinstance(data, dict):
+        raise InvalidStationPayloadError("station response is not a mapping")
+
+    response_id = data.get("id")
+    if (
+        isinstance(response_id, bool)
+        or not isinstance(response_id, (int, str))
+        or str(response_id) != str(station_id)
+    ):
+        raise InvalidStationPayloadError("station response has an invalid id")
+    if not isinstance(data.get("name"), str) or not data["name"].strip():
+        raise InvalidStationPayloadError("station response has an invalid name")
+
+    normalized = dict(data)
+    for key in ("fuels", "services", "orariapertura"):
+        value = data.get(key)
+        if value is None:
+            normalized[key] = []
+        elif not isinstance(value, list):
+            raise InvalidStationPayloadError(f"station response {key} is not a list")
+
+    required_fuel_fields = {"name", "price", "fuelId", "isSelf", "serviceAreaId"}
+    for fuel in normalized["fuels"]:
+        if not isinstance(fuel, dict) or not required_fuel_fields <= fuel.keys():
+            raise InvalidStationPayloadError("station response contains an invalid fuel")
+    if not all(isinstance(item, dict) for item in normalized["orariapertura"]):
+        raise InvalidStationPayloadError("station response contains invalid opening hours")
+    if not all(
+        isinstance(item, (dict, int, str)) and not isinstance(item, bool)
+        for item in normalized["services"]
+    ):
+        raise InvalidStationPayloadError("station response contains an invalid service")
+
+    return normalized
+
+
 async def fetch_station_data(
     hass: HomeAssistant,
     station_id: str,
@@ -59,8 +101,11 @@ async def fetch_station_data(
 
                 if response.status == 200:
                     data = await response.json()
-                    _LOGGER.debug("Station API response data: %s", data)
-                    return data
+                    try:
+                        return normalize_station_data(data, station_id)
+                    except InvalidStationPayloadError as err:
+                        _LOGGER.warning("Invalid station API response structure: %s", err)
+                        raise
                 if response.status == 404:
                     raise aiohttp.ClientResponseError(
                         request_info=response.request_info,

@@ -13,7 +13,11 @@ import pytest
 sys.path.insert(0, ".")
 
 from custom_components.osservaprezzi_carburanti import api  # noqa: E402
-from custom_components.osservaprezzi_carburanti.api import fetch_station_data  # noqa: E402
+from custom_components.osservaprezzi_carburanti.api import (  # noqa: E402
+    InvalidStationPayloadError,
+    fetch_station_data,
+    normalize_station_data,
+)
 
 
 class _ResponseContext:
@@ -35,17 +39,17 @@ class _FakeResponse:
     def __init__(
         self,
         status: int,
-        payload: dict[str, Any] | None = None,
+        payload: Any = None,
         reason: str = "reason",
     ) -> None:
         self.status = status
-        self._payload = payload or {}
+        self._payload = payload
         self.reason = reason
         self.request_info = None
         self.history = ()
         self.headers = {"X-Test": "yes"}
 
-    async def json(self) -> dict[str, Any]:
+    async def json(self) -> Any:
         return self._payload
 
 
@@ -76,11 +80,81 @@ def test_fetch_station_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = asyncio.run(fetch_station_data(MagicMock(), "123", timeout=7))
 
-    assert result == {"id": "123", "name": "Station"}
+    assert result == {
+        "id": "123",
+        "name": "Station",
+        "fuels": [],
+        "services": [],
+        "orariapertura": [],
+    }
     assert "/123" in session.get_calls[0]["url"]
     assert session.get_calls[0]["headers"] == api.DEFAULT_HEADERS
     assert isinstance(session.get_calls[0]["timeout"], aiohttp.ClientTimeout)
     assert session.get_calls[0]["timeout"].total == 7
+
+
+def test_normalize_station_data_defaults_collections_and_preserves_unknowns() -> None:
+    payload = {"id": 123, "name": "Station", "unknown": {"future": True}, "fuels": None}
+
+    result = normalize_station_data(payload, "123")
+
+    assert result == {
+        "id": 123,
+        "name": "Station",
+        "unknown": {"future": True},
+        "fuels": [],
+        "services": [],
+        "orariapertura": [],
+    }
+    assert payload["fuels"] is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        "maintenance",
+        {},
+        {"id": "other", "name": "Station"},
+        {"id": "123", "name": ""},
+        {"id": "123", "name": "Station", "fuels": {}},
+        {"id": "123", "name": "Station", "services": {}},
+        {"id": "123", "name": "Station", "orariapertura": {}},
+        {"id": "123", "name": "Station", "fuels": ["bad"]},
+        {"id": "123", "name": "Station", "fuels": [{"name": "Benzina"}]},
+        {"id": "123", "name": "Station", "services": [None]},
+        {"id": "123", "name": "Station", "orariapertura": [1]},
+    ],
+)
+def test_normalize_station_data_rejects_invalid_payloads(payload: Any) -> None:
+    with pytest.raises(InvalidStationPayloadError):
+        normalize_station_data(payload, "123")
+
+
+@pytest.mark.parametrize("service", [{"name": "bar"}, 7, "car-wash"])
+def test_normalize_station_data_accepts_supported_service_forms(service: Any) -> None:
+    result = normalize_station_data(
+        {"id": "123", "name": "Station", "services": [service]},
+        "123",
+    )
+
+    assert result["services"] == [service]
+
+
+def test_fetch_station_data_warns_without_logging_bad_record(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret_record = "must-not-be-logged"
+    session = _FakeSession(_FakeResponse(200, {"record": secret_record}))
+    monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
+
+    with pytest.raises(InvalidStationPayloadError):
+        asyncio.run(fetch_station_data(MagicMock(), "123"))
+
+    assert "Invalid station API response structure" in caplog.text
+    assert secret_record not in caplog.text
 
 
 @pytest.mark.parametrize(

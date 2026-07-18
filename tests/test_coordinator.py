@@ -19,6 +19,7 @@ from custom_components.osservaprezzi_carburanti.coordinator import (
 )
 from custom_components.osservaprezzi_carburanti import coordinator as coordinator_module
 from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID
+from custom_components.osservaprezzi_carburanti.api import InvalidStationPayloadError
 
 
 def _make_coordinator() -> CarburantiDataUpdateCoordinator:
@@ -355,6 +356,37 @@ class TestCoordinatorUpdates:
         result = asyncio.run(coordinator._async_fetch_station_data())
 
         assert result == {"last": "known"}
+
+    def test_invalid_payload_exhausts_retries_on_initial_refresh(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        coordinator = _make_coordinator()
+        coordinator.csv_manager.is_data_available.return_value = True
+        fetch_mock = AsyncMock(side_effect=InvalidStationPayloadError("invalid structure"))
+        monkeypatch.setattr(coordinator_module, "fetch_station_data", fetch_mock)
+        monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
+
+        with pytest.raises(Exception, match="Error fetching station data"):
+            asyncio.run(coordinator._async_update_data())
+
+        assert fetch_mock.await_count == len(coordinator_module.RETRY_DELAYS) + 1
+
+    def test_invalid_payload_keeps_last_data_after_retries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        coordinator = _make_coordinator()
+        coordinator.data = {"last": "known"}
+        coordinator.csv_manager.is_data_available.return_value = True
+        fetch_mock = AsyncMock(side_effect=InvalidStationPayloadError("invalid structure"))
+        monkeypatch.setattr(coordinator_module, "fetch_station_data", fetch_mock)
+        monkeypatch.setattr(coordinator_module.asyncio, "sleep", AsyncMock())
+
+        result = asyncio.run(coordinator._async_update_data())
+
+        assert result == {"last": "known"}
+        assert fetch_mock.await_count == len(coordinator_module.RETRY_DELAYS) + 1
 
     def test_async_fetch_station_data_exhausts_retries(
         self,

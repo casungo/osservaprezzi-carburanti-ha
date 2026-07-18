@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, ".")
 
 from custom_components.osservaprezzi_carburanti import coordinator as coordinator_module
+from custom_components.osservaprezzi_carburanti.api import normalize_station_data  # noqa: E402
 from custom_components.osservaprezzi_carburanti.coordinator import (  # noqa: E402
     CarburantiDataUpdateCoordinator,
 )
@@ -77,6 +78,7 @@ def test_real_station_payload_snapshot_maps_expected_coordinator_output() -> Non
     station_payload = json.loads(
         (FIXTURES_DIR / "mimit_station_54233.json").read_text(encoding="utf-8")
     )
+    station_payload = normalize_station_data(station_payload, "54233")
     coordinator = _make_coordinator()
     coordinator.csv_manager.get_station_by_id.return_value = {
         "operator": "UNION GESTIONI SOCIETA' A RESPONSABILITA' LIMITATA",

@@ -24,9 +24,6 @@ from .const import CSV_UPDATE_INTERVAL, CSV_URL, DEFAULT_HEADERS, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 CACHE_VERSION = "2.0"
-_CSV_IO_LOCK = asyncio.Lock()
-_CSV_CACHE_GENERATION = 0
-
 CSV_COLUMNS = {
     "idImpianto": "id",
     "Gestore": "operator",
@@ -120,31 +117,38 @@ class CSVStationManager:
         self._csv_path = hass.config.path(".storage", f"{DOMAIN}_stations.csv")
         self._cache_path = hass.config.path(".storage", f"{DOMAIN}_cache.json")
         self._detected_separator = "|"
+        self._operation_lock = asyncio.Lock()
+        self._cache_generation = 0
+        self._initialized = False
 
     async def _async_migrate_legacy_files(self) -> None:
         """Migrate old CSV/cache files from config root to .storage."""
         old_csv = self.hass.config.path("osservaprezzi_stations.csv")
         old_cache = self.hass.config.path("osservaprezzi_cache.json")
 
-        async with _CSV_IO_LOCK:
-            for old_path, new_path in ((old_csv, self._csv_path), (old_cache, self._cache_path)):
-                old_exists = await self.hass.async_add_executor_job(os.path.exists, old_path)
-                if not old_exists:
-                    continue
+        for old_path, new_path in ((old_csv, self._csv_path), (old_cache, self._cache_path)):
+            old_exists = await self.hass.async_add_executor_job(os.path.exists, old_path)
+            if not old_exists:
+                continue
 
-                new_exists = await self.hass.async_add_executor_job(os.path.exists, new_path)
-                if new_exists:
-                    continue
+            new_exists = await self.hass.async_add_executor_job(os.path.exists, new_path)
+            if new_exists:
+                continue
 
-                try:
-                    await self.hass.async_add_executor_job(shutil.move, old_path, new_path)
-                    _LOGGER.info("Migrated legacy file: %s -> %s", old_path, new_path)
-                except OSError as err:
-                    _LOGGER.warning("Failed to migrate %s: %s", old_path, err)
+            try:
+                await self.hass.async_add_executor_job(shutil.move, old_path, new_path)
+                _LOGGER.info("Migrated legacy file: %s -> %s", old_path, new_path)
+            except OSError as err:
+                _LOGGER.warning("Failed to migrate %s: %s", old_path, err)
 
     async def async_update_csv_data(self, force_update: bool = False) -> bool:
         """Update CSV data from the remote source."""
-        async with _CSV_IO_LOCK:
+        async with self._operation_lock:
+            return await self._async_update_csv_data(force_update)
+
+    async def _async_update_csv_data(self, force_update: bool = False) -> bool:
+        """Update CSV data while the operation lock is held."""
+        try:
             now = dt_util.now()
             if (
                 not force_update
@@ -154,9 +158,7 @@ class CSVStationManager:
                 _LOGGER.debug("CSV data is recent, skipping update")
                 return True
             headers = self._build_csv_request_headers(force_update)
-            cache_generation = _CSV_CACHE_GENERATION
-
-        try:
+            cache_generation = self._cache_generation
             _LOGGER.info("Downloading station data from CSV: %s", CSV_URL)
 
             async with self.session.get(
@@ -165,21 +167,20 @@ class CSVStationManager:
                 timeout=aiohttp.ClientTimeout(total=60),
             ) as response:
                 if response.status == 304:
-                    async with _CSV_IO_LOCK:
-                        if cache_generation != _CSV_CACHE_GENERATION:
-                            _LOGGER.info("Ignoring CSV 304 response after cache was cleared")
-                            return False
-                        data = self._build_cache_data(
-                            stations_cache=self._stations_cache,
-                            last_update=now,
-                            separator=self._detected_separator,
-                            csv_etag=self._csv_etag,
-                            csv_last_modified=self._csv_last_modified,
-                        )
-                        if not await self._async_save_cache_data(data):
-                            _LOGGER.error("Failed to persist CSV 304 refresh metadata")
-                            return False
-                        self._last_update = now
+                    if cache_generation != self._cache_generation:
+                        _LOGGER.info("Ignoring CSV 304 response after cache was cleared")
+                        return False
+                    data = self._build_cache_data(
+                        stations_cache=self._stations_cache,
+                        last_update=now,
+                        separator=self._detected_separator,
+                        csv_etag=self._csv_etag,
+                        csv_last_modified=self._csv_last_modified,
+                    )
+                    if not await self._async_save_cache_data(data):
+                        _LOGGER.error("Failed to persist CSV 304 refresh metadata")
+                        return False
+                    self._last_update = now
                     _LOGGER.debug("CSV not modified, keeping cached station data")
                     return True
 
@@ -199,34 +200,26 @@ class CSVStationManager:
                 _LOGGER.error("Failed to parse CSV data")
                 return False
 
-            async with _CSV_IO_LOCK:
-                if cache_generation != _CSV_CACHE_GENERATION:
-                    _LOGGER.info("Discarding downloaded CSV because cache was cleared")
-                    return False
-                if (
-                    not force_update
-                    and self._last_update
-                    and dt_util.now() - self._last_update < timedelta(hours=CSV_UPDATE_INTERVAL)
-                ):
-                    _LOGGER.debug("CSV data was refreshed by another task, skipping downloaded update")
-                    return True
+            if cache_generation != self._cache_generation:
+                _LOGGER.info("Discarding downloaded CSV because cache was cleared")
+                return False
 
-                data = self._build_cache_data(
-                    stations_cache=stations_cache,
-                    last_update=now,
-                    separator=separator,
-                    csv_etag=csv_etag,
-                    csv_last_modified=csv_last_modified,
-                )
-                await self._async_write_csv_file(content)
-                if not await self._async_save_cache_data(data):
-                    _LOGGER.error("Failed to persist downloaded CSV station data")
-                    return False
-                self._csv_etag = csv_etag
-                self._csv_last_modified = csv_last_modified
-                self._detected_separator = separator
-                self._stations_cache = stations_cache
-                self._last_update = now
+            data = self._build_cache_data(
+                stations_cache=stations_cache,
+                last_update=now,
+                separator=separator,
+                csv_etag=csv_etag,
+                csv_last_modified=csv_last_modified,
+            )
+            await self._async_write_csv_file(content)
+            if not await self._async_save_cache_data(data):
+                _LOGGER.error("Failed to persist downloaded CSV station data")
+                return False
+            self._csv_etag = csv_etag
+            self._csv_last_modified = csv_last_modified
+            self._detected_separator = separator
+            self._stations_cache = stations_cache
+            self._last_update = now
 
             _LOGGER.info("Successfully updated CSV station data")
             return True
@@ -403,8 +396,12 @@ class CSVStationManager:
 
     async def async_load_cached_data(self) -> bool:
         """Load cached station data from local file."""
-        async with _CSV_IO_LOCK:
-            try:
+        async with self._operation_lock:
+            return await self._async_load_cached_data()
+
+    async def _async_load_cached_data(self) -> bool:
+        """Load cached station data while the operation lock is held."""
+        try:
                 _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
                 data = await self.hass.async_add_executor_job(
                     _load_json_file_sync, self._cache_path
@@ -453,12 +450,12 @@ class CSVStationManager:
                 )
                 return True
 
-            except FileNotFoundError:
-                _LOGGER.info("No cached data found, will download from CSV")
-                return False
-            except (json.JSONDecodeError, OSError, TypeError, ValueError) as err:
-                _LOGGER.error("Error loading cached data: %s", err)
-                return False
+        except FileNotFoundError:
+            _LOGGER.info("No cached data found, will download from CSV")
+            return False
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as err:
+            _LOGGER.error("Error loading cached data: %s", err)
+            return False
 
     def _parse_cached_datetime(self, value: str | None) -> datetime | None:
         """Parse the cached last update datetime."""
@@ -480,7 +477,7 @@ class CSVStationManager:
 
     async def async_save_cached_data(self) -> bool:
         """Save station data to local cache file."""
-        async with _CSV_IO_LOCK:
+        async with self._operation_lock:
             data = self._build_cache_data(
                 stations_cache=self._stations_cache,
                 last_update=self._last_update,
@@ -535,10 +532,18 @@ class CSVStationManager:
 
     async def async_initialize(self) -> bool:
         """Initialize the CSV manager."""
+        async with self._operation_lock:
+            if self._initialized:
+                return True
+            self._initialized = await self._async_initialize()
+            return self._initialized
+
+    async def _async_initialize(self) -> bool:
+        """Initialize the CSV manager while the operation lock is held."""
         _LOGGER.info("Initializing CSV station data")
         await self._async_migrate_legacy_files()
 
-        cache_loaded = await self.async_load_cached_data()
+        cache_loaded = await self._async_load_cached_data()
         _LOGGER.info("Cache loaded: %s, Stations in cache: %d", cache_loaded, len(self._stations_cache))
 
         if cache_loaded:
@@ -558,7 +563,7 @@ class CSVStationManager:
             _LOGGER.info("No cached data found, will download from CSV")
 
         _LOGGER.info("Forcing CSV data update")
-        success = await self.async_update_csv_data(force_update=True)
+        success = await self._async_update_csv_data(force_update=True)
         if success:
             _LOGGER.info("CSV update completed successfully")
         else:
@@ -572,11 +577,10 @@ class CSVStationManager:
 
     async def async_clear_cache(self) -> bool:
         """Clear the CSV cache files and in-memory data."""
-        global _CSV_CACHE_GENERATION
-
-        async with _CSV_IO_LOCK:
+        async with self._operation_lock:
             try:
-                _CSV_CACHE_GENERATION += 1
+                self._cache_generation += 1
+                self._initialized = False
                 self._stations_cache.clear()
                 self._last_update = None
                 self._csv_etag = None

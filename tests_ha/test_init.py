@@ -21,17 +21,17 @@ from custom_components.osservaprezzi_carburanti.csv_manager import CSVStationMan
 STATION_ID = "54233"
 
 
-def _station_payload() -> dict[str, Any]:
+def _station_payload(station_id: str = STATION_ID) -> dict[str, Any]:
     """Return deterministic upstream data with every representative platform."""
     return {
-        "id": int(STATION_ID),
+        "id": int(station_id),
         "name": "UNION - BORGHESANO LUCCHESE",
         "nomeImpianto": "UNION - BORGHESANO LUCCHESE",
         "address": "BORGHESANO LUCCHESE 2 - 00146 ROMA (RM)",
         "brand": "PompeBianche",
         "company": "UNION GESTIONI SRL",
         "fuels": [{"price": 1.798, "name": "Benzina", "fuelId": 1, "isSelf": True,
-                   "serviceAreaId": int(STATION_ID), "insertDate": "2026-06-06T18:15:30Z",
+                   "serviceAreaId": int(station_id), "insertDate": "2026-06-06T18:15:30Z",
                    "validityDate": "2026-06-06T18:24:29Z"}],
         "services": [{"id": 1}],
         "orariapertura": [
@@ -44,7 +44,7 @@ def _station_payload() -> dict[str, Any]:
 
 async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypatch) -> None:
     """Exercise setup, entities, services, reload, and final unload in real HA."""
-    fetch_station_data = AsyncMock(return_value=_station_payload())
+    fetch_station_data = AsyncMock(side_effect=lambda hass, station_id: _station_payload(station_id))
     monkeypatch.setattr(
         "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
         fetch_station_data,
@@ -109,11 +109,32 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert hass.data[DOMAIN][entry.entry_id]["listener"] is not listener_before_reload
 
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    assert coordinator._csv_update_listener is not None
+    csv_manager = coordinator.csv_manager
+    registry_listener = hass.data[DOMAIN]["csv_update_listener"]
+
+    second_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Second station",
+        unique_id="54234",
+        data={CONF_STATION_ID: "54234"},
+    )
+    second_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second_entry.entry_id)
+    await hass.async_block_till_done()
+    second_coordinator = hass.data[DOMAIN][second_entry.entry_id]["coordinator"]
+    assert second_coordinator.csv_manager is csv_manager
+    assert hass.data[DOMAIN]["csv_update_listener"] is registry_listener
+
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert coordinator._csv_update_listener is None
     assert DOMAIN not in hass.data or entry.entry_id not in hass.data[DOMAIN]
+    assert hass.data[DOMAIN]["csv_manager"] is csv_manager
+    assert hass.services.has_service(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
+
+    assert await hass.config_entries.async_unload(second_entry.entry_id)
+    await hass.async_block_till_done()
+    assert "csv_manager" not in hass.data[DOMAIN]
+    assert "csv_update_listener" not in hass.data[DOMAIN]
     assert not hass.services.has_service(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
     assert not hass.services.has_service(DOMAIN, SERVICE_CLEAR_CACHE)
     assert not hass.services.has_service(DOMAIN, SERVICE_COMPARE_STATIONS)

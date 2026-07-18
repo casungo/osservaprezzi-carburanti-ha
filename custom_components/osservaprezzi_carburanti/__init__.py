@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,13 +11,14 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CRON_EXPRESSION,
     CONF_STATION_ID,
     DEFAULT_CRON_EXPRESSION,
+    CSV_UPDATE_INTERVAL,
     DOMAIN,
     SERVICE_COMPARE_STATIONS,
     SERVICE_CLEAR_CACHE,
@@ -25,12 +26,15 @@ from .const import (
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 from .cron_helper import get_next_run_time
+from .csv_manager import CSVStationManager
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 _SERVICES_REGISTERED = f"{DOMAIN}_services_registered"
+_CSV_MANAGER = "csv_manager"
+_CSV_UPDATE_LISTENER = "csv_update_listener"
 
 _LEGACY_DEFAULT_ENTITY_NAMES = frozenset(
     {
@@ -82,17 +86,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Osservaprezzi Carburanti from a config entry."""
     _async_register_services(hass)
 
-    coordinator = CarburantiDataUpdateCoordinator(hass, entry)
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    csv_manager = domain_data.get(_CSV_MANAGER)
+    if not isinstance(csv_manager, CSVStationManager):
+        csv_manager = CSVStationManager(hass)
+        domain_data[_CSV_MANAGER] = csv_manager
+
+        async def _async_csv_update_callback(now: datetime) -> None:
+            _LOGGER.info("Performing periodic CSV data update at %s", now)
+            if not await csv_manager.async_periodic_update():
+                _LOGGER.warning("Periodic CSV update failed")
+
+        domain_data[_CSV_UPDATE_LISTENER] = async_track_time_interval(
+            hass,
+            _async_csv_update_callback,
+            timedelta(hours=CSV_UPDATE_INTERVAL),
+        )
+
+    coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
         await coordinator.async_shutdown()
+        _async_remove_csv_owner_if_unused(hass)
         raise
 
     cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
     _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+    domain_data[entry.entry_id] = {
         "coordinator": coordinator,
         "listener": None,
     }
@@ -132,6 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except (ImportError, TypeError, ValueError):
         await coordinator.async_shutdown()
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        _async_remove_csv_owner_if_unused(hass)
         return False
 
     _async_cleanup_legacy_entity_registry(hass, entry)
@@ -177,6 +200,22 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
             entity_registry.async_update_entity(entity_id, name=None)
 
 
+def _async_remove_csv_owner_if_unused(hass: HomeAssistant) -> bool:
+    """Remove registry-wide resources when no config entries remain."""
+    domain_data = hass.data.get(DOMAIN, {})
+    if any(
+        isinstance(value, dict) and "coordinator" in value
+        for value in domain_data.values()
+    ):
+        return False
+
+    listener = domain_data.pop(_CSV_UPDATE_LISTENER, None)
+    if listener is not None:
+        listener()
+    domain_data.pop(_CSV_MANAGER, None)
+    return True
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register integration services once per Home Assistant instance."""
     if hass.data.get(_SERVICES_REGISTERED):
@@ -205,19 +244,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.warning("CSV update failed for entry %s", entry_id)
             return
 
-        refresh_targets = [(entry_id, primary_coordinator)]
-        for entry_id, coordinator in coordinators[1:]:
-            if not await coordinator.csv_manager.async_load_cached_data():
-                _LOGGER.warning(
-                    "Failed to load refreshed CSV cache for entry %s, trying re-initialization",
-                    entry_id,
-                )
-                if not await coordinator.csv_manager.async_initialize():
-                    _LOGGER.warning("Skipping refresh for entry %s because CSV sync failed", entry_id)
-                    continue
-            refresh_targets.append((entry_id, coordinator))
-
-        for entry_id, coordinator in refresh_targets:
+        for entry_id, coordinator in coordinators:
             await coordinator.async_request_refresh()
             _LOGGER.info("CSV update and refresh completed for entry %s", entry_id)
 
@@ -235,19 +262,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.warning("Cache cleared but CSV re-initialization failed; skipping station refresh")
             return
 
-        refresh_targets = [coordinators[0]]
-        for entry_id, coordinator in coordinators[1:]:
-            if not await coordinator.csv_manager.async_load_cached_data():
-                _LOGGER.warning(
-                    "Failed to load rebuilt CSV cache for entry %s, trying re-initialization",
-                    entry_id,
-                )
-                if not await coordinator.csv_manager.async_initialize():
-                    _LOGGER.warning("Skipping refresh for entry %s because CSV sync failed", entry_id)
-                    continue
-            refresh_targets.append((entry_id, coordinator))
-
-        for entry_id, coordinator in refresh_targets:
+        for entry_id, coordinator in coordinators:
             await coordinator.async_request_refresh()
             _LOGGER.info("Cache cleared and re-initialized for entry %s", entry_id)
 
@@ -312,7 +327,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             listener()
         await entry_data["coordinator"].async_shutdown()
 
-        if not hass.data[DOMAIN]:
+        if _async_remove_csv_owner_if_unused(hass):
             hass.services.async_remove(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
             hass.services.async_remove(DOMAIN, SERVICE_CLEAR_CACHE)
             hass.services.async_remove(DOMAIN, SERVICE_COMPARE_STATIONS)

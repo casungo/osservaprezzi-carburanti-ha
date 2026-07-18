@@ -56,7 +56,9 @@ class FakeCoordinator:
         clear_result: bool = True,
     ) -> None:
         """Initialize counters."""
-        self.csv_manager = FakeCSVManager(load_result, initialize_result, clear_result)
+        self.csv_manager = args[2] if len(args) > 2 else FakeCSVManager(
+            load_result, initialize_result, clear_result
+        )
         self.force_update_calls = 0
         self.refresh_calls = 0
         self.first_refresh_calls = 0
@@ -131,7 +133,7 @@ def test_force_csv_update_service_updates_shared_csv_once(monkeypatch) -> None:
 
     assert first.force_update_calls == 1
     assert second.force_update_calls == 0
-    assert second.csv_manager.load_calls == 1
+    assert second.csv_manager.load_calls == 0
     assert first.refresh_calls == 1
     assert second.refresh_calls == 1
 
@@ -158,7 +160,7 @@ def test_force_csv_update_service_does_not_refresh_when_shared_update_fails(monk
     assert second.refresh_calls == 0
 
 
-def test_force_csv_update_service_initializes_secondary_when_cache_load_fails(monkeypatch) -> None:
+def test_force_csv_update_service_does_not_reload_shared_manager(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     hass, registered_services = _build_hass_with_services()
     first = FakeCoordinator()
@@ -173,13 +175,13 @@ def test_force_csv_update_service_initializes_secondary_when_cache_load_fails(mo
     init_module._async_register_services(hass)
     asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
 
-    assert second.csv_manager.load_calls == 1
-    assert second.csv_manager.initialize_calls == 1
+    assert second.csv_manager.load_calls == 0
+    assert second.csv_manager.initialize_calls == 0
     assert first.refresh_calls == 1
     assert second.refresh_calls == 1
 
 
-def test_force_csv_update_service_skips_secondary_when_cache_sync_fails(monkeypatch) -> None:
+def test_force_csv_update_service_refreshes_all_with_shared_manager(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     hass, registered_services = _build_hass_with_services()
     first = FakeCoordinator()
@@ -194,10 +196,10 @@ def test_force_csv_update_service_skips_secondary_when_cache_sync_fails(monkeypa
     init_module._async_register_services(hass)
     asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
 
-    assert second.csv_manager.load_calls == 1
-    assert second.csv_manager.initialize_calls == 1
+    assert second.csv_manager.load_calls == 0
+    assert second.csv_manager.initialize_calls == 0
     assert first.refresh_calls == 1
-    assert second.refresh_calls == 0
+    assert second.refresh_calls == 1
 
 
 def test_clear_cache_service_clears_shared_csv_once(monkeypatch) -> None:
@@ -218,7 +220,7 @@ def test_clear_cache_service_clears_shared_csv_once(monkeypatch) -> None:
     assert first.csv_manager.clear_calls == 1
     assert second.csv_manager.clear_calls == 0
     assert first.csv_manager.initialize_calls == 1
-    assert second.csv_manager.load_calls == 1
+    assert second.csv_manager.load_calls == 0
     assert second.csv_manager.initialize_calls == 0
     assert first.refresh_calls == 1
     assert second.refresh_calls == 1
@@ -268,7 +270,7 @@ def test_clear_cache_service_does_not_refresh_when_primary_initialize_fails(monk
     assert second.refresh_calls == 0
 
 
-def test_clear_cache_service_initializes_secondary_when_cache_load_fails(monkeypatch) -> None:
+def test_clear_cache_service_does_not_reload_shared_manager(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     hass, registered_services = _build_hass_with_services()
     first = FakeCoordinator()
@@ -285,13 +287,13 @@ def test_clear_cache_service_initializes_secondary_when_cache_load_fails(monkeyp
 
     assert first.csv_manager.clear_calls == 1
     assert second.csv_manager.clear_calls == 0
-    assert second.csv_manager.load_calls == 1
-    assert second.csv_manager.initialize_calls == 1
+    assert second.csv_manager.load_calls == 0
+    assert second.csv_manager.initialize_calls == 0
     assert first.refresh_calls == 1
     assert second.refresh_calls == 1
 
 
-def test_clear_cache_service_skips_secondary_when_cache_sync_fails(monkeypatch) -> None:
+def test_clear_cache_service_refreshes_all_with_shared_manager(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     hass, registered_services = _build_hass_with_services()
     first = FakeCoordinator()
@@ -306,10 +308,10 @@ def test_clear_cache_service_skips_secondary_when_cache_sync_fails(monkeypatch) 
     init_module._async_register_services(hass)
     asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
 
-    assert second.csv_manager.load_calls == 1
-    assert second.csv_manager.initialize_calls == 1
+    assert second.csv_manager.load_calls == 0
+    assert second.csv_manager.initialize_calls == 0
     assert first.refresh_calls == 1
-    assert second.refresh_calls == 0
+    assert second.refresh_calls == 1
 
 
 def test_async_setup_registers_global_services_without_entries() -> None:
@@ -404,6 +406,7 @@ def test_setup_entry_registers_services_after_last_entry_unload(monkeypatch) -> 
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
     monkeypatch.setattr(init_module, "async_track_point_in_utc_time", lambda *args: lambda: None)
+    monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
     monkeypatch.setattr(
         init_module.er,
         "async_get",
@@ -428,6 +431,57 @@ def test_setup_entry_registers_services_after_last_entry_unload(monkeypatch) -> 
     assert init_module.SERVICE_FORCE_CSV_UPDATE in registered_services
     assert init_module.SERVICE_CLEAR_CACHE in registered_services
     assert init_module.SERVICE_COMPARE_STATIONS in registered_services
+
+
+def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    monkeypatch.setattr(init_module, "CSVStationManager", FakeCSVManager)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", lambda *args: lambda: None)
+    registry_listener = MagicMock()
+    track_registry = MagicMock(return_value=registry_listener)
+    monkeypatch.setattr(init_module, "async_track_time_interval", track_registry)
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+
+    def make_entry(entry_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            entry_id=entry_id,
+            title=entry_id,
+            unique_id=entry_id,
+            data={"station_id": entry_id},
+            options={},
+            async_on_unload=MagicMock(),
+            add_update_listener=MagicMock(return_value=lambda: None),
+        )
+
+    first = make_entry("entry_1")
+    second = make_entry("entry_2")
+    assert asyncio.run(init_module.async_setup_entry(hass, first)) is True
+    assert asyncio.run(init_module.async_setup_entry(hass, second)) is True
+
+    domain_data = hass.data[init_module.DOMAIN]
+    shared_manager = domain_data[init_module._CSV_MANAGER]
+    assert domain_data["entry_1"]["coordinator"].csv_manager is shared_manager
+    assert domain_data["entry_2"]["coordinator"].csv_manager is shared_manager
+    track_registry.assert_called_once()
+    shared_manager.async_periodic_update = AsyncMock(return_value=False)
+    registry_callback = track_registry.call_args.args[1]
+    asyncio.run(registry_callback(datetime(2026, 1, 1)))
+    shared_manager.async_periodic_update.assert_awaited_once()
+
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    assert asyncio.run(init_module.async_unload_entry(hass, second)) is True
+    registry_listener.assert_not_called()
+    assert domain_data[init_module._CSV_MANAGER] is shared_manager
+
+    assert asyncio.run(init_module.async_unload_entry(hass, first)) is True
+    registry_listener.assert_called_once()
+    assert init_module._CSV_MANAGER not in domain_data
+    assert init_module._CSV_UPDATE_LISTENER not in domain_data
 
 
 def test_cleanup_legacy_entity_registry_clears_old_default_name(monkeypatch) -> None:
@@ -617,6 +671,7 @@ def test_setup_entry_scheduled_refresh_reschedules(monkeypatch) -> None:
         return lambda: None
 
     monkeypatch.setattr(init_module, "async_track_point_in_utc_time", fake_track)
+    monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
     monkeypatch.setattr(init_module.dt_util, "as_utc", lambda value: value)
     hass, _ = _build_hass_with_services()
     hass.data = {}
@@ -739,6 +794,7 @@ def test_old_scheduled_refresh_does_not_overwrite_reload_listener(monkeypatch) -
 def test_setup_entry_returns_false_when_cron_schedule_fails(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     monkeypatch.setattr(init_module, "get_next_run_time", MagicMock(side_effect=ValueError("bad")))
+    monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
     hass, _ = _build_hass_with_services()
     hass.data = {}
     entry = SimpleNamespace(
@@ -762,6 +818,7 @@ def test_setup_entry_shuts_down_on_first_refresh_not_ready(monkeypatch) -> None:
             created.append(self)
 
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", NotReadyCoordinator)
+    monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
     hass, _ = _build_hass_with_services()
     hass.data = {}
     entry = SimpleNamespace(entry_id="entry_1", title="Test Station", unique_id="station_1", options={})
@@ -801,7 +858,11 @@ def test_unload_entry_removes_listener_coordinator_and_services() -> None:
     listener = MagicMock()
     coordinator = FakeCoordinator()
     hass.data = {
-        init_module.DOMAIN: {"entry_1": {"listener": listener, "coordinator": coordinator}},
+        init_module.DOMAIN: {
+            init_module._CSV_MANAGER: coordinator.csv_manager,
+            init_module._CSV_UPDATE_LISTENER: MagicMock(),
+            "entry_1": {"listener": listener, "coordinator": coordinator},
+        },
         init_module._SERVICES_REGISTERED: True,
     }
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)

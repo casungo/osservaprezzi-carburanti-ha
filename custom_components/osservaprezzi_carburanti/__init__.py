@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_time_interval
@@ -232,39 +232,64 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 coordinators.append((entry_id, coordinator))
         return coordinators
 
+    async def _async_refresh_coordinators(
+        coordinators: list[tuple[str, CarburantiDataUpdateCoordinator]],
+        action: str,
+    ) -> None:
+        failed_entry_ids: list[str] = []
+        for entry_id, coordinator in coordinators:
+            try:
+                await coordinator.async_request_refresh()
+            except Exception:  # noqa: BLE001 - service must attempt every configured station
+                failed_entry_ids.append(entry_id)
+                _LOGGER.exception("Station refresh failed for entry %s after %s", entry_id, action)
+            else:
+                _LOGGER.info("%s completed for entry %s", action, entry_id)
+
+        if failed_entry_ids:
+            raise HomeAssistantError(
+                f"{action} succeeded, but {len(failed_entry_ids)} station refresh(es) failed"
+            )
+
     async def _handle_force_csv_update(call: ServiceCall) -> None:
         _LOGGER.info("Service force_csv_update triggered")
         coordinators = _iter_coordinators()
         if not coordinators:
-            return
+            raise HomeAssistantError("No active Osservaprezzi entries")
 
         entry_id, primary_coordinator = coordinators[0]
-        success = await primary_coordinator.async_force_csv_update()
+        try:
+            success = await primary_coordinator.async_force_csv_update()
+        except Exception as err:
+            _LOGGER.exception("CSV update failed for entry %s", entry_id)
+            raise HomeAssistantError("Unable to update the station cache") from err
         if not success:
             _LOGGER.warning("CSV update failed for entry %s", entry_id)
-            return
+            raise HomeAssistantError("Unable to update the station cache")
 
-        for entry_id, coordinator in coordinators:
-            await coordinator.async_request_refresh()
-            _LOGGER.info("CSV update and refresh completed for entry %s", entry_id)
+        await _async_refresh_coordinators(coordinators, "CSV update")
 
     async def _handle_clear_cache(call: ServiceCall) -> None:
         _LOGGER.info("Service clear_cache triggered")
         coordinators = _iter_coordinators()
         if not coordinators:
-            return
+            raise HomeAssistantError("No active Osservaprezzi entries")
 
         _, primary_coordinator = coordinators[0]
-        if not await primary_coordinator.csv_manager.async_clear_cache():
+        try:
+            cleared = await primary_coordinator.csv_manager.async_clear_cache()
+            initialized = cleared and await primary_coordinator.csv_manager.async_initialize()
+        except Exception as err:
+            _LOGGER.exception("CSV cache reset failed")
+            raise HomeAssistantError("Unable to reset the station cache") from err
+        if not cleared:
             _LOGGER.warning("CSV cache clear failed; skipping station refresh")
-            return
-        if not await primary_coordinator.csv_manager.async_initialize():
+            raise HomeAssistantError("Unable to reset the station cache")
+        if not initialized:
             _LOGGER.warning("Cache cleared but CSV re-initialization failed; skipping station refresh")
-            return
+            raise HomeAssistantError("Unable to reset the station cache")
 
-        for entry_id, coordinator in coordinators:
-            await coordinator.async_request_refresh()
-            _LOGGER.info("Cache cleared and re-initialized for entry %s", entry_id)
+        await _async_refresh_coordinators(coordinators, "Cache reset")
 
     async def _handle_compare_stations(call: ServiceCall) -> ServiceResponse:
         _LOGGER.info("Service compare_stations triggered")

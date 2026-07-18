@@ -7,6 +7,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 
 init_module = importlib.import_module("custom_components.osservaprezzi_carburanti")
 
@@ -54,6 +56,8 @@ class FakeCoordinator:
         load_result: bool = True,
         initialize_result: bool = True,
         clear_result: bool = True,
+        force_error: BaseException | None = None,
+        refresh_error: BaseException | None = None,
     ) -> None:
         """Initialize counters."""
         self.csv_manager = args[2] if len(args) > 2 else FakeCSVManager(
@@ -64,6 +68,8 @@ class FakeCoordinator:
         self.first_refresh_calls = 0
         self.shutdown_calls = 0
         self.update_result = update_result
+        self.force_error = force_error
+        self.refresh_error = refresh_error
         self.data = {}
         self.raise_first_refresh = False
 
@@ -80,11 +86,15 @@ class FakeCoordinator:
     async def async_force_csv_update(self) -> bool:
         """Track forced CSV updates."""
         self.force_update_calls += 1
+        if self.force_error is not None:
+            raise self.force_error
         return self.update_result
 
     async def async_request_refresh(self) -> None:
         """Track coordinator refresh calls."""
         self.refresh_calls += 1
+        if self.refresh_error is not None:
+            raise self.refresh_error
 
 
 class FakeEntityRegistry:
@@ -151,7 +161,8 @@ def test_force_csv_update_service_does_not_refresh_when_shared_update_fails(monk
     }
 
     init_module._async_register_services(hass)
-    asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
+    with pytest.raises(init_module.HomeAssistantError, match="Unable to update"):
+        asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
 
     assert first.force_update_calls == 1
     assert second.force_update_calls == 0
@@ -239,7 +250,8 @@ def test_clear_cache_service_does_not_refresh_when_clear_fails(monkeypatch) -> N
     }
 
     init_module._async_register_services(hass)
-    asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
+    with pytest.raises(init_module.HomeAssistantError, match="Unable to reset"):
+        asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
 
     assert first.csv_manager.clear_calls == 1
     assert first.csv_manager.initialize_calls == 0
@@ -261,7 +273,8 @@ def test_clear_cache_service_does_not_refresh_when_primary_initialize_fails(monk
     }
 
     init_module._async_register_services(hass)
-    asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
+    with pytest.raises(init_module.HomeAssistantError, match="Unable to reset"):
+        asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
 
     assert first.csv_manager.clear_calls == 1
     assert first.csv_manager.initialize_calls == 1
@@ -335,17 +348,78 @@ def test_register_services_is_idempotent() -> None:
     assert registered_services == {}
 
 
-def test_services_return_when_no_coordinators() -> None:
+def test_cache_services_raise_when_no_coordinators() -> None:
     hass, registered_services = _build_hass_with_services()
     hass.data = {init_module.DOMAIN: {"other": object()}}
 
     init_module._async_register_services(hass)
 
-    asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
-    asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
+    with pytest.raises(init_module.HomeAssistantError, match="No active"):
+        asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
+    with pytest.raises(init_module.HomeAssistantError, match="No active"):
+        asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
     result = asyncio.run(registered_services[init_module.SERVICE_COMPARE_STATIONS](SimpleNamespace()))
 
     assert result == {"stations": {}}
+
+
+def test_force_csv_update_translates_manager_exception(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    coordinator = FakeCoordinator(force_error=RuntimeError("private path: /tmp/cache.csv"))
+    hass.data = {init_module.DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+    init_module._async_register_services(hass)
+
+    with pytest.raises(init_module.HomeAssistantError, match="Unable to update") as exc_info:
+        asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
+
+    assert "/tmp" not in str(exc_info.value)
+
+
+def test_clear_cache_translates_manager_exception(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    coordinator = FakeCoordinator()
+    coordinator.csv_manager.async_clear_cache = AsyncMock(side_effect=RuntimeError("private data"))
+    hass.data = {init_module.DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+    init_module._async_register_services(hass)
+
+    with pytest.raises(init_module.HomeAssistantError, match="Unable to reset") as exc_info:
+        asyncio.run(registered_services[init_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
+
+    assert "private data" not in str(exc_info.value)
+
+
+def test_force_csv_update_attempts_all_refreshes_before_raising(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    first = FakeCoordinator(refresh_error=RuntimeError("first failed"))
+    second = FakeCoordinator(refresh_error=RuntimeError("second failed"))
+    third = FakeCoordinator()
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
+            "entry_3": {"coordinator": third},
+        }
+    }
+    init_module._async_register_services(hass)
+
+    with pytest.raises(init_module.HomeAssistantError, match=r"2 station refresh\(es\) failed"):
+        asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
+
+    assert [first.refresh_calls, second.refresh_calls, third.refresh_calls] == [1, 1, 1]
+
+
+def test_force_csv_update_propagates_cancellation(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    coordinator = FakeCoordinator(force_error=asyncio.CancelledError())
+    hass.data = {init_module.DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+    init_module._async_register_services(hass)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(registered_services[init_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
 
 
 def test_compare_stations_service_returns_station_payload(monkeypatch) -> None:

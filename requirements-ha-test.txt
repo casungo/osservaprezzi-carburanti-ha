@@ -1,0 +1,3 @@
+-r requirements-test.txt
+cronsim
+pytest-homeassistant-custom-component==0.13.346

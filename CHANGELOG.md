@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Run the live upstream contract check daily and the Home Assistant Docker regression twice monthly, with both checks also available through manual workflow dispatch
+
+### Fixed
+- Keep the Docker regression import check aligned with the current entity helper module
+
+## [2.2.0] - 2026-06-08
+
+### Added
+- Add Battery State Card dashboard examples for displaying and grouping fuel prices
+- Add a Docker-based smoke regression against a real Home Assistant runtime and a documented release-validation checklist
+- Add broader regression coverage for API, config flow, coordinator, CSV cache, entity, and live upstream behavior
+
+### Changed
+- Move opening-hours and station-service entities to dedicated shared entity and binary-sensor implementations with translated diagnostic names
+- Strengthen shared CSV cache update and clear operations across all configured station entries
+- Refresh time-sensitive opening-hours entity state independently of price polling
+
+### Removed
+- Remove legacy service sensor registry entries superseded by service binary sensors
+
 ## [2.1.6] - 2026-04-30
 
 ### Fixed

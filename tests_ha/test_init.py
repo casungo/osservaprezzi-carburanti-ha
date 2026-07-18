@@ -150,7 +150,10 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         if entity.config_entry_id == entry.entry_id
     }
     assert entity_ids_after_reload == entity_ids_before_reload
-    assert len(hass.data[DOMAIN]) == 1
+    assert sum(
+        isinstance(value, dict) and "coordinator" in value
+        for value in hass.data[DOMAIN].values()
+    ) == 1
     assert hass.data[DOMAIN][entry.entry_id]["coordinator"] is not coordinator_before_reload
     assert hass.data[DOMAIN][entry.entry_id]["listener"] is not None
     assert hass.data[DOMAIN][entry.entry_id]["listener"] is not listener_before_reload

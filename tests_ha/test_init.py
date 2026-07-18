@@ -93,6 +93,9 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         entity.entity_id for entity in registry.entities.values()
         if entity.config_entry_id == entry.entry_id
     }
+    coordinator_before_reload = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    listener_before_reload = hass.data[DOMAIN][entry.entry_id]["listener"]
+    assert listener_before_reload is not None
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     entity_ids_after_reload = {
@@ -100,6 +103,10 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         if entity.config_entry_id == entry.entry_id
     }
     assert entity_ids_after_reload == entity_ids_before_reload
+    assert len(hass.data[DOMAIN]) == 1
+    assert hass.data[DOMAIN][entry.entry_id]["coordinator"] is not coordinator_before_reload
+    assert hass.data[DOMAIN][entry.entry_id]["listener"] is not None
+    assert hass.data[DOMAIN][entry.entry_id]["listener"] is not listener_before_reload
 
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     assert coordinator._csv_update_listener is not None

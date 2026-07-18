@@ -98,6 +98,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     def _schedule_next_refresh() -> None:
+        entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if entry_data is None or entry_data.get("coordinator") is not coordinator:
+            return
+
         try:
             next_run_time = get_next_run_time(cron_expression)
         except (ImportError, TypeError, ValueError) as err:
@@ -114,7 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _request_refresh,
             dt_util.as_utc(next_run_time),
         )
-        hass.data[DOMAIN][entry.entry_id]["listener"] = listener
+        entry_data["listener"] = listener
 
     async def _request_refresh(now: datetime) -> None:
         _LOGGER.info("Executing scheduled refresh for %s at %s", entry.title, now)

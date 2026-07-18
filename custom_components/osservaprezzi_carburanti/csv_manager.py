@@ -8,7 +8,6 @@ import io
 import json
 import logging
 import os
-import shutil
 import tempfile
 from datetime import datetime, timedelta
 from typing import Any
@@ -37,18 +36,6 @@ CSV_COLUMNS = {
     "Longitudine": "longitude",
 }
 REQUIRED_CSV_COLUMNS = ("id", "latitude", "longitude")
-
-
-def _write_file_sync(path: str, content: str) -> None:
-    """Write content to file synchronously."""
-    with open(path, "w", encoding="utf-8", newline="") as file_handle:
-        file_handle.write(content)
-
-
-def _read_file_sync(path: str) -> str:
-    """Read content from file synchronously."""
-    with open(path, "r", encoding="utf-8") as file_handle:
-        return file_handle.read()
 
 
 def _load_json_file_sync(path: str) -> dict[str, Any]:
@@ -82,27 +69,6 @@ def _write_json_file_atomic_sync(path: str, data: dict[str, Any]) -> None:
                 os.remove(temp_path)
 
 
-def _replace_file_sync(source_path: str, destination_path: str) -> None:
-    """Atomically replace a file."""
-    os.replace(source_path, destination_path)
-
-
-def _create_temp_file_sync(directory: str, prefix: str) -> str:
-    """Create a temporary file and return its path."""
-    temp_file = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        newline="",
-        delete=False,
-        dir=directory,
-        prefix=prefix,
-        suffix=".tmp",
-    )
-    temp_path = temp_file.name
-    temp_file.close()
-    return temp_path
-
-
 class CSVStationManager:
     """Manager for CSV station data."""
 
@@ -114,32 +80,44 @@ class CSVStationManager:
         self._last_update: datetime | None = None
         self._csv_etag: str | None = None
         self._csv_last_modified: str | None = None
-        self._csv_path = hass.config.path(".storage", f"{DOMAIN}_stations.csv")
         self._cache_path = hass.config.path(".storage", f"{DOMAIN}_cache.json")
+        self._legacy_csv_paths = (
+            hass.config.path("osservaprezzi_stations.csv"),
+            hass.config.path(".storage", f"{DOMAIN}_stations.csv"),
+        )
         self._detected_separator = "|"
         self._operation_lock = asyncio.Lock()
         self._cache_generation = 0
         self._initialized = False
 
     async def _async_migrate_legacy_files(self) -> None:
-        """Migrate old CSV/cache files from config root to .storage."""
-        old_csv = self.hass.config.path("osservaprezzi_stations.csv")
+        """Migrate the legacy JSON cache and remove obsolete raw CSV files."""
         old_cache = self.hass.config.path("osservaprezzi_cache.json")
+        old_exists = await self.hass.async_add_executor_job(os.path.exists, old_cache)
+        if old_exists:
+            new_exists = await self.hass.async_add_executor_job(os.path.exists, self._cache_path)
+            if not new_exists:
+                try:
+                    await self.hass.async_add_executor_job(
+                        os.replace, old_cache, self._cache_path
+                    )
+                    _LOGGER.info("Migrated legacy JSON station cache")
+                except OSError as err:
+                    _LOGGER.warning("Failed to migrate legacy JSON station cache: %s", err)
 
-        for old_path, new_path in ((old_csv, self._csv_path), (old_cache, self._cache_path)):
-            old_exists = await self.hass.async_add_executor_job(os.path.exists, old_path)
-            if not old_exists:
-                continue
+        await self._async_remove_legacy_csv_files()
 
-            new_exists = await self.hass.async_add_executor_job(os.path.exists, new_path)
-            if new_exists:
-                continue
-
+    async def _async_remove_legacy_csv_files(self) -> None:
+        """Best-effort remove raw CSV caches created by released versions."""
+        for file_path in self._legacy_csv_paths:
             try:
-                await self.hass.async_add_executor_job(shutil.move, old_path, new_path)
-                _LOGGER.info("Migrated legacy file: %s -> %s", old_path, new_path)
+                exists = await self.hass.async_add_executor_job(os.path.exists, file_path)
+                if not exists:
+                    continue
+                await self.hass.async_add_executor_job(os.remove, file_path)
+                _LOGGER.info("Removed legacy raw station cache")
             except OSError as err:
-                _LOGGER.warning("Failed to migrate %s: %s", old_path, err)
+                _LOGGER.warning("Failed to remove legacy raw station cache: %s", err)
 
     async def async_update_csv_data(self, force_update: bool = False) -> bool:
         """Update CSV data from the remote source."""
@@ -211,7 +189,6 @@ class CSVStationManager:
                 csv_etag=csv_etag,
                 csv_last_modified=csv_last_modified,
             )
-            await self._async_write_csv_file(content)
             if not await self._async_save_cache_data(data):
                 _LOGGER.error("Failed to persist downloaded CSV station data")
                 return False
@@ -228,13 +205,6 @@ class CSVStationManager:
             _LOGGER.error("Error updating CSV data: %s", err)
             return False
 
-    def _parse_csv_content_to_cache(
-        self,
-        content: str,
-    ) -> tuple[bool, str, dict[str, dict[str, Any]]]:
-        """Parse downloaded CSV content without mutating manager state."""
-        return self._parse_csv_text_to_cache(content)
-
     def _build_csv_request_headers(self, force_update: bool) -> dict[str, str]:
         """Build request headers for the CSV download."""
         headers = {
@@ -247,22 +217,6 @@ class CSVStationManager:
             if self._csv_last_modified:
                 headers["If-Modified-Since"] = self._csv_last_modified
         return headers
-
-    async def _async_write_csv_file(self, content: str) -> None:
-        """Write the downloaded CSV atomically to disk."""
-        temp_path = await self.hass.async_add_executor_job(
-            _create_temp_file_sync,
-            os.path.dirname(self._csv_path),
-            f"{DOMAIN}_stations_",
-        )
-
-        try:
-            await self.hass.async_add_executor_job(_write_file_sync, temp_path, content)
-            await self.hass.async_add_executor_job(_replace_file_sync, temp_path, self._csv_path)
-        except OSError:
-            with contextlib.suppress(OSError):
-                await self.hass.async_add_executor_job(os.remove, temp_path)
-            raise
 
     def _build_column_indices(self, header_line: str, separator: str) -> dict[str, int]:
         """Build a mapping of internal column names to CSV indexes."""
@@ -304,14 +258,7 @@ class CSVStationManager:
             return station_id, station_data
         return None
 
-    def _parse_csv_lines_to_cache(
-        self,
-        lines: list[str],
-    ) -> tuple[bool, str, dict[str, dict[str, Any]]]:
-        """Parse CSV lines into a station cache without mutating manager state."""
-        return self._parse_csv_text_to_cache("\n".join(lines))
-
-    def _parse_csv_text_to_cache(
+    def _parse_csv_content_to_cache(
         self,
         content: str,
     ) -> tuple[bool, str, dict[str, dict[str, Any]]]:
@@ -379,20 +326,6 @@ class CSVStationManager:
             return float(value.replace(",", "."))
         except (TypeError, ValueError):
             return None
-
-    async def _parse_csv_data_from_file(self) -> bool:
-        """Parse CSV from disk and populate station cache."""
-        try:
-            content = await self.hass.async_add_executor_job(_read_file_sync, self._csv_path)
-        except OSError as err:
-            _LOGGER.error("Error reading CSV data from disk: %s", err)
-            return False
-
-        success, separator, stations_cache = self._parse_csv_text_to_cache(content)
-        if success:
-            self._detected_separator = separator
-            self._stations_cache = stations_cache
-        return success
 
     async def async_load_cached_data(self) -> bool:
         """Load cached station data from local file."""
@@ -578,23 +511,24 @@ class CSVStationManager:
     async def async_clear_cache(self) -> bool:
         """Clear the CSV cache files and in-memory data."""
         async with self._operation_lock:
+            self._cache_generation += 1
+            self._initialized = False
+            self._stations_cache.clear()
+            self._last_update = None
+            self._csv_etag = None
+            self._csv_last_modified = None
+
+            success = True
             try:
-                self._cache_generation += 1
-                self._initialized = False
-                self._stations_cache.clear()
-                self._last_update = None
-                self._csv_etag = None
-                self._csv_last_modified = None
-
-                for file_path in (self._cache_path, self._csv_path):
-                    exists = await self.hass.async_add_executor_job(os.path.exists, file_path)
-                    if exists:
-                        await self.hass.async_add_executor_job(os.remove, file_path)
-                        _LOGGER.info("Removed cache file: %s", file_path)
-
-                _LOGGER.info("CSV cache cleared successfully")
-                return True
-
+                exists = await self.hass.async_add_executor_job(os.path.exists, self._cache_path)
+                if exists:
+                    await self.hass.async_add_executor_job(os.remove, self._cache_path)
+                    _LOGGER.info("Removed JSON station cache")
             except OSError as err:
                 _LOGGER.error("Error clearing CSV cache: %s", err)
-                return False
+                success = False
+
+            await self._async_remove_legacy_csv_files()
+            if success:
+                _LOGGER.info("CSV cache cleared successfully")
+            return success

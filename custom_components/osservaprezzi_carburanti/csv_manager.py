@@ -53,6 +53,37 @@ def _read_file_sync(path: str) -> str:
         return file_handle.read()
 
 
+def _load_json_file_sync(path: str) -> dict[str, Any]:
+    """Read and decode a JSON document synchronously."""
+    with open(path, "r", encoding="utf-8") as file_handle:
+        data = json.load(file_handle)
+    if not isinstance(data, dict):
+        raise ValueError("Cache root must be an object")
+    return data
+
+
+def _write_json_file_atomic_sync(path: str, data: dict[str, Any]) -> None:
+    """Encode and atomically replace a JSON document synchronously."""
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=os.path.dirname(path),
+            prefix=f"{DOMAIN}_cache_",
+            suffix=".tmp",
+        ) as file_handle:
+            temp_path = file_handle.name
+            json.dump(data, file_handle, ensure_ascii=False, indent=2)
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                os.remove(temp_path)
+
+
 def _replace_file_sync(source_path: str, destination_path: str) -> None:
     """Atomically replace a file."""
     os.replace(source_path, destination_path)
@@ -137,6 +168,16 @@ class CSVStationManager:
                         if cache_generation != _CSV_CACHE_GENERATION:
                             _LOGGER.info("Ignoring CSV 304 response after cache was cleared")
                             return False
+                        data = self._build_cache_data(
+                            stations_cache=self._stations_cache,
+                            last_update=now,
+                            separator=self._detected_separator,
+                            csv_etag=self._csv_etag,
+                            csv_last_modified=self._csv_last_modified,
+                        )
+                        if not await self._async_save_cache_data(data):
+                            _LOGGER.error("Failed to persist CSV 304 refresh metadata")
+                            return False
                         self._last_update = now
                     _LOGGER.debug("CSV not modified, keeping cached station data")
                     return True
@@ -169,7 +210,17 @@ class CSVStationManager:
                     _LOGGER.debug("CSV data was refreshed by another task, skipping downloaded update")
                     return True
 
+                data = self._build_cache_data(
+                    stations_cache=stations_cache,
+                    last_update=now,
+                    separator=separator,
+                    csv_etag=csv_etag,
+                    csv_last_modified=csv_last_modified,
+                )
                 await self._async_write_csv_file(content)
+                if not await self._async_save_cache_data(data):
+                    _LOGGER.error("Failed to persist downloaded CSV station data")
+                    return False
                 self._csv_etag = csv_etag
                 self._csv_last_modified = csv_last_modified
                 self._detected_separator = separator
@@ -345,10 +396,31 @@ class CSVStationManager:
         async with _CSV_IO_LOCK:
             try:
                 _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
-                content = await self.hass.async_add_executor_job(_read_file_sync, self._cache_path)
-                data = json.loads(content)
+                data = await self.hass.async_add_executor_job(
+                    _load_json_file_sync, self._cache_path
+                )
 
                 cache_version = data.get("version", "1.0")
+                stations = data.get("stations", {})
+                last_update = data.get("last_update")
+                separator = data.get("csv_separator", "|")
+                csv_etag = data.get("csv_etag")
+                csv_last_modified = data.get("csv_last_modified")
+                if not isinstance(cache_version, str):
+                    raise ValueError("Cache version must be a string")
+                if not isinstance(stations, dict) or not all(
+                    isinstance(station_id, str) and isinstance(station, dict)
+                    for station_id, station in stations.items()
+                ):
+                    raise ValueError("Cache stations must be an object of station objects")
+                if last_update is not None and not isinstance(last_update, str):
+                    raise ValueError("Cache last_update must be a string or null")
+                if not isinstance(separator, str):
+                    raise ValueError("Cache csv_separator must be a string")
+                if csv_etag is not None and not isinstance(csv_etag, str):
+                    raise ValueError("Cache csv_etag must be a string or null")
+                if csv_last_modified is not None and not isinstance(csv_last_modified, str):
+                    raise ValueError("Cache csv_last_modified must be a string or null")
                 if cache_version != CACHE_VERSION:
                     _LOGGER.info(
                         "Cache version %s is outdated (expected %s), forcing update",
@@ -357,11 +429,12 @@ class CSVStationManager:
                     )
                     return False
 
-                self._stations_cache = data.get("stations", {})
-                self._last_update = self._parse_cached_datetime(data.get("last_update"))
-                self._detected_separator = data.get("csv_separator", "|")
-                self._csv_etag = data.get("csv_etag")
-                self._csv_last_modified = data.get("csv_last_modified")
+                parsed_last_update = self._parse_cached_datetime(last_update)
+                self._stations_cache = stations
+                self._last_update = parsed_last_update
+                self._detected_separator = separator
+                self._csv_etag = csv_etag
+                self._csv_last_modified = csv_last_modified
                 _LOGGER.info(
                     "Loaded %d stations from cache (version %s, separator: %s)",
                     len(self._stations_cache),
@@ -398,27 +471,49 @@ class CSVStationManager:
     async def async_save_cached_data(self) -> bool:
         """Save station data to local cache file."""
         async with _CSV_IO_LOCK:
-            try:
-                data = {
-                    "stations": self._stations_cache,
-                    "last_update": self._last_update.isoformat() if self._last_update else None,
-                    "version": CACHE_VERSION,
-                    "csv_separator": self._detected_separator,
-                    "csv_etag": self._csv_etag,
-                    "csv_last_modified": self._csv_last_modified,
-                }
-                content = json.dumps(data, ensure_ascii=False, indent=2)
-                await self.hass.async_add_executor_job(_write_file_sync, self._cache_path, content)
-                _LOGGER.debug(
-                    "Saved station data to cache (version %s, separator: %s)",
-                    CACHE_VERSION,
-                    self._detected_separator,
-                )
-                return True
+            data = self._build_cache_data(
+                stations_cache=self._stations_cache,
+                last_update=self._last_update,
+                separator=self._detected_separator,
+                csv_etag=self._csv_etag,
+                csv_last_modified=self._csv_last_modified,
+            )
+            return await self._async_save_cache_data(data)
 
-            except (OSError, TypeError, ValueError) as err:
-                _LOGGER.error("Error saving cached data: %s", err)
-                return False
+    def _build_cache_data(
+        self,
+        *,
+        stations_cache: dict[str, dict[str, Any]],
+        last_update: datetime | None,
+        separator: str,
+        csv_etag: str | None,
+        csv_last_modified: str | None,
+    ) -> dict[str, Any]:
+        """Build a complete cache document from staged values."""
+        return {
+            "stations": stations_cache,
+            "last_update": last_update.isoformat() if last_update else None,
+            "version": CACHE_VERSION,
+            "csv_separator": separator,
+            "csv_etag": csv_etag,
+            "csv_last_modified": csv_last_modified,
+        }
+
+    async def _async_save_cache_data(self, data: dict[str, Any]) -> bool:
+        """Persist a prepared cache document without mutating manager state."""
+        try:
+            await self.hass.async_add_executor_job(
+                _write_json_file_atomic_sync, self._cache_path, data
+            )
+            _LOGGER.debug(
+                "Saved station data to cache (version %s, separator: %s)",
+                CACHE_VERSION,
+                data["csv_separator"],
+            )
+            return True
+        except (OSError, TypeError, ValueError) as err:
+            _LOGGER.error("Error saving cached data: %s", err)
+            return False
 
     def get_station_by_id(self, station_id: str) -> dict[str, Any] | None:
         """Get station data by ID."""
@@ -455,7 +550,6 @@ class CSVStationManager:
         _LOGGER.info("Forcing CSV data update")
         success = await self.async_update_csv_data(force_update=True)
         if success:
-            await self.async_save_cached_data()
             _LOGGER.info("CSV update completed successfully")
         else:
             _LOGGER.error("CSV update failed")
@@ -464,8 +558,6 @@ class CSVStationManager:
     async def async_periodic_update(self) -> bool:
         """Perform periodic update of CSV data."""
         success = await self.async_update_csv_data()
-        if success:
-            await self.async_save_cached_data()
         return success
 
     async def async_clear_cache(self) -> bool:

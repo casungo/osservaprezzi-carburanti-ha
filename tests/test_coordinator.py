@@ -29,7 +29,6 @@ def _make_coordinator() -> CarburantiDataUpdateCoordinator:
     coordinator.csv_manager = MagicMock()
     coordinator.data = None
     coordinator._previous_fuel_prices = {}
-    coordinator._csv_update_listener = None
     return coordinator
 
 
@@ -224,28 +223,16 @@ class TestStationProcessing:
 
 
 class TestCoordinatorUpdates:
-    def test_constructor_sets_up_csv_manager_and_schedule(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_constructor_uses_injected_csv_manager(self) -> None:
         csv_manager = MagicMock()
-        listener = MagicMock()
-        monkeypatch.setattr(
-            "custom_components.osservaprezzi_carburanti.coordinator.CSVStationManager",
-            MagicMock(return_value=csv_manager),
-        )
-        track_mock = MagicMock(return_value=listener)
-        monkeypatch.setattr(
-            "custom_components.osservaprezzi_carburanti.coordinator.async_track_time_interval",
-            track_mock,
-        )
         hass = MagicMock()
         entry = MagicMock(unique_id=None, entry_id="entry_1")
 
-        coordinator = CarburantiDataUpdateCoordinator(hass, entry)
+        coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
 
         assert coordinator.config_entry is entry
         assert coordinator.csv_manager is csv_manager
         assert coordinator._previous_fuel_prices == {}
-        assert coordinator._csv_update_listener is listener
-        track_mock.assert_called_once()
 
     def test_async_update_data_initializes_csv_and_fetches_station(self) -> None:
         coordinator = _make_coordinator()
@@ -353,22 +340,6 @@ class TestCoordinatorUpdates:
         with pytest.raises(Exception, match="Error fetching station data"):
             asyncio.run(coordinator._async_fetch_station_data())
 
-    def test_async_csv_update_callback(self) -> None:
-        coordinator = _make_coordinator()
-        coordinator.csv_manager.async_periodic_update = AsyncMock(return_value=True)
-
-        asyncio.run(coordinator._async_csv_update_callback(MagicMock()))
-
-        coordinator.csv_manager.async_periodic_update.assert_awaited_once()
-
-    def test_async_csv_update_callback_logs_failure(self) -> None:
-        coordinator = _make_coordinator()
-        coordinator.csv_manager.async_periodic_update = AsyncMock(return_value=False)
-
-        asyncio.run(coordinator._async_csv_update_callback(MagicMock()))
-
-        coordinator.csv_manager.async_periodic_update.assert_awaited_once()
-
     def test_async_force_csv_update_propagates_success(self) -> None:
         coordinator = _make_coordinator()
         coordinator.csv_manager.async_update_csv_data = AsyncMock(return_value=True)
@@ -381,20 +352,3 @@ class TestCoordinatorUpdates:
         coordinator.csv_manager.async_update_csv_data = AsyncMock(return_value=False)
 
         assert asyncio.run(coordinator.async_force_csv_update()) is False
-
-    def test_async_shutdown_calls_listener_and_base(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        coordinator = _make_coordinator()
-        listener = MagicMock()
-        coordinator._csv_update_listener = listener
-        shutdown_mock = AsyncMock()
-        monkeypatch.setattr(
-            CarburantiDataUpdateCoordinator.__mro__[1],
-            "async_shutdown",
-            shutdown_mock,
-            raising=False,
-        )
-
-        asyncio.run(coordinator.async_shutdown())
-
-        listener.assert_called_once()
-        assert coordinator._csv_update_listener is None

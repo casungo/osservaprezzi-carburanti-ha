@@ -588,17 +588,33 @@ class TestCSVCacheValidation:
         assert asyncio.run(csv_manager.async_update_csv_data()) is True
         assert csv_manager._last_update == now
 
-    def test_update_304_ignores_response_after_cache_clear(self, tmp_path, monkeypatch):
+    def test_update_304_returns_false_when_metadata_save_fails(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "unused")
+        csv_manager = CSVStationManager(hass)
+        csv_manager.session = FakeCSVSession(FakeCSVResponse(status=304))
+        csv_manager._async_save_cache_data = AsyncMock(return_value=False)
+
+        assert asyncio.run(csv_manager.async_update_csv_data()) is False
+
+    def test_load_cached_data_handles_missing_file(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.return_value = str(tmp_path / "missing")
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        csv_manager = CSVStationManager(hass)
+
+        assert asyncio.run(csv_manager.async_load_cached_data()) is False
+
+    def test_update_304_ignores_response_after_generation_change(self, tmp_path):
         class ClearingSession(FakeCSVSession):
             def get(self, *args, **kwargs):
-                csv_module._CSV_CACHE_GENERATION += 1
+                csv_manager._cache_generation += 1
                 return super().get(*args, **kwargs)
 
         hass = MagicMock()
         hass.config.path.return_value = str(tmp_path / "unused")
         csv_manager = CSVStationManager(hass)
         csv_manager.session = ClearingSession(FakeCSVResponse(status=304))
-        monkeypatch.setattr(csv_module, "_CSV_CACHE_GENERATION", 10)
 
         assert asyncio.run(csv_manager.async_update_csv_data()) is False
 
@@ -619,10 +635,10 @@ class TestCSVCacheValidation:
 
         assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
 
-    def test_update_discards_download_after_cache_clear(self, tmp_path, monkeypatch):
+    def test_update_discards_download_after_generation_change(self, tmp_path):
         async def parse_and_clear(func, *args):
             result = func(*args)
-            csv_module._CSV_CACHE_GENERATION += 1
+            csv_manager._cache_generation += 1
             return result
 
         hass = MagicMock()
@@ -632,11 +648,10 @@ class TestCSVCacheValidation:
         csv_manager.session = FakeCSVSession(
             FakeCSVResponse(status=200, text="\n".join(PIPE_CSV_LINES))
         )
-        monkeypatch.setattr(csv_module, "_CSV_CACHE_GENERATION", 20)
 
         assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
 
-    def test_update_skips_when_another_task_refreshed(self, tmp_path, monkeypatch):
+    def test_update_commits_downloaded_snapshot(self, tmp_path, monkeypatch):
         now_values = iter(
             [
                 datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc),
@@ -660,7 +675,7 @@ class TestCSVCacheValidation:
         monkeypatch.setattr(csv_module.dt_util, "now", lambda: next(now_values))
 
         assert asyncio.run(csv_manager.async_update_csv_data()) is True
-        csv_manager._async_write_csv_file.assert_not_awaited()
+        csv_manager._async_write_csv_file.assert_awaited_once()
 
     def test_update_handles_client_error(self, tmp_path):
         hass = MagicMock()
@@ -752,12 +767,34 @@ class TestCSVCacheValidation:
         csv_manager._stations_cache = {"123": {"id": "123"}}
         csv_manager._last_update = now - timedelta(hours=1)
         csv_manager._async_migrate_legacy_files = AsyncMock()
-        csv_manager.async_load_cached_data = AsyncMock(return_value=True)
-        csv_manager.async_update_csv_data = AsyncMock()
+        csv_manager._async_load_cached_data = AsyncMock(return_value=True)
+        csv_manager._async_update_csv_data = AsyncMock()
         monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
 
         assert asyncio.run(csv_manager.async_initialize()) is True
-        csv_manager.async_update_csv_data.assert_not_awaited()
+        csv_manager._async_update_csv_data.assert_not_awaited()
+
+    def test_concurrent_initialize_runs_one_transaction(self, csv_manager):
+        async def _exercise():
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def initialize_once():
+                started.set()
+                await release.wait()
+                return True
+
+            csv_manager._async_initialize = AsyncMock(side_effect=initialize_once)
+            first = asyncio.create_task(csv_manager.async_initialize())
+            await started.wait()
+            second = asyncio.create_task(csv_manager.async_initialize())
+            await asyncio.sleep(0)
+            assert not second.done()
+            release.set()
+            assert await asyncio.gather(first, second) == [True, True]
+            csv_manager._async_initialize.assert_awaited_once()
+
+        asyncio.run(_exercise())
 
     def test_initialize_updates_stale_cache(self, csv_manager, monkeypatch):
         monkeypatch.setattr(
@@ -766,13 +803,13 @@ class TestCSVCacheValidation:
             lambda: datetime(2026, 6, 3, tzinfo=timezone.utc),
         )
         csv_manager._async_migrate_legacy_files = AsyncMock()
-        csv_manager.async_load_cached_data = AsyncMock(return_value=True)
+        csv_manager._async_load_cached_data = AsyncMock(return_value=True)
         csv_manager._last_update = datetime(2026, 6, 1, tzinfo=timezone.utc)
         csv_manager._stations_cache = {"123": {"id": "123"}}
-        csv_manager.async_update_csv_data = AsyncMock(return_value=True)
+        csv_manager._async_update_csv_data = AsyncMock(return_value=True)
 
         assert asyncio.run(csv_manager.async_initialize()) is True
-        csv_manager.async_update_csv_data.assert_awaited_once_with(force_update=True)
+        csv_manager._async_update_csv_data.assert_awaited_once_with(force_update=True)
 
     @pytest.mark.parametrize(
         ("cache_loaded", "last_update", "stations", "update_result"),
@@ -797,13 +834,13 @@ class TestCSVCacheValidation:
             lambda: datetime(2026, 6, 2, tzinfo=timezone.utc),
         )
         csv_manager._async_migrate_legacy_files = AsyncMock()
-        csv_manager.async_load_cached_data = AsyncMock(return_value=cache_loaded)
+        csv_manager._async_load_cached_data = AsyncMock(return_value=cache_loaded)
         csv_manager._last_update = last_update
         csv_manager._stations_cache = stations
-        csv_manager.async_update_csv_data = AsyncMock(return_value=update_result)
+        csv_manager._async_update_csv_data = AsyncMock(return_value=update_result)
 
         assert asyncio.run(csv_manager.async_initialize()) is update_result
-        csv_manager.async_update_csv_data.assert_awaited_once_with(force_update=True)
+        csv_manager._async_update_csv_data.assert_awaited_once_with(force_update=True)
 
     def test_periodic_update_propagates_update_result(self, csv_manager):
         csv_manager.async_update_csv_data = AsyncMock(return_value=True)
@@ -834,7 +871,7 @@ class TestCSVCacheValidation:
         assert csv_manager._stations_cache == {"existing": {"id": "existing"}}
         assert csv_manager._last_update == datetime(2026, 5, 1, tzinfo=timezone.utc)
 
-    def test_update_does_not_hold_io_lock_while_downloading(self, tmp_path, monkeypatch):
+    def test_public_transactions_serialize_while_downloading(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             csv_module.dt_util,
             "now",
@@ -880,10 +917,12 @@ class TestCSVCacheValidation:
             update_task = asyncio.create_task(csv_manager.async_update_csv_data(force_update=True))
             await asyncio.wait_for(text_started.wait(), timeout=1)
 
-            load_result = await asyncio.wait_for(csv_manager.async_load_cached_data(), timeout=1)
-            assert load_result is False
+            load_task = asyncio.create_task(csv_manager.async_load_cached_data())
+            await asyncio.sleep(0)
+            assert not load_task.done()
 
             release_text.set()
             assert await update_task is True
+            assert await load_task is True
 
         asyncio.run(_exercise())

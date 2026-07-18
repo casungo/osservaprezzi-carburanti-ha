@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -19,7 +17,6 @@ from .const import (
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
     CONF_STATION_ID,
-    CSV_UPDATE_INTERVAL,
     DOMAIN,
 )
 from .csv_manager import CSVStationManager
@@ -32,11 +29,15 @@ RETRY_DELAYS: list[int] = [30, 60, 120]
 class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     """Coordinate API and CSV enrichment updates for a single station."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        csv_manager: CSVStationManager,
+    ) -> None:
         """Initialize the coordinator."""
         self.config_entry = entry
-        self.csv_manager = CSVStationManager(hass)
-        self._csv_update_listener: Callable[[], None] | None = None
+        self.csv_manager = csv_manager
         self._previous_fuel_prices: dict[str, float | None] = {}
 
         super().__init__(
@@ -45,7 +46,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             name=f"{DOMAIN}_{entry.unique_id or entry.entry_id}",
             update_interval=None,
         )
-        self._schedule_csv_updates()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch and enrich the latest station payload."""
@@ -228,30 +228,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             }
 
         return processed_data
-
-    def _schedule_csv_updates(self) -> None:
-        """Schedule periodic CSV updates."""
-        self._csv_update_listener = async_track_time_interval(
-            self.hass,
-            self._async_csv_update_callback,
-            timedelta(hours=CSV_UPDATE_INTERVAL),
-        )
-
-    async def _async_csv_update_callback(self, now: datetime) -> None:
-        """Callback for periodic CSV data update."""
-        _LOGGER.info("Performing periodic CSV data update at %s", now)
-        success = await self.csv_manager.async_periodic_update()
-        if success:
-            _LOGGER.info("Periodic CSV update completed successfully")
-        else:
-            _LOGGER.warning("Periodic CSV update failed")
-
-    async def async_shutdown(self) -> None:
-        """Clean up resources when shutting down."""
-        if self._csv_update_listener:
-            self._csv_update_listener()
-            self._csv_update_listener = None
-        await super().async_shutdown()
 
     async def async_force_csv_update(self) -> bool:
         """Force an immediate CSV update."""

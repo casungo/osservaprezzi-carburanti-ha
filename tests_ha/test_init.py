@@ -5,10 +5,14 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.osservaprezzi_carburanti import async_setup
 from custom_components.osservaprezzi_carburanti.const import (
     CONF_STATION_ID,
     DOMAIN,
@@ -19,6 +23,16 @@ from custom_components.osservaprezzi_carburanti.const import (
 from custom_components.osservaprezzi_carburanti.csv_manager import CSVStationManager
 
 STATION_ID = "54233"
+
+
+async def test_cache_services_raise_without_active_entries(hass: HomeAssistant) -> None:
+    """Expose no-op cache actions as service failures through Home Assistant."""
+    assert await async_setup(hass, {})
+
+    with pytest.raises(HomeAssistantError, match="No active"):
+        await hass.services.async_call(DOMAIN, SERVICE_FORCE_CSV_UPDATE, {}, blocking=True)
+    with pytest.raises(HomeAssistantError, match="No active"):
+        await hass.services.async_call(DOMAIN, SERVICE_CLEAR_CACHE, {}, blocking=True)
 
 
 def _station_payload(station_id: str = STATION_ID) -> dict[str, Any]:

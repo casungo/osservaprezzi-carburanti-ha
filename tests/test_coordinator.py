@@ -28,7 +28,6 @@ def _make_coordinator() -> CarburantiDataUpdateCoordinator:
     coordinator.config_entry = MagicMock(data={CONF_STATION_ID: "123"})
     coordinator.csv_manager = MagicMock()
     coordinator.data = None
-    coordinator._previous_fuel_prices = {}
     coordinator._csv_update_listener = None
     return coordinator
 
@@ -141,20 +140,47 @@ class TestStationProcessing:
 
         assert coordinator._parse_iso_datetime(value) == expected
 
-    def test_snapshot_previous_prices(self) -> None:
+    def test_process_station_data_preserves_price_change_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         coordinator = _make_coordinator()
-        coordinator.data = {
-            "fuels": {
-                "Benzina_self": {"price": 1.8},
-                "Gasolio_servito": {"price": None},
-            }
-        }
+        coordinator.csv_manager.get_station_by_id.return_value = None
+        times = iter(
+            datetime(2025, 3, day, 12, 0, tzinfo=timezone.utc) for day in range(1, 5)
+        )
+        monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: next(times))
 
-        coordinator._snapshot_previous_prices()
+        def payload(price: float, *, include_gasolio: bool = False) -> dict[str, Any]:
+            fuels = [{"name": "Benzina", "isSelf": True, "price": price}]
+            if include_gasolio:
+                fuels.append({"name": "Gasolio", "isSelf": True, "price": 1.6})
+            return {"id": 123, "fuels": fuels}
 
-        assert coordinator._previous_fuel_prices == {
-            "Benzina_self": 1.8,
-            "Gasolio_servito": None,
+        coordinator.data = coordinator._process_station_data(payload(1.7))
+        assert coordinator.data["fuels"]["Benzina_self"]["previous_price"] is None
+        assert coordinator.data["fuels"]["Benzina_self"]["price_changed_at"] is None
+
+        coordinator.data = coordinator._process_station_data(payload(1.8))
+        changed_at = "2025-03-02T12:00:00+00:00"
+        assert coordinator.data["fuels"]["Benzina_self"]["previous_price"] == 1.7
+        assert coordinator.data["fuels"]["Benzina_self"]["price_changed_at"] == changed_at
+
+        coordinator.data = coordinator._process_station_data(payload(1.8, include_gasolio=True))
+        assert coordinator.data["fuels"]["Benzina_self"]["previous_price"] == 1.7
+        assert coordinator.data["fuels"]["Benzina_self"]["price_changed_at"] == changed_at
+        assert coordinator.data["fuels"]["Gasolio_self"]["previous_price"] is None
+        assert coordinator.data["fuels"]["Gasolio_self"]["price_changed_at"] is None
+
+        coordinator.data = coordinator._process_station_data(payload(1.9))
+        assert coordinator.data["fuels"]["Benzina_self"] == {
+            "price": 1.9,
+            "last_update": None,
+            "validity_date": None,
+            "fuel_id": None,
+            "is_self": True,
+            "service_area_id": None,
+            "previous_price": 1.8,
+            "price_changed_at": "2025-03-04T12:00:00+00:00",
         }
 
     def test_process_station_data_enriches_station_and_fuels(self) -> None:
@@ -167,7 +193,15 @@ class TestStationProcessing:
             "municipality": "Milano",
             "province": "MI",
         }
-        coordinator._previous_fuel_prices = {"Benzina_self": 1.7}
+        coordinator.data = {
+            "fuels": {
+                "Benzina_self": {
+                    "price": 1.7,
+                    "previous_price": None,
+                    "price_changed_at": None,
+                }
+            }
+        }
         payload = {
             "id": 123,
             "name": "Station",
@@ -243,7 +277,6 @@ class TestCoordinatorUpdates:
 
         assert coordinator.config_entry is entry
         assert coordinator.csv_manager is csv_manager
-        assert coordinator._previous_fuel_prices == {}
         assert coordinator._csv_update_listener is listener
         track_mock.assert_called_once()
 

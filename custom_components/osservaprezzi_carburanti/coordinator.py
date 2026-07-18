@@ -37,7 +37,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         self.config_entry = entry
         self.csv_manager = CSVStationManager(hass)
         self._csv_update_listener: Callable[[], None] | None = None
-        self._previous_fuel_prices: dict[str, float | None] = {}
 
         super().__init__(
             hass,
@@ -56,16 +55,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                     "CSV station data initialization failed; continuing without CSV enrichment"
                 )
 
-        self._snapshot_previous_prices()
         return await self._async_fetch_station_data()
-
-    def _snapshot_previous_prices(self) -> None:
-        """Capture the previous price values before a refresh."""
-        if not self.data:
-            return
-
-        for fuel_key, fuel_info in self.data.get("fuels", {}).items():
-            self._previous_fuel_prices[fuel_key] = fuel_info.get("price")
 
     async def _async_fetch_station_data(self) -> dict[str, Any]:
         """Fetch station data with retry handling."""
@@ -213,8 +203,13 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             service_type = "self" if fuel.get("isSelf") else "servito"
             fuel_key = f"{fuel_name}_{service_type}"
             new_price = fuel.get("price")
-            previous_price = self._previous_fuel_prices.get(fuel_key)
-            price_changed_at = now_iso if new_price != previous_price and previous_price is not None else None
+            existing_fuel = (self.data or {}).get("fuels", {}).get(fuel_key)
+            if existing_fuel and new_price == existing_fuel.get("price"):
+                previous_price = existing_fuel.get("previous_price")
+                price_changed_at = existing_fuel.get("price_changed_at")
+            else:
+                previous_price = existing_fuel.get("price") if existing_fuel else None
+                price_changed_at = now_iso if previous_price is not None else None
 
             processed_data["fuels"][fuel_key] = {
                 "price": new_price,

@@ -27,7 +27,6 @@ def _make_coordinator() -> CarburantiDataUpdateCoordinator:
     coordinator.config_entry = MagicMock()
     coordinator.csv_manager = MagicMock()
     coordinator.data = None
-    coordinator._previous_fuel_prices = {}
     coordinator._csv_update_listener = None
     return coordinator
 

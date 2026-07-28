@@ -7,3 +7,55 @@ clear_cache:
 compare_stations:
   name: Compare station prices
   description: Returns a comparison of fuel prices across all configured stations.
+refresh_prices:
+  name: Refresh fuel prices
+  description: Refreshes all active stations, or only the requested station IDs.
+  fields:
+    station_ids:
+      name: Station IDs
+      description: Optional list of configured Osservaprezzi station IDs to refresh.
+      required: false
+      example:
+        - "54233"
+        - "54234"
+      selector:
+        text:
+          multiple: true
+search_registry:
+  name: Search station registry
+  description: Searches the locally cached official registry and returns matching stations.
+  fields:
+    query:
+      name: Text
+      description: Optional text found in the name, brand, address, operator, municipality, or province.
+      required: false
+      selector:
+        text:
+    municipality:
+      name: Municipality
+      description: Optional municipality name or fragment.
+      required: false
+      selector:
+        text:
+    province:
+      name: Province
+      description: Optional province name, abbreviation, or fragment.
+      required: false
+      selector:
+        text:
+    station_type:
+      name: Station type
+      description: Optional station type or fragment.
+      required: false
+      selector:
+        text:
+    limit:
+      name: Maximum results
+      description: Maximum number of stations to return.
+      required: false
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 50
+          mode: box

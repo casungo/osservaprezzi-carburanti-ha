@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add four setup methods: Home location, manual coordinates, municipality/province registry search, and direct station ID
+- Add local text and station-type filters, configurable result limits, and accent-insensitive matching to station discovery
+- Add in-place station reconfiguration from the integration settings
+- Add a preview of the next cron execution and a configurable stale-price threshold
+- Add `refresh_prices` with optional station selection and the response-only `search_registry` service
+- Add privacy-safe config-entry diagnostics with coordinator and shared-registry health
+- Add price delta, direction, age, and stale-state attributes to fuel sensors
+- Add municipality, province, station type, operator, and coordinate source to the location sensor
+
+### Changed
+- Keep manual station-ID setup available alongside local registry discovery
+
 ## [2.3.0] - 2026-07-19
 
 ### Added

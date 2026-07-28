@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from custom_components.osservaprezzi_carburanti.csv_manager import (
+    RegistrySnapshot,
+    RegistryUnavailableError,
+)
 
 
 init_module = importlib.import_module("custom_components.osservaprezzi_carburanti")
@@ -71,6 +76,11 @@ class FakeCoordinator:
         self.force_error = force_error
         self.refresh_error = refresh_error
         self.data = {}
+        self.config_entry = (
+            args[1]
+            if len(args) > 1
+            else SimpleNamespace(data={init_module.CONF_STATION_ID: ""})
+        )
         self.raise_first_refresh = False
 
     async def async_config_entry_first_refresh(self) -> None:
@@ -337,6 +347,8 @@ def test_async_setup_registers_global_services_without_entries() -> None:
     assert init_module.SERVICE_FORCE_CSV_UPDATE in registered_services
     assert init_module.SERVICE_CLEAR_CACHE in registered_services
     assert init_module.SERVICE_COMPARE_STATIONS in registered_services
+    assert init_module.SERVICE_REFRESH_PRICES in registered_services
+    assert init_module.SERVICE_SEARCH_REGISTRY in registered_services
 
 
 def test_register_services_is_idempotent() -> None:
@@ -361,6 +373,12 @@ def test_cache_services_raise_when_no_coordinators() -> None:
     result = asyncio.run(registered_services[init_module.SERVICE_COMPARE_STATIONS](SimpleNamespace()))
 
     assert result == {"stations": {}}
+    with pytest.raises(init_module.HomeAssistantError, match="No matching"):
+        asyncio.run(
+            registered_services[init_module.SERVICE_REFRESH_PRICES](
+                SimpleNamespace(data={})
+            )
+        )
 
 
 def test_force_csv_update_translates_manager_exception(monkeypatch) -> None:
@@ -476,6 +494,174 @@ def test_compare_stations_service_returns_station_payload(monkeypatch) -> None:
     }
 
 
+def test_refresh_prices_service_supports_all_and_station_subset(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    first = FakeCoordinator()
+    first.config_entry = SimpleNamespace(data={init_module.CONF_STATION_ID: "123"})
+    second = FakeCoordinator()
+    second.config_entry = SimpleNamespace(data={init_module.CONF_STATION_ID: "456"})
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
+        }
+    }
+    init_module._async_register_services(hass)
+
+    result = asyncio.run(
+        registered_services[init_module.SERVICE_REFRESH_PRICES](
+            SimpleNamespace(data={})
+        )
+    )
+    assert result == {
+        "refreshed_station_ids": ["123", "456"],
+        "refreshed_count": 2,
+    }
+
+    result = asyncio.run(
+        registered_services[init_module.SERVICE_REFRESH_PRICES](
+            SimpleNamespace(data={"station_ids": [" 456 ", "", "missing"]})
+        )
+    )
+    assert result == {
+        "refreshed_station_ids": ["456"],
+        "refreshed_count": 1,
+    }
+    assert first.refresh_calls == 1
+    assert second.refresh_calls == 2
+
+
+def test_refresh_prices_service_rejects_unknown_station(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    coordinator = FakeCoordinator()
+    coordinator.config_entry = SimpleNamespace(
+        data={init_module.CONF_STATION_ID: "123"}
+    )
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {"coordinator": coordinator},
+        }
+    }
+    init_module._async_register_services(hass)
+
+    with pytest.raises(init_module.HomeAssistantError, match="No matching"):
+        asyncio.run(
+            registered_services[init_module.SERVICE_REFRESH_PRICES](
+                SimpleNamespace(data={"station_ids": ["999"]})
+            )
+        )
+
+
+def test_search_registry_service_returns_public_matches(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    hass, registered_services = _build_hass_with_services()
+    hass.async_add_executor_job = AsyncMock(
+        side_effect=lambda function, *args: function(*args)
+    )
+    coordinator = FakeCoordinator()
+    coordinator.config_entry = SimpleNamespace(
+        data={init_module.CONF_STATION_ID: "123"}
+    )
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {"coordinator": coordinator},
+        }
+    }
+    manager = MagicMock()
+    manager.async_ensure_registry = AsyncMock(
+        return_value=RegistrySnapshot(
+            stations=(
+                {
+                    "id": "123",
+                    "name": "Station",
+                    "brand": "Brand",
+                    "address": "Via Roma 1",
+                    "municipality": "Roma",
+                    "province": "RM",
+                    "station_type": "Stradale",
+                },
+            ),
+            updated_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            is_stale=True,
+        )
+    )
+    monkeypatch.setattr(init_module, "get_shared_csv_manager", lambda hass: manager)
+    init_module._async_register_services(hass)
+
+    result = asyncio.run(
+        registered_services[init_module.SERVICE_SEARCH_REGISTRY](
+            SimpleNamespace(
+                data={
+                    "query": "Brand",
+                    "municipality": "Roma",
+                    "province": "RM",
+                    "station_type": "strada",
+                    "limit": 5,
+                }
+            )
+        )
+    )
+
+    assert result == {
+        "results": [
+            {
+                "station_id": "123",
+                "name": "Station",
+                "brand": "Brand",
+                "address": "Via Roma 1",
+                "municipality": "Roma",
+                "province": "RM",
+                "station_type": "Stradale",
+                "configured": True,
+            }
+        ],
+        "result_count": 1,
+        "registry_updated": "2026-07-28T00:00:00+00:00",
+        "registry_is_stale": True,
+    }
+    manager.async_ensure_registry.assert_awaited_once_with(allow_stale=True)
+
+
+def test_search_registry_service_handles_missing_timestamp_and_error(
+    monkeypatch,
+) -> None:
+    hass, registered_services = _build_hass_with_services()
+    hass.data = {}
+    hass.async_add_executor_job = AsyncMock(
+        side_effect=lambda function, *args: function(*args)
+    )
+    manager = MagicMock()
+    manager.async_ensure_registry = AsyncMock(
+        return_value=RegistrySnapshot(
+            stations=(),
+            updated_at=None,
+            is_stale=False,
+        )
+    )
+    monkeypatch.setattr(init_module, "get_shared_csv_manager", lambda hass: manager)
+    init_module._async_register_services(hass)
+
+    result = asyncio.run(
+        registered_services[init_module.SERVICE_SEARCH_REGISTRY](
+            SimpleNamespace(data={})
+        )
+    )
+    assert result["registry_updated"] is None
+    assert result["results"] == []
+
+    manager.async_ensure_registry = AsyncMock(
+        side_effect=RegistryUnavailableError("offline")
+    )
+    with pytest.raises(init_module.HomeAssistantError, match="registry is unavailable"):
+        asyncio.run(
+            registered_services[init_module.SERVICE_SEARCH_REGISTRY](
+                SimpleNamespace(data={})
+            )
+        )
+
+
 def test_setup_entry_registers_services_after_last_entry_unload(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
@@ -505,6 +691,8 @@ def test_setup_entry_registers_services_after_last_entry_unload(monkeypatch) -> 
     assert init_module.SERVICE_FORCE_CSV_UPDATE in registered_services
     assert init_module.SERVICE_CLEAR_CACHE in registered_services
     assert init_module.SERVICE_COMPARE_STATIONS in registered_services
+    assert init_module.SERVICE_REFRESH_PRICES in registered_services
+    assert init_module.SERVICE_SEARCH_REGISTRY in registered_services
 
 
 def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
@@ -558,6 +746,43 @@ def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
     assert init_module._CSV_UPDATE_LISTENER not in domain_data
 
 
+def test_setup_entry_adds_registry_timer_to_manager_created_by_config_flow(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    monkeypatch.setattr(init_module, "CSVStationManager", FakeCSVManager)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", lambda *args: lambda: None)
+    registry_listener = MagicMock()
+    track_registry = MagicMock(return_value=registry_listener)
+    monkeypatch.setattr(init_module, "async_track_time_interval", track_registry)
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+
+    hass, _ = _build_hass_with_services()
+    shared_manager = FakeCSVManager()
+    hass.data = {
+        init_module.DOMAIN: {
+            init_module._CSV_MANAGER: shared_manager,
+        }
+    }
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="entry_1",
+        unique_id="entry_1",
+        data={"station_id": "entry_1"},
+        options={},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(return_value=lambda: None),
+    )
+
+    assert asyncio.run(init_module.async_setup_entry(hass, entry)) is True
+
+    assert hass.data[init_module.DOMAIN][init_module._CSV_MANAGER] is shared_manager
+    track_registry.assert_called_once()
+    assert hass.data[init_module.DOMAIN][init_module._CSV_UPDATE_LISTENER] is registry_listener
+
+
 def test_cleanup_legacy_entity_registry_clears_old_default_name(monkeypatch) -> None:
     registry = FakeEntityRegistry(
         {
@@ -600,7 +825,9 @@ def test_cleanup_legacy_entity_registry_keeps_custom_name(monkeypatch) -> None:
     assert registry.removed == []
 
 
-def test_cleanup_legacy_entity_registry_skips_unrelated_or_invalid_entries(monkeypatch) -> None:
+def test_cleanup_registry_skips_unrelated_entries_and_removes_previous_station(
+    monkeypatch,
+) -> None:
     registry = FakeEntityRegistry(
         {
             "sensor.other_platform": SimpleNamespace(
@@ -639,7 +866,7 @@ def test_cleanup_legacy_entity_registry_skips_unrelated_or_invalid_entries(monke
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
-    assert registry.removed == []
+    assert registry.removed == ["sensor.other_station"]
 
 
 def test_cleanup_legacy_entity_registry_removes_stale_address(monkeypatch) -> None:
@@ -691,7 +918,7 @@ def test_cleanup_legacy_entity_registry_removes_legacy_service_sensors(monkeypat
     assert registry.removed == ["sensor.station_service"]
 
 
-def test_cleanup_legacy_entity_registry_keeps_unrelated_service_entities(monkeypatch) -> None:
+def test_cleanup_registry_removes_previous_station_service_entities(monkeypatch) -> None:
     registry = FakeEntityRegistry(
         {
             "sensor.other_station_service": SimpleNamespace(
@@ -723,7 +950,7 @@ def test_cleanup_legacy_entity_registry_keeps_unrelated_service_entities(monkeyp
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
-    assert registry.removed == []
+    assert registry.removed == ["sensor.other_station_service"]
 
 
 def test_platforms_include_sensor_and_binary_sensor() -> None:
@@ -948,6 +1175,8 @@ def test_unload_entry_removes_listener_coordinator_and_services() -> None:
     hass.services.async_remove.assert_any_call(init_module.DOMAIN, init_module.SERVICE_FORCE_CSV_UPDATE)
     hass.services.async_remove.assert_any_call(init_module.DOMAIN, init_module.SERVICE_CLEAR_CACHE)
     hass.services.async_remove.assert_any_call(init_module.DOMAIN, init_module.SERVICE_COMPARE_STATIONS)
+    hass.services.async_remove.assert_any_call(init_module.DOMAIN, init_module.SERVICE_REFRESH_PRICES)
+    hass.services.async_remove.assert_any_call(init_module.DOMAIN, init_module.SERVICE_SEARCH_REGISTRY)
     assert init_module._SERVICES_REGISTERED not in hass.data
 
 

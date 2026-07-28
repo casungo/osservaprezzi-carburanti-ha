@@ -20,6 +20,8 @@ from custom_components.osservaprezzi_carburanti.const import (
     SERVICE_CLEAR_CACHE,
     SERVICE_COMPARE_STATIONS,
     SERVICE_FORCE_CSV_UPDATE,
+    SERVICE_REFRESH_PRICES,
+    SERVICE_SEARCH_REGISTRY,
 )
 from custom_components.osservaprezzi_carburanti.csv_manager import CSVStationManager
 
@@ -127,6 +129,8 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert hass.services.has_service(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
     assert hass.services.has_service(DOMAIN, SERVICE_CLEAR_CACHE)
     assert hass.services.has_service(DOMAIN, SERVICE_COMPARE_STATIONS)
+    assert hass.services.has_service(DOMAIN, SERVICE_REFRESH_PRICES)
+    assert hass.services.has_service(DOMAIN, SERVICE_SEARCH_REGISTRY)
     await hass.services.async_call(DOMAIN, SERVICE_FORCE_CSV_UPDATE, {}, blocking=True)
     await hass.services.async_call(DOMAIN, SERVICE_CLEAR_CACHE, {}, blocking=True)
     comparison = await hass.services.async_call(
@@ -135,6 +139,27 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert comparison is not None
     assert comparison["stations"][entry.entry_id]["station_id"] == int(STATION_ID)
     json.dumps(comparison)
+    refresh = await hass.services.async_call(
+        DOMAIN,
+        SERVICE_REFRESH_PRICES,
+        {"station_ids": [STATION_ID]},
+        blocking=True,
+        return_response=True,
+    )
+    assert refresh == {
+        "refreshed_station_ids": [STATION_ID],
+        "refreshed_count": 1,
+    }
+    registry_search = await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SEARCH_REGISTRY,
+        {"municipality": "Roma"},
+        blocking=True,
+        return_response=True,
+    )
+    assert registry_search is not None
+    assert registry_search["result_count"] == 0
+    json.dumps(registry_search)
 
     entity_ids_before_reload = {
         entity.entity_id for entity in registry.entities.values()
@@ -188,6 +213,8 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert not hass.services.has_service(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
     assert not hass.services.has_service(DOMAIN, SERVICE_CLEAR_CACHE)
     assert not hass.services.has_service(DOMAIN, SERVICE_COMPARE_STATIONS)
+    assert not hass.services.has_service(DOMAIN, SERVICE_REFRESH_PRICES)
+    assert not hass.services.has_service(DOMAIN, SERVICE_SEARCH_REGISTRY)
     unloaded_states = {
         entity_id: hass.states.get(entity_id).state
         for entity_id in entity_ids_after_reload

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -22,6 +22,7 @@ from custom_components.osservaprezzi_carburanti.entity import (
 )
 from custom_components.osservaprezzi_carburanti.sensor import (
     _get_fuel_icon,
+    _price_metadata,
     OsservaprezziStationSensor,
     StationLocationSensor,
     StationInfoSensor,
@@ -52,6 +53,10 @@ def _sample_station_data():
             "brand": "Brand X",
             "address": "Via Roma 1",
             "station_type": "Stradale",
+            "municipality": "Roma",
+            "province": "RM",
+            "operator": "Example Srl",
+            "coordinate_source": "registry_csv",
             "latitude": 41.902782,
             "longitude": 12.496366,
         },
@@ -188,6 +193,11 @@ class TestEntitySetupRegression:
         assert location.native_value == "Via Roma 1"
         assert location.available is True
         assert location.extra_state_attributes["latitude"] == 41.902782
+        assert location.extra_state_attributes["municipality"] == "Roma"
+        assert location.extra_state_attributes["province"] == "RM"
+        assert location.extra_state_attributes["station_type"] == "Stradale"
+        assert location.extra_state_attributes["operator"] == "Example Srl"
+        assert location.extra_state_attributes["coordinate_source"] == "registry_csv"
 
     def test_location_sensor_unavailable_without_coordinates(self):
         coordinator = SimpleNamespace(
@@ -548,6 +558,95 @@ class TestGetFuelIcon:
 
     def test_other(self):
         assert _get_fuel_icon("Unknown Fuel") == "mdi:currency-eur"
+
+
+class TestPriceMetadata:
+    def test_reports_delta_direction_age_and_staleness(self, monkeypatch):
+        updated_at = datetime(2026, 7, 27, 10, 0, tzinfo=timezone.utc)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: updated_at)
+        monkeypatch.setattr(
+            sensor_module.dt_util,
+            "now",
+            lambda: datetime(2026, 7, 28, 11, 0, tzinfo=timezone.utc),
+        )
+
+        result = _price_metadata(
+            price=1.801,
+            previous_price=1.755,
+            last_update="2026-07-27T10:00:00+00:00",
+            stale_hours=24,
+        )
+
+        assert result == {
+            "price_delta": 0.046,
+            "price_direction": "up",
+            "price_age_minutes": 1500,
+            "price_is_stale": True,
+        }
+
+    def test_reports_down_unchanged_and_new_directions(self):
+        assert _price_metadata(
+            price=1.7,
+            previous_price=1.8,
+            last_update=None,
+            stale_hours=24,
+        )["price_direction"] == "down"
+        assert _price_metadata(
+            price=1.8,
+            previous_price=1.8,
+            last_update=None,
+            stale_hours=24,
+        )["price_direction"] == "unchanged"
+        assert _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update=None,
+            stale_hours=24,
+        )["price_direction"] == "new"
+
+    def test_ignores_boolean_prices_and_invalid_dates(self, monkeypatch):
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: None)
+
+        result = _price_metadata(
+            price=True,
+            previous_price=False,
+            last_update="invalid",
+            stale_hours=24,
+        )
+
+        assert result == {
+            "price_delta": None,
+            "price_direction": None,
+            "price_age_minutes": None,
+            "price_is_stale": None,
+        }
+
+    def test_naive_or_future_update_does_not_produce_negative_age(self, monkeypatch):
+        naive = datetime(2026, 7, 28, 10, 0)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: naive)
+        result = _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update="naive",
+            stale_hours=24,
+        )
+        assert result["price_age_minutes"] is None
+
+        future = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: future)
+        monkeypatch.setattr(
+            sensor_module.dt_util,
+            "now",
+            lambda: datetime(2026, 7, 28, tzinfo=timezone.utc),
+        )
+        result = _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update="future",
+            stale_hours=24,
+        )
+        assert result["price_age_minutes"] == 0
+        assert result["price_is_stale"] is False
 
 
 class TestGetAvailableServiceIds:

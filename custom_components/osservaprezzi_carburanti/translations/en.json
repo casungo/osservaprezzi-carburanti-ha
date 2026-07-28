@@ -3,33 +3,105 @@
     "step": {
       "user": {
         "title": "Setup Osservaprezzi Carburanti",
+        "description": "Choose how to add a fuel station.",
+        "menu_options": {
+          "home": "Find stations near Home",
+          "coordinates": "Find stations near coordinates",
+          "area": "Search the station registry",
+          "station_id": "Enter a station ID"
+        }
+      },
+      "home": {
+        "title": "Find stations near Home",
+        "description": "Your Home Assistant home location is used temporarily to calculate distances on this device. It is not stored or sent to MIMIT or another provider.",
+        "data": {
+          "radius_km": "Search radius (km)",
+          "text_filter": "Name, brand, address, or operator contains",
+          "station_type": "Station type contains",
+          "result_limit": "Maximum results"
+        }
+      },
+      "coordinates": {
+        "title": "Find stations near coordinates",
+        "description": "The coordinates are used only for this local search. They are not stored or sent to MIMIT or another provider.",
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "radius_km": "Search radius (km)",
+          "text_filter": "Name, brand, address, or operator contains",
+          "station_type": "Station type contains",
+          "result_limit": "Maximum results"
+        }
+      },
+      "area": {
+        "title": "Search the station registry",
+        "description": "Search the locally cached official registry by municipality and optional filters.",
+        "data": {
+          "municipality": "Municipality",
+          "province": "Province",
+          "text_filter": "Name, brand, address, or operator contains",
+          "station_type": "Station type contains",
+          "result_limit": "Maximum results"
+        }
+      },
+      "station_id": {
+        "title": "Enter a station ID",
         "description": "Enter the station ID to monitor fuel prices.\n\nHow to find the station ID:\n1. Go to carburanti.mise.gov.it/ospzSearch/zona\n2. Search for and open the station details page\n3. Copy the ID from the URL (for example, 1111 from .../dettaglio/1111)",
         "data": {
           "station_id": "Station ID"
+        }
+      },
+      "select_station": {
+        "title": "Choose a station",
+        "description": "{result_count} matching stations. Registry updated: {registry_updated}.",
+        "data": {
+          "station_id": "Station"
+        }
+      },
+      "select_station_stale": {
+        "title": "Choose a station",
+        "description": "{result_count} matching stations from the last available cache, updated {registry_updated}.",
+        "data": {
+          "station_id": "Station"
+        }
+      },
+      "reconfigure": {
+        "title": "Change monitored station",
+        "description": "Enter another station ID. Existing entities will be reloaded for the selected station.",
+        "data": {
+          "station_id": "Station"
         }
       }
     },
     "error": {
       "unknown": "An unexpected error occurred",
       "cannot_connect": "Unable to connect to the service",
-      "invalid_station": "Invalid station ID or station not found"
+      "invalid_station": "Invalid station ID or station not found",
+      "home_location_unavailable": "Home Assistant does not have a valid Home location. Set it in System > General or use a station ID.",
+      "invalid_location": "Enter valid latitude and longitude coordinates.",
+      "registry_unavailable": "The official station registry is currently unavailable. Try again or use a station ID.",
+      "no_stations_found": "No stations matched the search. Broaden the area or filters, or use a station ID.",
+      "already_configured": "That station is already configured."
     },
     "abort": {
-      "already_configured": "This configuration is already set up"
+      "already_configured": "This configuration is already set up",
+      "reconfigure_successful": "The monitored station was changed successfully."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Osservaprezzi Carburanti Options",
-        "description": "Configure integration options.\n\nUse a standard five-field cron expression such as 30 7 * * *.",
+        "description": "Configure refresh and price freshness. Next scheduled refresh: {next_run}.\n\nUse a standard five-field cron expression such as 30 7 * * *.",
         "data": {
-          "cron_expression": "Cron expression"
+          "cron_expression": "Cron expression",
+          "price_stale_hours": "Mark prices stale after (hours)"
         }
       }
     },
     "error": {
-      "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30)."
+      "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30).",
+      "invalid_stale_hours": "Choose one of the supported price freshness thresholds."
     }
   },
   "entity": {
@@ -130,6 +202,14 @@
     "compare_stations": {
       "name": "Compare station prices",
       "description": "Returns a comparison of fuel prices across all configured stations."
+    },
+    "refresh_prices": {
+      "name": "Refresh fuel prices",
+      "description": "Refreshes all active stations, or only the requested station IDs."
+    },
+    "search_registry": {
+      "name": "Search station registry",
+      "description": "Searches the locally cached official registry and returns matching stations."
     }
   },
   "title": "Osservaprezzi Carburanti"

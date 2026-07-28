@@ -1,6 +1,13 @@
 # Nearby station discovery design
 
-Status: decision-ready design spike; no implementation is authorized by this document.
+Status: the local-registry MVP is implemented in the unreleased code. Map/current-device location,
+address geocoding, and live price ranking remain design-only.
+
+Implemented scope: setup method menu, Home Assistant Home location, manual coordinates,
+municipality/province lookup, selectable 2/5/10/20/50 km radius, text and station-type filters,
+selectable 5/10/20 result caps, accent-insensitive matching, local distance calculation over the
+shared MIMIT registry, stale-cache fallback, final station-detail validation, and the unchanged
+manual-ID path. The integration stores only the selected station ID.
 
 ## Decision summary
 
@@ -64,14 +71,21 @@ No location, address, distance linked to a location, raw search text, IP address
 
 ### Entry and controls
 
-The initial step offers two actions in this order:
+The initial step offers four actions in this order:
 
-1. **Find nearby stations** — explanatory privacy copy and source choice.
-2. **Enter station ID** — the current form, unchanged as the universal fallback.
+1. **Find near Home** — explanatory privacy copy and local distance search.
+2. **Find near coordinates** — explicit manual latitude/longitude input used only in memory.
+3. **Search the registry** — municipality plus optional province and metadata filters.
+4. **Enter station ID** — the current form, unchanged as the universal fallback.
 
-Discovery source choices are HA home, current/map location when the frontend supports it, municipality/province, and manual coordinates. Default radius is 5 km; selectable values are 2, 5, 10, 20, and 50 km. MVP filters are optional case-insensitive brand/name text and station type when present. Do not promise fuel availability from the registry because current registry fields do not contain fuels. Fuel/price filtering belongs to a later live-data phase.
+Default radius is 5 km; selectable values are 2, 5, 10, 20, and 50 km. Filters match
+name, brand, address, operator, municipality, and province without case or accent sensitivity;
+station type is an additional optional filter. Do not promise fuel availability from the registry
+because current registry fields do not contain fuels. Fuel/price filtering belongs to a later
+live-data phase.
 
-Search locally, calculate great-circle distance, sort by `(distance_meters, normalized_name, numeric_or_string_station_id)`, and cap at 20 results. Show a specific “20 closest shown; narrow the radius or filter” message instead of pagination in MVP.
+Search locally, calculate great-circle distance where applicable, sort deterministically, and apply
+the selected 5, 10, or 20 result cap. The form reports the returned count instead of paginating.
 
 Each result card/selector label conveys, without color alone:
 
@@ -161,11 +175,10 @@ Errors must distinguish `registry_unavailable`, `registry_invalid`, `location_de
 
 ### MVP
 
-1. Land Plan 006 and prove one safe shared manager can initialize during config flow.
-2. Add stale-readable snapshot semantics and pure bounded search helpers.
-3. Add translated source/radius/filter/result steps and manual-ID escape routes.
-4. Release behind an internal feature constant for one beta cycle if maintainers want rapid rollback; otherwise expose as an optional first-step action while preserving ID setup.
-5. Document local-only location processing and cache timestamp semantics.
+1. Shared-manager setup-time snapshots and stale-cache fallback.
+2. Pure bounded coordinate and area search helpers.
+3. Translated Home, coordinates, area, selection, and manual-ID steps.
+4. Local-only privacy documentation and cache timestamp semantics.
 
 ### Later, only with evidence
 

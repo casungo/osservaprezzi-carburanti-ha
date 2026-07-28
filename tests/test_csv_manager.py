@@ -15,7 +15,11 @@ import pytest
 sys.path.insert(0, ".")
 
 from custom_components.osservaprezzi_carburanti import csv_manager as csv_module
-from custom_components.osservaprezzi_carburanti.csv_manager import CSVStationManager
+from custom_components.osservaprezzi_carburanti.csv_manager import (
+    CSVStationManager,
+    RegistryUnavailableError,
+    get_shared_csv_manager,
+)
 
 
 async def _run_in_executor(func, *args):
@@ -810,6 +814,98 @@ class TestCSVCacheValidation:
             csv_manager._async_initialize.assert_awaited_once()
 
         asyncio.run(_exercise())
+
+    def test_ensure_registry_returns_immutable_fresh_snapshot(
+        self, csv_manager, monkeypatch
+    ):
+        now = datetime(2026, 7, 28, 8, 0, tzinfo=timezone.utc)
+        csv_manager._stations_cache = {
+            "123": {"id": "123", "name": "Station", "latitude": 41.9, "longitude": 12.5}
+        }
+        csv_manager._last_update = now - timedelta(hours=1)
+        csv_manager.async_initialize = AsyncMock(return_value=True)
+        monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+
+        snapshot = asyncio.run(csv_manager.async_ensure_registry())
+
+        assert snapshot.updated_at == now - timedelta(hours=1)
+        assert snapshot.is_stale is False
+        assert snapshot.stations[0]["name"] == "Station"
+        with pytest.raises(TypeError):
+            snapshot.stations[0]["name"] = "Changed"
+
+    def test_ensure_registry_can_use_stale_cache(self, csv_manager, monkeypatch):
+        now = datetime(2026, 7, 28, 8, 0, tzinfo=timezone.utc)
+        csv_manager._stations_cache = {
+            "123": {"id": "123", "latitude": 41.9, "longitude": 12.5}
+        }
+        csv_manager._last_update = now - timedelta(days=2)
+        csv_manager.async_initialize = AsyncMock(return_value=False)
+        monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+
+        snapshot = asyncio.run(csv_manager.async_ensure_registry(allow_stale=True))
+
+        assert snapshot.is_stale is True
+        assert len(snapshot.stations) == 1
+
+    def test_ensure_registry_rejects_unavailable_or_disallowed_stale_cache(
+        self, csv_manager
+    ):
+        csv_manager.async_initialize = AsyncMock(return_value=False)
+
+        with pytest.raises(RegistryUnavailableError):
+            asyncio.run(csv_manager.async_ensure_registry())
+
+        csv_manager._stations_cache = {"123": {"id": "123"}}
+        with pytest.raises(RegistryUnavailableError):
+            asyncio.run(csv_manager.async_ensure_registry(allow_stale=False))
+
+    def test_registry_status_reports_cache_health(self, csv_manager, monkeypatch):
+        now = datetime(2026, 6, 2, tzinfo=timezone.utc)
+        monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+        csv_manager._initialized = True
+        csv_manager._stations_cache = {"123": {"id": "123"}}
+        csv_manager._last_update = now - timedelta(hours=1)
+        csv_manager._detected_separator = ";"
+        csv_manager._csv_etag = '"etag"'
+        csv_manager._csv_last_modified = "Mon, 01 Jun 2026 00:00:00 GMT"
+
+        assert csv_manager.registry_status() == {
+            "initialized": True,
+            "station_count": 1,
+            "last_update": "2026-06-01T23:00:00+00:00",
+            "is_stale": False,
+            "separator": ";",
+            "has_etag": True,
+            "has_last_modified": True,
+        }
+
+    def test_registry_status_reports_missing_cache_as_stale(
+        self, csv_manager, monkeypatch
+    ):
+        monkeypatch.setattr(
+            csv_module.dt_util,
+            "now",
+            lambda: datetime(2026, 6, 2, tzinfo=timezone.utc),
+        )
+
+        status = csv_manager.registry_status()
+
+        assert status["last_update"] is None
+        assert status["is_stale"] is True
+        assert status["has_etag"] is False
+        assert status["has_last_modified"] is False
+
+    def test_get_shared_csv_manager_reuses_domain_owner(self):
+        hass = MagicMock()
+        hass.data = {}
+        hass.config.path.return_value = "/tmp/test_storage"
+
+        first = get_shared_csv_manager(hass)
+        second = get_shared_csv_manager(hass)
+
+        assert second is first
+        assert hass.data[csv_module.DOMAIN][csv_module.CSV_MANAGER_DATA_KEY] is first
 
     def test_initialize_updates_stale_cache(self, csv_manager, monkeypatch):
         monkeypatch.setattr(

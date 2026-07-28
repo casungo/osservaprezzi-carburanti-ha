@@ -20,6 +20,8 @@ Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi
 
 📞 **Contact Information Sensors**: Creates sensors for phone, email, and website when available.
 
+🏠 **Flexible Station Setup**: Finds stations near Home or manual coordinates, searches by municipality, or accepts a station ID.
+
 ## 🚀 Installation and Configuration
 
 ### Installation via HACS
@@ -34,6 +36,21 @@ Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi
 
 To configure the integration, go to: "Settings" -> "Devices & Services" -> "+ Add Integration", search for "Osservaprezzi Carburanti" and follow the instructions.
 
+During setup you can:
+
+- find nearby stations using Home Assistant's configured Home location and a 2, 5, 10, 20, or 50 km radius;
+- search near manually entered coordinates without storing them;
+- search the official registry by municipality and optional province;
+- enter an Osservaprezzi station ID manually.
+
+Registry searches support free-text and station-type filters plus a 5, 10, or 20 result limit.
+Matching is case- and accent-insensitive. Nearby searches use the locally cached official MIMIT
+station registry. Coordinates are used only in memory to calculate distances and are not stored by
+the integration or sent to MIMIT.
+
+After setup, use the integration's **Reconfigure** action to change the monitored station without
+removing and recreating the config entry.
+
 You can also use the following My Home Assistant link (requires the integration to be already installed):
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
@@ -47,6 +64,7 @@ When you configure a station, the integration automatically creates the followin
 - One sensor for each fuel type available at the station (both self-service and served)
 - Shows current price in €/L
 - Includes attributes for fuel name, service type, last update time, and validity date
+- Reports price delta, `up`/`down`/`unchanged` direction, age in minutes, and whether the price is stale
 
 ### Station Information Sensors
 
@@ -83,7 +101,9 @@ Binary sensors are created for each available service at the station:
 
 ### Cron Expression Configuration
 
-The integration uses a cron expression to schedule automatic data updates. This can be configured after initial installation through the integration options.
+The integration uses a cron expression to schedule automatic data updates. This can be configured
+after initial installation through the integration options, which also previews the next run.
+The same screen lets you choose when prices are marked stale: 6, 12, 24, 48, 72, or 168 hours.
 
 **Default value**: `30 8 * * *` (daily at 8:30 AM)
 
@@ -98,7 +118,7 @@ Common examples:
 
 ### How to Find the Station ID
 
-During configuration, you will be asked to enter the **Station ID** of the facility you want to monitor. To find the Station ID:
+Manual ID entry remains available during configuration. To find a **Station ID**:
 
 1. Go to https://carburanti.mise.gov.it/ospzSearch/zona
 2. Search for your favorite station
@@ -172,9 +192,8 @@ group:
 
 ## Global Services
 
-The integration registers these services globally. They take no input fields. Shared CSV cache
-operations run once and then synchronize and refresh every loaded station entry that can use the
-updated cache.
+The integration registers these services globally. Shared CSV cache operations run once and then
+synchronize and refresh every loaded station entry that can use the updated cache.
 
 ### Force CSV update
 
@@ -207,6 +226,39 @@ price, previous price, price-change time, service mode, and last-update time.
 action: osservaprezzi_carburanti.compare_stations
 response_variable: station_comparison
 ```
+
+### Refresh fuel prices
+
+`osservaprezzi_carburanti.refresh_prices` refreshes every active station or an optional list of
+station IDs and returns the refreshed IDs.
+
+```yaml
+action: osservaprezzi_carburanti.refresh_prices
+data:
+  station_ids:
+    - "54233"
+response_variable: refresh_result
+```
+
+### Search the station registry
+
+`osservaprezzi_carburanti.search_registry` searches the local official registry by text,
+municipality, province, or station type. It returns public station metadata and flags stations
+already configured in Home Assistant.
+
+```yaml
+action: osservaprezzi_carburanti.search_registry
+data:
+  municipality: Roma
+  query: Eni
+  limit: 10
+response_variable: registry_results
+```
+
+## Diagnostics
+
+Home Assistant's diagnostics download includes configuration options, coordinator counts, and
+shared-registry health. Station ID, identity, address, and coordinates are not included.
 
 ## Local Regression Tests
 

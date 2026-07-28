@@ -3,33 +3,105 @@
     "step": {
       "user": {
         "title": "Configurazione Osservaprezzi Carburanti",
+        "description": "Scegli come aggiungere un distributore.",
+        "menu_options": {
+          "home": "Trova stazioni vicino a casa",
+          "coordinates": "Trova stazioni vicino a coordinate",
+          "area": "Cerca nel registro delle stazioni",
+          "station_id": "Inserisci l'ID della stazione"
+        }
+      },
+      "home": {
+        "title": "Trova stazioni vicino a casa",
+        "description": "La posizione di casa configurata in Home Assistant viene usata temporaneamente per calcolare le distanze su questo dispositivo. Non viene salvata né inviata al MIMIT o ad altri servizi.",
+        "data": {
+          "radius_km": "Raggio di ricerca (km)",
+          "text_filter": "Nome, marchio, indirizzo o gestore contiene",
+          "station_type": "Tipologia impianto contiene",
+          "result_limit": "Numero massimo di risultati"
+        }
+      },
+      "coordinates": {
+        "title": "Trova stazioni vicino a coordinate",
+        "description": "Le coordinate vengono usate solo per questa ricerca locale. Non vengono salvate né inviate al MIMIT o ad altri servizi.",
+        "data": {
+          "latitude": "Latitudine",
+          "longitude": "Longitudine",
+          "radius_km": "Raggio di ricerca (km)",
+          "text_filter": "Nome, marchio, indirizzo o gestore contiene",
+          "station_type": "Tipologia impianto contiene",
+          "result_limit": "Numero massimo di risultati"
+        }
+      },
+      "area": {
+        "title": "Cerca nel registro delle stazioni",
+        "description": "Cerca nel registro ufficiale memorizzato localmente per comune e filtri opzionali.",
+        "data": {
+          "municipality": "Comune",
+          "province": "Provincia",
+          "text_filter": "Nome, marchio, indirizzo o gestore contiene",
+          "station_type": "Tipologia impianto contiene",
+          "result_limit": "Numero massimo di risultati"
+        }
+      },
+      "station_id": {
+        "title": "Inserisci l'ID della stazione",
         "description": "Inserisci l'ID della stazione da monitorare.\n\nCome trovare l'ID stazione:\n1. Vai su carburanti.mise.gov.it/ospzSearch/zona\n2. Cerca e apri la pagina di dettaglio della stazione\n3. Copia l'ID dall'URL (per esempio 1111 da .../dettaglio/1111)",
         "data": {
           "station_id": "ID stazione"
+        }
+      },
+      "select_station": {
+        "title": "Scegli una stazione",
+        "description": "{result_count} stazioni corrispondenti. Registro aggiornato: {registry_updated}.",
+        "data": {
+          "station_id": "Stazione"
+        }
+      },
+      "select_station_stale": {
+        "title": "Scegli una stazione",
+        "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile, aggiornata il {registry_updated}.",
+        "data": {
+          "station_id": "Stazione"
+        }
+      },
+      "reconfigure": {
+        "title": "Cambia stazione monitorata",
+        "description": "Inserisci un altro ID stazione. Le entità esistenti verranno ricaricate per la stazione selezionata.",
+        "data": {
+          "station_id": "Stazione"
         }
       }
     },
     "error": {
       "unknown": "Si è verificato un errore imprevisto",
       "cannot_connect": "Impossibile connettersi al servizio",
-      "invalid_station": "ID stazione non valido o stazione non trovata"
+      "invalid_station": "ID stazione non valido o stazione non trovata",
+      "home_location_unavailable": "Home Assistant non ha una posizione di casa valida. Impostala in Sistema > Generale oppure usa l'ID stazione.",
+      "invalid_location": "Inserisci coordinate di latitudine e longitudine valide.",
+      "registry_unavailable": "Il registro ufficiale delle stazioni non è disponibile. Riprova oppure usa l'ID stazione.",
+      "no_stations_found": "Nessuna stazione corrisponde alla ricerca. Amplia l'area o i filtri oppure usa l'ID stazione.",
+      "already_configured": "Questa stazione è già configurata."
     },
     "abort": {
-      "already_configured": "Questa configurazione è già stata impostata"
+      "already_configured": "Questa configurazione è già stata impostata",
+      "reconfigure_successful": "La stazione monitorata è stata cambiata."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Opzioni Osservaprezzi Carburanti",
-        "description": "Configura le opzioni dell'integrazione.\n\nUsa una normale espressione cron a cinque campi, ad esempio 30 7 * * *.",
+        "description": "Configura aggiornamento e freschezza dei prezzi. Prossimo aggiornamento pianificato: {next_run}.\n\nUsa una normale espressione cron a cinque campi, ad esempio 30 7 * * *.",
         "data": {
-          "cron_expression": "Espressione cron"
+          "cron_expression": "Espressione cron",
+          "price_stale_hours": "Considera i prezzi obsoleti dopo (ore)"
         }
       }
     },
     "error": {
-      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (ogni giorno alle 07:30)."
+      "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (ogni giorno alle 07:30).",
+      "invalid_stale_hours": "Scegli una delle soglie di freschezza supportate."
     }
   },
   "entity": {
@@ -130,6 +202,14 @@
     "compare_stations": {
       "name": "Confronta prezzi stazioni",
       "description": "Restituisce un confronto dei prezzi dei carburanti tra tutte le stazioni configurate."
+    },
+    "refresh_prices": {
+      "name": "Aggiorna prezzi carburanti",
+      "description": "Aggiorna tutte le stazioni attive oppure solo gli ID stazione richiesti."
+    },
+    "search_registry": {
+      "name": "Cerca nel registro stazioni",
+      "description": "Cerca nel registro ufficiale memorizzato localmente e restituisce le stazioni corrispondenti."
     }
   },
   "title": "Osservaprezzi Carburanti"

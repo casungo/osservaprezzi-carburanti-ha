@@ -18,11 +18,17 @@ from .const import (
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
     ATTR_PREVIOUS_PRICE,
+    ATTR_PRICE_AGE_MINUTES,
     ATTR_PRICE_CHANGED_AT,
+    ATTR_PRICE_DELTA,
+    ATTR_PRICE_DIRECTION,
+    ATTR_PRICE_IS_STALE,
     ATTR_STATION_ADDRESS,
     ATTR_STATION_BRAND,
     ATTR_STATION_NAME,
     ATTR_VALIDITY_DATE,
+    CONF_PRICE_STALE_HOURS,
+    DEFAULT_PRICE_STALE_HOURS,
     DOMAIN,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
@@ -58,6 +64,50 @@ def _get_fuel_icon(fuel_name: str) -> str:
     if "metano" in fuel_name_lower:
         return "mdi:molecule-co2"
     return "mdi:currency-eur"
+
+
+def _price_metadata(
+    *,
+    price: Any,
+    previous_price: Any,
+    last_update: Any,
+    stale_hours: int,
+) -> dict[str, Any]:
+    """Return derived, presentation-safe price metadata."""
+    price_is_number = isinstance(price, (int, float)) and not isinstance(price, bool)
+    previous_is_number = isinstance(previous_price, (int, float)) and not isinstance(
+        previous_price, bool
+    )
+    price_delta: float | None = None
+    price_direction: str | None = None
+    if price_is_number and previous_is_number:
+        price_delta = round(float(price) - float(previous_price), 3)
+        if price_delta > 0:
+            price_direction = "up"
+        elif price_delta < 0:
+            price_direction = "down"
+        else:
+            price_direction = "unchanged"
+    elif price_is_number:
+        price_direction = "new"
+
+    age_minutes: int | None = None
+    price_is_stale: bool | None = None
+    if isinstance(last_update, str):
+        parsed_update = dt_util.parse_datetime(last_update)
+        if parsed_update is not None and parsed_update.tzinfo is not None:
+            age_minutes = max(
+                0,
+                int((dt_util.now() - parsed_update).total_seconds() / 60),
+            )
+            price_is_stale = age_minutes > stale_hours * 60
+
+    return {
+        ATTR_PRICE_DELTA: price_delta,
+        ATTR_PRICE_DIRECTION: price_direction,
+        ATTR_PRICE_AGE_MINUTES: age_minutes,
+        ATTR_PRICE_IS_STALE: price_is_stale,
+    }
 
 
 async def async_setup_entry(
@@ -141,7 +191,7 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
             return {}
 
         fuel_name, service_type = self._fuel_key.rsplit("_", 1)
-        return {
+        attributes = {
             ATTR_FUEL_TYPE_NAME: fuel_name.replace("_", " ").title(),
             ATTR_IS_SELF: service_type == "self",
             ATTR_LAST_UPDATE: fuel_info.get("last_update"),
@@ -152,6 +202,20 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
             ATTR_PREVIOUS_PRICE: fuel_info.get("previous_price"),
             ATTR_PRICE_CHANGED_AT: fuel_info.get("price_changed_at"),
         }
+        attributes.update(
+            _price_metadata(
+                price=fuel_info.get("price"),
+                previous_price=fuel_info.get("previous_price"),
+                last_update=fuel_info.get("last_update"),
+                stale_hours=int(
+                    getattr(self._entry, "options", {}).get(
+                        CONF_PRICE_STALE_HOURS,
+                        DEFAULT_PRICE_STALE_HOURS,
+                    )
+                ),
+            )
+        )
+        return attributes
 
 
 class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
@@ -208,6 +272,11 @@ class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
             ATTR_STATION_BRAND: self.station_info.get("brand"),
             ATTR_LATITUDE: self.station_info.get(ATTR_LATITUDE),
             ATTR_LONGITUDE: self.station_info.get(ATTR_LONGITUDE),
+            "municipality": self.station_info.get("municipality"),
+            "province": self.station_info.get("province"),
+            "station_type": self.station_info.get("station_type"),
+            "operator": self.station_info.get("operator"),
+            "coordinate_source": self.station_info.get("coordinate_source"),
         }
 
     @property

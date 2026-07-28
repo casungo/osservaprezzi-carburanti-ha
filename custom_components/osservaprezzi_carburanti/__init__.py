@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any
+
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -23,18 +26,47 @@ from .const import (
     SERVICE_COMPARE_STATIONS,
     SERVICE_CLEAR_CACHE,
     SERVICE_FORCE_CSV_UPDATE,
+    SERVICE_REFRESH_PRICES,
+    SERVICE_SEARCH_REGISTRY,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 from .cron_helper import get_next_run_time
-from .csv_manager import CSVStationManager
+from .csv_manager import (
+    CSV_MANAGER_DATA_KEY,
+    CSVStationManager,
+    RegistryUnavailableError,
+    get_shared_csv_manager,
+)
+from .discovery import find_stations_by_area
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 _SERVICES_REGISTERED = f"{DOMAIN}_services_registered"
-_CSV_MANAGER = "csv_manager"
+_CSV_MANAGER = CSV_MANAGER_DATA_KEY
 _CSV_UPDATE_LISTENER = "csv_update_listener"
+
+_REFRESH_PRICES_SCHEMA = vol.Schema(
+    {
+        vol.Optional("station_ids"): vol.All(
+            cv.ensure_list,
+            [str],
+        )
+    }
+)
+_SEARCH_REGISTRY_SCHEMA = vol.Schema(
+    {
+        vol.Optional("query", default=""): str,
+        vol.Optional("municipality", default=""): str,
+        vol.Optional("province", default=""): str,
+        vol.Optional("station_type", default=""): str,
+        vol.Optional("limit", default=20): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=1, max=50),
+        ),
+    }
+)
 
 _LEGACY_DEFAULT_ENTITY_NAMES = frozenset(
     {
@@ -92,6 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         csv_manager = CSVStationManager(hass)
         domain_data[_CSV_MANAGER] = csv_manager
 
+    if domain_data.get(_CSV_UPDATE_LISTENER) is None:
         async def _async_csv_update_callback(now: datetime) -> None:
             _LOGGER.info("Performing periodic CSV data update at %s", now)
             if not await csv_manager.async_periodic_update():
@@ -185,6 +218,7 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
         if not isinstance(unique_id, str) or not isinstance(entity_id, str):
             continue
         if not unique_id.startswith(f"{station_id}_"):
+            entity_registry.async_remove(entity_id)
             continue
 
         if entity_id.startswith("sensor.") and unique_id.startswith(f"{station_id}_service_"):
@@ -317,6 +351,80 @@ def _async_register_services(hass: HomeAssistant) -> None:
             }
         return {"stations": comparison}
 
+    async def _handle_refresh_prices(call: ServiceCall) -> ServiceResponse:
+        """Refresh all active stations or a requested station subset."""
+        requested_ids = {
+            str(station_id).strip()
+            for station_id in call.data.get("station_ids", [])
+            if str(station_id).strip()
+        }
+        coordinators = _iter_coordinators()
+        if requested_ids:
+            coordinators = [
+                (entry_id, coordinator)
+                for entry_id, coordinator in coordinators
+                if str(coordinator.config_entry.data.get(CONF_STATION_ID)) in requested_ids
+            ]
+        if not coordinators:
+            raise HomeAssistantError("No matching active Osservaprezzi entries")
+
+        await _async_refresh_coordinators(coordinators, "Price refresh")
+        refreshed_station_ids = [
+            str(coordinator.config_entry.data.get(CONF_STATION_ID))
+            for _, coordinator in coordinators
+        ]
+        return {
+            "refreshed_station_ids": refreshed_station_ids,
+            "refreshed_count": len(refreshed_station_ids),
+        }
+
+    async def _handle_search_registry(call: ServiceCall) -> ServiceResponse:
+        """Search the shared official station registry without location data."""
+        try:
+            snapshot = await get_shared_csv_manager(hass).async_ensure_registry(
+                allow_stale=True
+            )
+        except RegistryUnavailableError as err:
+            raise HomeAssistantError("The station registry is unavailable") from err
+
+        candidates = await hass.async_add_executor_job(
+            partial(
+                find_stations_by_area,
+                snapshot.stations,
+                municipality=str(call.data.get("municipality", "")),
+                province=str(call.data.get("province", "")),
+                text_filter=str(call.data.get("query", "")),
+                station_type=str(call.data.get("station_type", "")),
+                limit=int(call.data.get("limit", 20)),
+            )
+        )
+        configured_station_ids = {
+            str(coordinator.config_entry.data.get(CONF_STATION_ID))
+            for _, coordinator in _iter_coordinators()
+        }
+        return {
+            "results": [
+                {
+                    "station_id": candidate.station_id,
+                    "name": candidate.name,
+                    "brand": candidate.brand,
+                    "address": candidate.address,
+                    "municipality": candidate.municipality,
+                    "province": candidate.province,
+                    "station_type": candidate.station_type,
+                    "configured": candidate.station_id in configured_station_ids,
+                }
+                for candidate in candidates
+            ],
+            "result_count": len(candidates),
+            "registry_updated": (
+                snapshot.updated_at.isoformat()
+                if snapshot.updated_at is not None
+                else None
+            ),
+            "registry_is_stale": snapshot.is_stale,
+        }
+
     hass.services.async_register(
         DOMAIN, SERVICE_FORCE_CSV_UPDATE, _handle_force_csv_update,
     )
@@ -325,6 +433,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_COMPARE_STATIONS, _handle_compare_stations,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REFRESH_PRICES,
+        _handle_refresh_prices,
+        schema=_REFRESH_PRICES_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SEARCH_REGISTRY,
+        _handle_search_registry,
+        schema=_SEARCH_REGISTRY_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
 
@@ -356,6 +478,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
             hass.services.async_remove(DOMAIN, SERVICE_CLEAR_CACHE)
             hass.services.async_remove(DOMAIN, SERVICE_COMPARE_STATIONS)
+            hass.services.async_remove(DOMAIN, SERVICE_REFRESH_PRICES)
+            hass.services.async_remove(DOMAIN, SERVICE_SEARCH_REGISTRY)
             hass.data.pop(_SERVICES_REGISTERED, None)
 
     return unload_ok

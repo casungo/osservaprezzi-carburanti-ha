@@ -194,6 +194,7 @@ class OsservaprezziBaseEntity(CoordinatorEntity):
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the shared entity base."""
         super().__init__(coordinator)
+        self._entry = entry
         self._station_id = entry.data[CONF_STATION_ID]
 
     @property

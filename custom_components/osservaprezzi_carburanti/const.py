@@ -7,7 +7,10 @@ CONF_STATION_ID = "station_id"
 
 # Options
 CONF_CRON_EXPRESSION = "cron_expression"
+CONF_PRICE_STALE_HOURS = "price_stale_hours"
 DEFAULT_CRON_EXPRESSION = "30 8 * * *"  # Daily at 08:30
+DEFAULT_PRICE_STALE_HOURS = 24
+PRICE_STALE_HOUR_OPTIONS = (6, 12, 24, 48, 72, 168)
 
 # API
 BASE_URL = "https://carburanti.mise.gov.it/ospzApi"
@@ -123,7 +126,13 @@ ATTR_LATITUDE = "latitude"
 ATTR_LONGITUDE = "longitude"
 ATTR_PREVIOUS_PRICE = "previous_price"
 ATTR_PRICE_CHANGED_AT = "price_changed_at"
+ATTR_PRICE_DELTA = "price_delta"
+ATTR_PRICE_DIRECTION = "price_direction"
+ATTR_PRICE_AGE_MINUTES = "price_age_minutes"
+ATTR_PRICE_IS_STALE = "price_is_stale"
 
 SERVICE_FORCE_CSV_UPDATE = "force_csv_update"
 SERVICE_CLEAR_CACHE = "clear_cache"
 SERVICE_COMPARE_STATIONS = "compare_stations"
+SERVICE_REFRESH_PRICES = "refresh_prices"
+SERVICE_SEARCH_REGISTRY = "search_registry"

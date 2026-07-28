@@ -237,6 +237,8 @@ modules = [
     "custom_components.{DOMAIN}.coordinator",
     "custom_components.{DOMAIN}.cron_helper",
     "custom_components.{DOMAIN}.csv_manager",
+    "custom_components.{DOMAIN}.diagnostics",
+    "custom_components.{DOMAIN}.discovery",
     "custom_components.{DOMAIN}.sensor",
 ]
 
@@ -257,6 +259,54 @@ if normalized != {{"1", "2", "3"}}:
 print("HA import contract passed")
 """
     _run(["docker", "exec", container_name, "python", "-c", script], timeout=60, env=docker_env)
+
+
+def _run_discovery_contract(
+    container_name: str,
+    docker_env: dict[str, str],
+) -> dict[str, int | str]:
+    """Search the live cached MIMIT registry around the configured test home."""
+    script = f"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/config")
+
+from custom_components.{DOMAIN}.discovery import find_nearby_stations
+
+cache_path = Path("/config/.storage/{DOMAIN}_cache.json")
+payload = json.loads(cache_path.read_text(encoding="utf-8"))
+candidates = find_nearby_stations(
+    payload["stations"].values(),
+    latitude=41.9028,
+    longitude=12.4964,
+    radius_km=20,
+    limit=20,
+)
+if not candidates:
+    raise AssertionError("Live registry discovery returned no stations around the test home")
+if len(candidates) > 20:
+    raise AssertionError(f"Discovery result cap was not enforced: {{len(candidates)}}")
+if list(candidates) != sorted(
+    candidates,
+    key=lambda candidate: candidate.distance_km,
+):
+    raise AssertionError("Discovery results are not ordered by distance")
+
+print(json.dumps({{
+    "count": len(candidates),
+    "nearest_station_id": candidates[0].station_id,
+}}))
+"""
+    result = _run(
+        ["docker", "exec", container_name, "python", "-c", script],
+        timeout=60,
+        env=docker_env,
+    )
+    return json.loads(result.stdout)
 
 
 def _entity_counts(container_name: str, docker_env: dict[str, str], station_ids: list[str]) -> dict[str, int] | None:
@@ -375,11 +425,13 @@ def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str])
             logs = _wait_for_startup(container_name, timeout, docker_env)
             _run_import_contract(container_name, docker_env)
             entity_counts = _wait_for_live_entities(container_name, docker_env, station_ids, timeout)
+            discovery_result = _run_discovery_contract(container_name, docker_env)
             _assert_no_error_logs(_combined_logs(container_name, docker_env), container_name)
             print("Home Assistant Docker regression passed")
             print(f"Image: {image}")
             print(f"Container: {container_name}")
             print(f"Live station entity counts: {entity_counts}")
+            print(f"Live nearby discovery: {discovery_result}")
             print("Matched startup logs:")
             for line in logs.splitlines():
                 if DOMAIN in line or STARTUP_OK_PATTERN.search(line):

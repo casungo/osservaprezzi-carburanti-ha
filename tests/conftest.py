@@ -59,6 +59,7 @@ def _mock_ha_modules():
     ha_modules = [
         "homeassistant",
         "homeassistant.components",
+        "homeassistant.components.diagnostics",
         "homeassistant.components.sensor",
         "homeassistant.components.binary_sensor",
         "homeassistant.components.geo_location",
@@ -90,6 +91,12 @@ def _mock_ha_modules():
     )
     sys.modules["homeassistant.components.binary_sensor"].BinarySensorEntity = _MockBinarySensorEntity
     sys.modules["homeassistant.components.geo_location"].GeolocationEvent = _MockEntity
+    sys.modules["homeassistant.components.diagnostics"].async_redact_data = (
+        lambda data, keys: {
+            key: "**REDACTED**" if key in keys else value
+            for key, value in data.items()
+        }
+    )
     sys.modules["homeassistant.helpers.update_coordinator"].CoordinatorEntity = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = Exception

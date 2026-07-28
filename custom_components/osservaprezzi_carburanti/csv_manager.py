@@ -9,7 +9,10 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from types import MappingProxyType
 from typing import Any
 
 import aiohttp
@@ -23,6 +26,7 @@ from .const import CSV_UPDATE_INTERVAL, CSV_URL, DEFAULT_HEADERS, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 CACHE_VERSION = "2.0"
+CSV_MANAGER_DATA_KEY = "csv_manager"
 CSV_COLUMNS = {
     "idImpianto": "id",
     "Gestore": "operator",
@@ -36,6 +40,19 @@ CSV_COLUMNS = {
     "Longitudine": "longitude",
 }
 REQUIRED_CSV_COLUMNS = ("id", "latitude", "longitude")
+
+
+class RegistryUnavailableError(Exception):
+    """Raised when no usable station registry is available."""
+
+
+@dataclass(frozen=True)
+class RegistrySnapshot:
+    """Read-only view of the shared station registry."""
+
+    stations: tuple[Mapping[str, Any], ...]
+    updated_at: datetime | None
+    is_stale: bool
 
 
 def _load_json_file_sync(path: str) -> dict[str, Any]:
@@ -463,6 +480,43 @@ class CSVStationManager:
         """Check if station data is available."""
         return bool(self._stations_cache)
 
+    def registry_status(self) -> dict[str, Any]:
+        """Return a privacy-safe summary of the registry cache."""
+        last_update = self._last_update
+        is_stale = (
+            last_update is None
+            or dt_util.now() - last_update >= timedelta(hours=CSV_UPDATE_INTERVAL)
+        )
+        return {
+            "initialized": self._initialized,
+            "station_count": len(self._stations_cache),
+            "last_update": last_update.isoformat() if last_update else None,
+            "is_stale": is_stale,
+            "separator": self._detected_separator,
+            "has_etag": self._csv_etag is not None,
+            "has_last_modified": self._csv_last_modified is not None,
+        }
+
+    async def async_ensure_registry(self, *, allow_stale: bool = True) -> RegistrySnapshot:
+        """Initialize the registry and return an immutable snapshot."""
+        initialized = await self.async_initialize()
+        if not initialized and (not allow_stale or not self._stations_cache):
+            raise RegistryUnavailableError("No station registry is available")
+
+        last_update = self._last_update
+        is_stale = (
+            last_update is None
+            or dt_util.now() - last_update >= timedelta(hours=CSV_UPDATE_INTERVAL)
+        )
+        stations = tuple(
+            MappingProxyType(dict(station)) for station in self._stations_cache.values()
+        )
+        return RegistrySnapshot(
+            stations=stations,
+            updated_at=last_update,
+            is_stale=is_stale,
+        )
+
     async def async_initialize(self) -> bool:
         """Initialize the CSV manager."""
         async with self._operation_lock:
@@ -532,3 +586,13 @@ class CSVStationManager:
             if success:
                 _LOGGER.info("CSV cache cleared successfully")
             return success
+
+
+def get_shared_csv_manager(hass: HomeAssistant) -> CSVStationManager:
+    """Return the integration-wide station registry manager."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    csv_manager = domain_data.get(CSV_MANAGER_DATA_KEY)
+    if not isinstance(csv_manager, CSVStationManager):
+        csv_manager = CSVStationManager(hass)
+        domain_data[CSV_MANAGER_DATA_KEY] = csv_manager
+    return csv_manager

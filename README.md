@@ -4,6 +4,10 @@
 
 Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi service provided by the Italian Ministry of Enterprises and Made in Italy (MIMIT).
 
+> **Release channels:** `v2.3.0` is the stable release. `v2.4.0` is available as a
+> pre-release and includes the flexible setup described below. To receive it through HACS,
+> enable the repository's **Pre-release** switch entity or select `v2.4.0` when downloading.
+
 ## ✨ Features
 
 📊 **Automatic Fuel Sensors**: Automatically creates a sensor for each fuel type available at the selected station.
@@ -30,6 +34,7 @@ Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi
 2. **Install the integration**:
    - Search for "Osservaprezzi Carburanti" in HACS.
    - Click "Download".
+   - To try `v2.4.0`, enable pre-releases for the repository or explicitly select that version.
    - Restart Home Assistant.
 
 ### Configuration
@@ -287,7 +292,10 @@ through manual workflow dispatch.
 
 ## 📞 Support
 
-For issues or suggestions, open an issue on GitHub.
+For issues or suggestions, open a
+[GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
+When testing `v2.4.0`, include the setup method used and attach the Home Assistant diagnostics
+download: it excludes station IDs, identity, addresses, and coordinates.
 
 ## 📄 License
 

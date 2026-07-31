@@ -4,6 +4,11 @@
 
 Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizio Osservaprezzi del Ministero delle Imprese e del Made in Italy (MIMIT).
 
+> **Canali di rilascio:** `v2.3.0` è la versione stabile. `v2.4.0` è disponibile come
+> pre-release e include la configurazione flessibile descritta qui sotto. Per riceverla tramite
+> HACS, abilita l'entità switch **Pre-release** del repository oppure seleziona `v2.4.0`
+> durante il download.
+
 ## ✨ Caratteristiche
 
 📊 **Sensori Automatici del Carburante**: Crea automaticamente un sensore per ogni tipo di carburante disponibile nella stazione selezionata.
@@ -30,6 +35,8 @@ Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizi
 2.  **Installa l'integrazione**:
     - Cerca "Osservaprezzi Carburanti" in HACS.
     - Clicca "Download".
+    - Per provare `v2.4.0`, abilita le pre-release per il repository o seleziona esplicitamente
+      quella versione.
     - Riavvia Home Assistant.
 
 ### Configurazione
@@ -286,7 +293,10 @@ tramite avvio manuale del workflow.
 
 ## 📞 Supporto
 
-Per problemi o suggerimenti apri una issue su GitHub.
+Per problemi o suggerimenti apri una
+[issue su GitHub](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
+Se stai provando `v2.4.0`, indica il metodo di configurazione usato e allega il download
+diagnostico di Home Assistant: non contiene ID stazione, identità, indirizzo o coordinate.
 
 ## 📄 Licenza
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-07-31
+
 ### Added
 - Add four setup methods: Home location, manual coordinates, municipality/province registry search, and direct station ID
 - Add local text and station-type filters, configurable result limits, and accent-insensitive matching to station discovery

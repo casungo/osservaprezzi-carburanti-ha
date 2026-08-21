@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from math import isfinite
 from typing import Any
 
 import aiohttp
@@ -144,10 +145,25 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Station %s found in CSV but missing coordinates", station_id)
             return None
 
+        try:
+            latitude = float(latitude)
+            longitude = float(longitude)
+        except (TypeError, ValueError):
+            _LOGGER.warning("Station %s has invalid CSV coordinates", station_id)
+            return None
+        if (
+            not isfinite(latitude)
+            or not isfinite(longitude)
+            or not -90 <= latitude <= 90
+            or not -180 <= longitude <= 180
+        ):
+            _LOGGER.warning("Station %s has invalid CSV coordinates", station_id)
+            return None
+
         _LOGGER.debug("Found coordinates for station %s: %s, %s", station_id, latitude, longitude)
         return {
-            "latitude": float(latitude),
-            "longitude": float(longitude),
+            "latitude": latitude,
+            "longitude": longitude,
             "source": "csv",
         }
 

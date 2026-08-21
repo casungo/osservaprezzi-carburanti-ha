@@ -9,12 +9,16 @@ On a host that provides `python3` but not `python`, create and activate a virtua
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements-test.txt
+python -m pip install -r requirements-ha-test.txt
 ```
+
+`requirements-ha-test.txt` includes the lightweight suite dependencies and the
+Home Assistant contract-test dependencies used by CI.
 
 ## Required for every PR
 
 ```bash
+python -m pytest -c pytest-ha.ini -q
 python -m pytest -q
 python -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
 python -m coverage report --fail-under=100

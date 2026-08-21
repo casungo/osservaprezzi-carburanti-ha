@@ -244,6 +244,9 @@ class TestCSVParsing:
     def test_parse_coordinate_invalid_values(self):
         assert CSVStationManager._parse_coordinate("") is None
         assert CSVStationManager._parse_coordinate("not-a-number") is None
+        assert CSVStationManager._parse_coordinate("NaN") is None
+        assert CSVStationManager._parse_coordinate("inf") is None
+        assert CSVStationManager._parse_coordinate("-inf") is None
 
 class TestCSVCacheValidation:
     def test_builds_conditional_headers(self, csv_manager):

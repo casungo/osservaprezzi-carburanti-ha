@@ -127,6 +127,27 @@ class TestStationProcessing:
         assert coordinator._get_station_coordinates(station_id) is None
 
     @pytest.mark.parametrize(
+        ("latitude", "longitude"),
+        [
+            ("not-a-coordinate", "9.2"),
+            ("NaN", "9.2"),
+            ("45.1", "inf"),
+            ("91", "9.2"),
+            ("45.1", "181"),
+        ],
+    )
+    def test_get_station_coordinates_rejects_invalid_csv_values(
+        self, latitude: str, longitude: str
+    ) -> None:
+        coordinator = _make_coordinator()
+        coordinator.csv_manager.get_station_by_id.return_value = {
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+
+        assert coordinator._get_station_coordinates("123") is None
+
+    @pytest.mark.parametrize(
         ("value", "expected"),
         [
             (None, None),

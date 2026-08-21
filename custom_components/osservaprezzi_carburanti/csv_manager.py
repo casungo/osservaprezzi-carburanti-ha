@@ -12,6 +12,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from math import isfinite
 from types import MappingProxyType
 from typing import Any
 
@@ -340,9 +341,10 @@ class CSVStationManager:
             return None
 
         try:
-            return float(value.replace(",", "."))
+            coordinate = float(value.replace(",", "."))
         except (TypeError, ValueError):
             return None
+        return coordinate if isfinite(coordinate) else None
 
     async def async_load_cached_data(self) -> bool:
         """Load cached station data from local file."""

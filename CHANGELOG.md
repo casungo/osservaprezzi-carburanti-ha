@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Keep manual station-ID setup available alongside local registry discovery
 
+### Fixed
+- Reject non-finite and out-of-range coordinates from the station registry before they reach Home Assistant
+
 ## [2.3.0] - 2026-07-19
 
 ### Added

@@ -476,7 +476,12 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         if location:
             parts.append(location)
         parts.append(f"ID {candidate.station_id}")
-        return " · ".join(parts)
+        label = " · ".join(parts)
+        if len(label) <= 64:
+            return label
+        suffix = f" · ID {candidate.station_id}"
+        prefix = " · ".join(parts[:-1])
+        return f"{prefix[: 64 - len(suffix) - 1].rstrip()}…{suffix}"
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None

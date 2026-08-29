@@ -583,6 +583,24 @@ def test_candidate_label_without_distance_uses_area_and_avoids_duplicate_brand()
     assert label == "Brand Roma · Roma, RM · ID 456"
 
 
+def test_candidate_label_caps_long_chip_text() -> None:
+    candidate = StationCandidate(
+        station_id="987654",
+        name="Stazione di servizio con un nome molto lungo",
+        brand="Un marchio altrettanto lungo",
+        address="Via con un indirizzo molto lungo 123456789",
+        municipality="Roma",
+        province="RM",
+        station_type="Stradale",
+        distance_km=1.25,
+    )
+
+    label = OsservaprezziCarburantiConfigFlow._format_candidate_label(candidate)
+
+    assert len(label) == 64
+    assert label.endswith(" · ID 987654")
+
+
 def _registry_manager(
     stations: tuple[dict[str, Any], ...],
     *,

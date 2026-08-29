@@ -455,10 +455,10 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             errors=errors,
             description_placeholders={
                 "registry_updated": getattr(self, "_registry_updated", "—"),
-                "result_count": str(len(candidates)),
                 "configured_count": str(
                     sum(candidate.station_id in configured_ids for candidate in candidates)
                 ),
+                "result_count": str(len(candidates)),
             },
         )
 

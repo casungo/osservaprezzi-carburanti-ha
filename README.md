@@ -289,7 +289,7 @@ through manual workflow dispatch.
 
 For issues or suggestions, open a
 [GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-When testing `v2.4.0`, include the setup method used and attach the Home Assistant diagnostics
+When testing `v2.5.0`, include the setup method used and attach the Home Assistant diagnostics
 download: it excludes station IDs, identity, addresses, and coordinates.
 
 ## 📄 License

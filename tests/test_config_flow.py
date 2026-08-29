@@ -344,7 +344,7 @@ def test_config_flow_imports_validated_station(
     }
 
 
-def test_config_flow_rejects_already_configured_batch_station(
+def test_config_flow_skips_already_configured_batch_station(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     flow = _make_config_flow(monkeypatch)
@@ -354,13 +354,38 @@ def test_config_flow_rejects_already_configured_batch_station(
     flow._async_current_entries.return_value = [
         MagicMock(data={CONF_STATION_ID: "456"})
     ]
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        AsyncMock(return_value={"name": "New Station"}),
+    )
+
+    result = asyncio.run(
+        flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "New Station",
+        "data": {CONF_STATION_ID: "123"},
+    }
+    flow.hass.config_entries.flow.async_init.assert_not_awaited()
+
+
+def test_config_flow_rejects_batch_when_all_stations_are_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow._nearby_candidates = (_candidate("123"), _candidate("456"))
+    flow._async_current_entries.return_value = [
+        MagicMock(data={CONF_STATION_ID: "123"}),
+        MagicMock(data={CONF_STATION_ID: "456"}),
+    ]
 
     result = asyncio.run(
         flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
     )
 
     assert result["errors"] == {"base": "already_configured"}
-    flow.hass.config_entries.flow.async_init.assert_not_awaited()
 
 
 def test_config_flow_home_uses_stale_registry_notice(
@@ -395,6 +420,7 @@ def test_config_flow_home_uses_stale_registry_notice(
     assert result["description_placeholders"] == {
         "registry_updated": "2026-07-27T00:00:00+00:00",
         "result_count": "1",
+        "configured_count": "0",
     }
 
 
@@ -488,6 +514,7 @@ def test_config_flow_home_formats_missing_registry_timestamp(
     assert result["description_placeholders"] == {
         "registry_updated": "—",
         "result_count": "1",
+        "configured_count": "0",
     }
 
 

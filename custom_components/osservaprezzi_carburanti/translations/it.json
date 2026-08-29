@@ -53,14 +53,14 @@
       },
       "select_station": {
         "title": "Scegli le stazioni",
-        "description": "{result_count} stazioni corrispondenti. Selezionane una o più. Registro aggiornato: {registry_updated}.",
+        "description": "{result_count} stazioni corrispondenti. Selezionane una o più. Già configurate: {configured_count}, verranno saltate. Registro aggiornato: {registry_updated}.",
         "data": {
           "station_id": "Stazioni"
         }
       },
       "select_station_stale": {
         "title": "Scegli le stazioni",
-        "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile. Selezionane una o più. Cache aggiornata il {registry_updated}.",
+        "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile. Selezionane una o più. Già configurate: {configured_count}, verranno saltate. Cache aggiornata il {registry_updated}.",
         "data": {
           "station_id": "Stazioni"
         }

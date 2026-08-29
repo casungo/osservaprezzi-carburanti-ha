@@ -383,6 +383,10 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             return await getattr(self, f"async_step_{source_step}")()
 
         errors: dict[str, str] = {}
+        configured_ids = {
+            str(entry.data.get(CONF_STATION_ID, ""))
+            for entry in self._async_current_entries()
+        }
         if user_input is not None:
             try:
                 selected_value = user_input.get(CONF_STATION_ID, [])
@@ -395,18 +399,19 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 if not selected_ids or not set(selected_ids) <= candidate_ids:
                     raise InvalidStation("Station is not in the current nearby results")
 
-                configured_ids = {
-                    str(entry.data.get(CONF_STATION_ID, ""))
-                    for entry in self._async_current_entries()
-                }
-                if configured_ids.intersection(selected_ids):
+                new_selected_ids = [
+                    station_id
+                    for station_id in selected_ids
+                    if station_id not in configured_ids
+                ]
+                if not new_selected_ids:
                     errors["base"] = "already_configured"
                 else:
                     station_info = {
                         station_id: await _validate_station(self.hass, station_id)
-                        for station_id in selected_ids
+                        for station_id in new_selected_ids
                     }
-                    for station_id in selected_ids[1:]:
+                    for station_id in new_selected_ids[1:]:
                         await self.hass.config_entries.flow.async_init(
                             DOMAIN,
                             context={"source": SOURCE_IMPORT},
@@ -416,7 +421,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                             },
                         )
                     return await self._async_create_station_entry(
-                        selected_ids[0], station_info[selected_ids[0]]
+                        new_selected_ids[0], station_info[new_selected_ids[0]]
                     )
             except InvalidStation:
                 errors["base"] = "invalid_station"
@@ -451,6 +456,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             description_placeholders={
                 "registry_updated": getattr(self, "_registry_updated", "—"),
                 "result_count": str(len(candidates)),
+                "configured_count": str(
+                    sum(candidate.station_id in configured_ids for candidate in candidates)
+                ),
             },
         )
 

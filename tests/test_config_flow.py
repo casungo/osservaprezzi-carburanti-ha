@@ -131,6 +131,7 @@ def _make_config_flow(monkeypatch: pytest.MonkeyPatch) -> OsservaprezziCarburant
     flow.hass.async_add_executor_job = AsyncMock(
         side_effect=lambda function, *args: function(*args)
     )
+    flow.hass.config_entries.flow.async_init = AsyncMock()
     flow.async_set_unique_id = AsyncMock()
     flow._abort_if_unique_id_configured = MagicMock()
     flow.async_create_entry = MagicMock(
@@ -141,6 +142,9 @@ def _make_config_flow(monkeypatch: pytest.MonkeyPatch) -> OsservaprezziCarburant
     )
     flow.async_show_menu = MagicMock(
         side_effect=lambda **kwargs: {"type": "menu", **kwargs}
+    )
+    flow.async_abort = MagicMock(
+        side_effect=lambda **kwargs: {"type": "abort", **kwargs}
     )
     flow._get_reconfigure_entry = MagicMock()
     flow._async_current_entries = MagicMock(return_value=[])
@@ -285,6 +289,78 @@ def test_config_flow_home_search_and_selection(monkeypatch: pytest.MonkeyPatch) 
         "data": {CONF_STATION_ID: "123"},
     }
     validate_mock.assert_awaited_once_with(flow.hass, "123")
+
+
+def test_config_flow_adds_multiple_selected_stations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow._nearby_candidates = (_candidate("123"), _candidate("456"))
+    flow._registry_is_stale = False
+    flow._registry_updated = "2026-08-28"
+    validate_mock = AsyncMock(
+        side_effect=[{"name": "First"}, {"name": "Second"}]
+    )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        validate_mock,
+    )
+
+    result = asyncio.run(
+        flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "First",
+        "data": {CONF_STATION_ID: "123"},
+    }
+    flow.hass.config_entries.flow.async_init.assert_awaited_once_with(
+        "osservaprezzi_carburanti",
+        context={"source": "import"},
+        data={CONF_STATION_ID: "456", "name": "Second"},
+    )
+    assert validate_mock.await_args_list == [
+        ((flow.hass, "123"),),
+        ((flow.hass, "456"),),
+    ]
+
+
+def test_config_flow_imports_validated_station(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+
+    assert asyncio.run(flow.async_step_import()) == {
+        "type": "abort",
+        "reason": "invalid_station",
+    }
+    assert asyncio.run(
+        flow.async_step_import({CONF_STATION_ID: "123", "name": "Station"})
+    ) == {
+        "type": "create_entry",
+        "title": "Station",
+        "data": {CONF_STATION_ID: "123"},
+    }
+
+
+def test_config_flow_rejects_already_configured_batch_station(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow._nearby_candidates = (_candidate("123"), _candidate("456"))
+    flow._registry_is_stale = False
+    flow._registry_updated = "2026-08-28"
+    flow._async_current_entries.return_value = [
+        MagicMock(data={CONF_STATION_ID: "456"})
+    ]
+
+    result = asyncio.run(
+        flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
+    )
+
+    assert result["errors"] == {"base": "already_configured"}
+    flow.hass.config_entries.flow.async_init.assert_not_awaited()
 
 
 def test_config_flow_home_uses_stale_registry_notice(
@@ -472,6 +548,10 @@ def test_config_flow_nearby_selection_errors(
         flow,
         "_async_create_station_entry",
         AsyncMock(side_effect=side_effect),
+    )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        AsyncMock(return_value={"name": "Station"}),
     )
 
     result = asyncio.run(

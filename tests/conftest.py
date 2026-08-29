@@ -70,6 +70,7 @@ def _mock_ha_modules():
         "homeassistant.helpers.entity",
         "homeassistant.helpers.entity_registry",
         "homeassistant.helpers.entity_platform",
+        "homeassistant.helpers.selector",
         "homeassistant.helpers.update_coordinator",
         "homeassistant.helpers.typing",
         "homeassistant.helpers.aiohttp_client",
@@ -116,7 +117,11 @@ def _mock_ha_modules():
     sys.modules["homeassistant.config_entries"].ConfigFlow = _MockConfigFlow
     sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict
     sys.modules["homeassistant.config_entries"].OptionsFlowWithConfigEntry = _MockOptionsFlow
+    sys.modules["homeassistant.config_entries"].SOURCE_IMPORT = "import"
     sys.modules["homeassistant.core"].callback = lambda f: f
+    sys.modules["homeassistant.helpers.selector"].SelectOptionDict = dict
+    sys.modules["homeassistant.helpers.selector"].SelectSelector = MagicMock
+    sys.modules["homeassistant.helpers.selector"].SelectSelectorConfig = dict
 
     sys.modules["homeassistant"].config_entries = sys.modules["homeassistant.config_entries"]
     sys.modules["homeassistant"].core = sys.modules["homeassistant.core"]

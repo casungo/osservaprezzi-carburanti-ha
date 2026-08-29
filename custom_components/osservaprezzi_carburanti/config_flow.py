@@ -8,9 +8,14 @@ import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+)
 
 from .api import fetch_station_data
 from .const import (
@@ -81,16 +86,33 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     ) -> OptionsFlowHandler:
         return OptionsFlowHandler(config_entry)
 
-    async def _async_create_station_entry(self, station_id: str) -> ConfigFlowResult:
+    async def _async_create_station_entry(
+        self,
+        station_id: str,
+        station_info: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
         """Validate a station and create its config entry."""
         normalized_station_id = station_id.strip()
         await self.async_set_unique_id(f"station_{normalized_station_id}")
         self._abort_if_unique_id_configured()
 
-        station_info = await _validate_station(self.hass, normalized_station_id)
+        station_info = station_info or await _validate_station(
+            self.hass, normalized_station_id
+        )
         return self.async_create_entry(
             title=station_info["name"],
             data={CONF_STATION_ID: normalized_station_id},
+        )
+
+    async def async_step_import(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Create one entry requested by a batch selection."""
+        if user_input is None:
+            return self.async_abort(reason="invalid_station")
+        return await self._async_create_station_entry(
+            str(user_input[CONF_STATION_ID]),
+            {"name": str(user_input["name"])},
         )
 
     async def _handle_station_input(
@@ -363,10 +385,39 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                station_id = str(user_input.get(CONF_STATION_ID, ""))
-                if station_id not in {candidate.station_id for candidate in candidates}:
+                selected_value = user_input.get(CONF_STATION_ID, [])
+                selected_ids = (
+                    [selected_value]
+                    if isinstance(selected_value, str)
+                    else [str(station_id) for station_id in selected_value]
+                )
+                candidate_ids = {candidate.station_id for candidate in candidates}
+                if not selected_ids or not set(selected_ids) <= candidate_ids:
                     raise InvalidStation("Station is not in the current nearby results")
-                return await self._async_create_station_entry(station_id)
+
+                configured_ids = {
+                    str(entry.data.get(CONF_STATION_ID, ""))
+                    for entry in self._async_current_entries()
+                }
+                if configured_ids.intersection(selected_ids):
+                    errors["base"] = "already_configured"
+                else:
+                    station_info = {
+                        station_id: await _validate_station(self.hass, station_id)
+                        for station_id in selected_ids
+                    }
+                    for station_id in selected_ids[1:]:
+                        await self.hass.config_entries.flow.async_init(
+                            DOMAIN,
+                            context={"source": SOURCE_IMPORT},
+                            data={
+                                CONF_STATION_ID: station_id,
+                                "name": station_info[station_id]["name"],
+                            },
+                        )
+                    return await self._async_create_station_entry(
+                        selected_ids[0], station_info[selected_ids[0]]
+                    )
             except InvalidStation:
                 errors["base"] = "invalid_station"
             except CannotConnect:
@@ -375,10 +426,13 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 _LOGGER.exception("Unexpected nearby station selection error: %s", err)
                 errors["base"] = "unknown"
 
-        options = {
-            candidate.station_id: self._format_candidate_label(candidate)
+        options = [
+            SelectOptionDict(
+                value=candidate.station_id,
+                label=self._format_candidate_label(candidate),
+            )
             for candidate in candidates
-        }
+        ]
         step_id = (
             "select_station_stale"
             if getattr(self, "_registry_is_stale", False)
@@ -387,7 +441,11 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         return self.async_show_form(
             step_id=step_id,
             data_schema=vol.Schema(
-                {vol.Required(CONF_STATION_ID): vol.In(options)}
+                {
+                    vol.Required(CONF_STATION_ID): SelectSelector(
+                        SelectSelectorConfig(options=options, multiple=True)
+                    )
+                }
             ),
             errors=errors,
             description_placeholders={

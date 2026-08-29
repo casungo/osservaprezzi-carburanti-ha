@@ -47,11 +47,11 @@ async def test_manual_station_id_path(hass: HomeAssistant, monkeypatch) -> None:
     validate_station.assert_awaited_once_with(hass, "123")
 
 
-async def test_nearby_home_path_stores_only_station_id(
+async def test_nearby_home_path_adds_selected_stations(
     hass: HomeAssistant,
     monkeypatch,
 ) -> None:
-    """Discover locally and persist only the selected station ID."""
+    """Discover locally and create one entry for each selected station."""
     hass.config.latitude = 41.9
     hass.config.longitude = 12.5
     manager = MagicMock()
@@ -66,13 +66,21 @@ async def test_nearby_home_path_stores_only_station_id(
                     "latitude": 41.901,
                     "longitude": 12.5,
                 },
+                {
+                    "id": "789",
+                    "name": "Second Station",
+                    "latitude": 41.902,
+                    "longitude": 12.5,
+                },
             ),
             updated_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
             is_stale=False,
         )
     )
     monkeypatch.setattr(config_flow, "get_shared_csv_manager", lambda hass: manager)
-    validate_station = AsyncMock(return_value={"name": "Nearby Station"})
+    validate_station = AsyncMock(
+        side_effect=[{"name": "Nearby Station"}, {"name": "Second Station"}]
+    )
     monkeypatch.setattr(config_flow, "_validate_station", validate_station)
 
     result = await hass.config_entries.flow.async_init(
@@ -95,14 +103,20 @@ async def test_nearby_home_path_stores_only_station_id(
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_STATION_ID: "456"},
+        {CONF_STATION_ID: ["456", "789"]},
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_STATION_ID: "456"}
     assert result["result"].unique_id == "station_456"
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert {entry.data[CONF_STATION_ID] for entry in entries} == {"456", "789"}
+    assert {entry.unique_id for entry in entries} == {"station_456", "station_789"}
     manager.async_ensure_registry.assert_awaited_once_with(allow_stale=True)
-    validate_station.assert_awaited_once_with(hass, "456")
+    assert validate_station.await_args_list == [
+        ((hass, "456"),),
+        ((hass, "789"),),
+    ]
 
 
 async def test_reconfigure_changes_station_in_place(

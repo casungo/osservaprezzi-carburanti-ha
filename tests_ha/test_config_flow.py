@@ -96,7 +96,10 @@ async def test_nearby_home_path_adds_selected_stations(
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {config_flow.CONF_RADIUS_KM: 5},
+        {
+            config_flow.CONF_RADIUS_KM: 3.5,
+            config_flow.CONF_RESULT_LIMIT: 7,
+        },
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "select_station"

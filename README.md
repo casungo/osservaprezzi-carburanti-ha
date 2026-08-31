@@ -38,12 +38,12 @@ To configure the integration, go to: "Settings" -> "Devices & Services" -> "+ Ad
 
 During setup you can:
 
-- find nearby stations using Home Assistant's configured Home location and a 2, 5, 10, 20, or 50 km radius;
+- find nearby stations using Home Assistant's configured Home location and a custom radius from 0.1 to 200 km;
 - search near manually entered coordinates without storing them;
 - search the official registry by municipality and optional province;
 - enter an Osservaprezzi station ID manually.
 
-Registry searches support free-text and station-type filters plus a 5, 10, or 20 result limit.
+Registry searches support free-text and station-type filters plus a custom limit from 1 to 100 results.
 Matching is case- and accent-insensitive. Nearby searches use the locally cached official MIMIT
 station registry. Coordinates are used only in memory to calculate distances and are not stored by
 the integration or sent to MIMIT.

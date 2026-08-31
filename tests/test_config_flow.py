@@ -471,16 +471,34 @@ def test_config_flow_home_no_results(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["errors"] == {"base": "no_stations_found"}
 
 
-def test_config_flow_home_rejects_unsupported_radius(
+def test_config_flow_home_accepts_custom_radius_and_result_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     flow = _make_config_flow(monkeypatch)
     flow.hass.config.latitude = 41.9
     flow.hass.config.longitude = 12.5
+    manager = _registry_manager(
+        (
+            {
+                "id": "123",
+                "name": "Station",
+                "latitude": 41.91,
+                "longitude": 12.5,
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow.get_shared_csv_manager",
+        lambda hass: manager,
+    )
 
-    result = asyncio.run(flow.async_step_home({CONF_RADIUS_KM: 3}))
+    result = asyncio.run(
+        flow.async_step_home(
+            {CONF_RADIUS_KM: 3.5, CONF_RESULT_LIMIT: 7}
+        )
+    )
 
-    assert result["errors"] == {"base": "unknown"}
+    assert result["step_id"] == "select_station"
 
 
 def test_config_flow_home_formats_missing_registry_timestamp(
@@ -792,11 +810,19 @@ def test_config_flow_area_reports_no_results_and_registry_error(
     assert result["errors"] == {"base": "registry_unavailable"}
 
 
-def test_config_flow_area_reports_invalid_filter_input(
+def test_config_flow_area_accepts_custom_result_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     flow = _make_config_flow(monkeypatch)
-    manager = _registry_manager(())
+    manager = _registry_manager(
+        (
+            {
+                "id": "123",
+                "name": "Station",
+                "municipality": "Roma",
+            },
+        )
+    )
     monkeypatch.setattr(
         "custom_components.osservaprezzi_carburanti.config_flow.get_shared_csv_manager",
         lambda hass: manager,
@@ -811,7 +837,7 @@ def test_config_flow_area_reports_invalid_filter_input(
         )
     )
 
-    assert result["errors"] == {"base": "unknown"}
+    assert result["step_id"] == "select_station"
 
 
 def test_config_flow_reconfigure_updates_station(

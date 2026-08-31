@@ -12,6 +12,9 @@ from homeassistant.config_entries import SOURCE_IMPORT, ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -42,9 +45,9 @@ CONF_TEXT_FILTER = "text_filter"
 CONF_STATION_TYPE = "station_type"
 CONF_RESULT_LIMIT = "result_limit"
 DEFAULT_RADIUS_KM = 5
-RADIUS_OPTIONS_KM = (2, 5, 10, 20, 50)
-MAX_NEARBY_STATIONS = 20
-RESULT_LIMIT_OPTIONS = (5, 10, 20)
+DEFAULT_RESULT_LIMIT = 20
+MAX_RADIUS_KM = 200
+MAX_RESULT_LIMIT = 100
 
 
 class CannotConnect(HomeAssistantError):
@@ -271,9 +274,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     ) -> tuple[ConfigFlowResult | None, str | None]:
         """Run a local coordinate search and return a flow result or error key."""
         try:
-            radius_km = int(user_input[CONF_RADIUS_KM])
-            if radius_km not in RADIUS_OPTIONS_KM:
-                raise ValueError("Unsupported nearby search radius")
+            radius_km = float(user_input[CONF_RADIUS_KM])
+            if not 0 < radius_km <= MAX_RADIUS_KM:
+                raise ValueError("Nearby search radius is out of range")
             limit, text_filter, station_type = self._search_filters(user_input)
             snapshot = await get_shared_csv_manager(
                 self.hass
@@ -303,9 +306,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     @staticmethod
     def _search_filters(user_input: dict[str, Any]) -> tuple[int, str | None, str | None]:
         """Validate and normalize common local-search fields."""
-        limit = int(user_input.get(CONF_RESULT_LIMIT, MAX_NEARBY_STATIONS))
-        if limit not in RESULT_LIMIT_OPTIONS:
-            raise ValueError("Unsupported result limit")
+        limit = int(user_input.get(CONF_RESULT_LIMIT, DEFAULT_RESULT_LIMIT))
+        if not 0 < limit <= MAX_RESULT_LIMIT:
+            raise ValueError("Result limit is out of range")
         text_filter = str(user_input.get(CONF_TEXT_FILTER, "")).strip() or None
         station_type = str(user_input.get(CONF_STATION_TYPE, "")).strip() or None
         return limit, text_filter, station_type
@@ -318,8 +321,15 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             vol.Optional(CONF_STATION_TYPE, default=""): str,
             vol.Required(
                 CONF_RESULT_LIMIT,
-                default=MAX_NEARBY_STATIONS,
-            ): vol.In(RESULT_LIMIT_OPTIONS),
+                default=DEFAULT_RESULT_LIMIT,
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1,
+                    max=MAX_RESULT_LIMIT,
+                    step=1,
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
         }
 
     @classmethod
@@ -331,7 +341,15 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         fields = dict(extra_fields or {})
         fields[
             vol.Required(CONF_RADIUS_KM, default=DEFAULT_RADIUS_KM)
-        ] = vol.In(RADIUS_OPTIONS_KM)
+        ] = NumberSelector(
+            NumberSelectorConfig(
+                min=0.1,
+                max=MAX_RADIUS_KM,
+                step=0.1,
+                unit_of_measurement="km",
+                mode=NumberSelectorMode.BOX,
+            )
+        )
         fields.update(cls._common_search_fields())
         return vol.Schema(fields)
 

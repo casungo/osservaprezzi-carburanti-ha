@@ -32,6 +32,24 @@ Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizi
     - Clicca "Download".
     - Riavvia Home Assistant.
 
+### Testare le pre-release
+
+Nuove funzionalità e correzioni vengono a volte pubblicate come pre-release prima di diventare
+stabili. Le pre-release disponibili sono elencate nella
+[pagina delle release](https://github.com/casungo/osservaprezzi-carburanti-ha/releases). Per
+installarne una tramite HACS:
+
+1. Vai su **Impostazioni > Dispositivi e Servizi > HACS**
+2. Clicca sull'integrazione HACS → **Entità**
+3. Cerca Osservaprezzi Carburanti nell'elenco — l'entità è **disabilitata per impostazione predefinita**, quindi attiva "Mostra entità disabilitate"
+4. Abilita l'entità, poi accendi l'interruttore
+
+Il nome esatto dell'interruttore è `switch.osservaprezzi_carburanti_pre_release`. Con l'interruttore
+attivo, HACS propone le versioni pre-release quando aggiorni o reinstalli l'integrazione.
+
+Per tornare alle versioni stabili, spegni l'interruttore e aggiorna o reinstalla di nuovo
+l'integrazione.
+
 ### Configurazione
 
 Per configurare l'integrazione, vai su: "Impostazioni" -> "Dispositivi e Servizi" -> "+ Aggiungi integrazione", cerca "Osservaprezzi Carburanti" e segui le istruzioni.
@@ -288,8 +306,11 @@ tramite avvio manuale del workflow.
 
 Per problemi o suggerimenti apri una
 [issue su GitHub](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-Se stai provando `v2.4.0`, indica il metodo di configurazione usato e allega il download
-diagnostico di Home Assistant: non contiene ID stazione, identità, indirizzo o coordinate.
+Quando segnali un problema, indica il metodo di configurazione usato e la versione
+dell'integrazione, e allega il download diagnostico di Home Assistant: non contiene ID stazione,
+identità, indirizzo o coordinate.
+Se ti viene chiesto di provare una correzione, segui
+[Testare le pre-release](#-testare-le-pre-release).
 
 ## 📄 Licenza
 

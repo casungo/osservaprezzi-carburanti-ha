@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -114,6 +115,37 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     return True
 
 
+async def _async_initial_refresh(
+    coordinator: CarburantiDataUpdateCoordinator,
+    entry: ConfigEntry,
+) -> None:
+    """Load the first station payload without blocking Home Assistant startup."""
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except asyncio.CancelledError:
+        raise
+    except ConfigEntryNotReady as err:
+        _LOGGER.warning(
+            "Initial refresh for station %s was not ready: %s",
+            entry.title,
+            err,
+        )
+    except Exception:
+        _LOGGER.exception("Initial refresh failed for station %s", entry.title)
+
+
+async def _async_cancel_initial_refresh(task: asyncio.Task[None] | None) -> None:
+    """Cancel and drain the initial refresh task during unload."""
+    if task is None or task.done():
+        return
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Osservaprezzi Carburanti from a config entry."""
     _async_register_services(hass)
@@ -137,20 +169,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except ConfigEntryNotReady:
-        await coordinator.async_shutdown()
-        _async_remove_csv_owner_if_unused(hass)
-        raise
-
-    cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
-    _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
 
     domain_data[entry.entry_id] = {
         "coordinator": coordinator,
         "listener": None,
+        "initial_refresh_task": None,
     }
+
+    cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+    _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
 
     def _schedule_next_refresh() -> None:
         entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
@@ -192,6 +219,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_cleanup_legacy_entity_registry(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    domain_data[entry.entry_id]["initial_refresh_task"] = hass.async_create_task(
+        _async_initial_refresh(coordinator, entry),
+        f"{DOMAIN}_{entry.entry_id}_initial_refresh",
+    )
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
@@ -472,6 +503,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         listener = entry_data.get("listener")
         if listener is not None:
             listener()
+        await _async_cancel_initial_refresh(entry_data.get("initial_refresh_task"))
         await entry_data["coordinator"].async_shutdown()
 
         if _async_remove_csv_owner_if_unused(hass):

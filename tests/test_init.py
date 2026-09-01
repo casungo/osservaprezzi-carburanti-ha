@@ -128,6 +128,9 @@ class FakeEntityRegistry:
 def _build_hass_with_services() -> tuple[MagicMock, dict[str, object]]:
     hass = MagicMock()
     registered_services: dict[str, object] = {}
+    hass.async_create_task.side_effect = (
+        lambda coroutine, name=None: asyncio.create_task(coroutine, name=name)
+    )
 
     def _register(domain, service, handler, **kwargs):
         registered_services[service] = handler
@@ -1109,7 +1112,7 @@ def test_setup_entry_returns_false_when_cron_schedule_fails(monkeypatch) -> None
     assert "entry_1" not in hass.data.get(init_module.DOMAIN, {})
 
 
-def test_setup_entry_shuts_down_on_first_refresh_not_ready(monkeypatch) -> None:
+def test_setup_entry_runs_first_refresh_in_background(monkeypatch) -> None:
     created = []
 
     class NotReadyCoordinator(FakeCoordinator):
@@ -1122,16 +1125,51 @@ def test_setup_entry_shuts_down_on_first_refresh_not_ready(monkeypatch) -> None:
     monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
     hass, _ = _build_hass_with_services()
     hass.data = {}
-    entry = SimpleNamespace(entry_id="entry_1", title="Test Station", unique_id="station_1", options={})
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        unique_id="station_1",
+        options={},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(return_value=lambda: None),
+    )
 
-    try:
-        asyncio.run(init_module.async_setup_entry(hass, entry))
-    except init_module.ConfigEntryNotReady:
-        pass
-    else:
-        raise AssertionError("Expected ConfigEntryNotReady")
+    async def run_setup() -> None:
+        assert await init_module.async_setup_entry(hass, entry) is True
+        await asyncio.sleep(0)
 
-    assert created[0].shutdown_calls == 1
+    asyncio.run(run_setup())
+
+    assert created[0].first_refresh_calls == 1
+    assert created[0].shutdown_calls == 0
+
+
+def test_unload_entry_cancels_initial_refresh_task() -> None:
+    async def run_unload() -> asyncio.Task[None]:
+        hass, _ = _build_hass_with_services()
+        coordinator = FakeCoordinator()
+        pending_task = asyncio.create_task(asyncio.Event().wait())
+        hass.data = {
+            init_module.DOMAIN: {
+                init_module._CSV_MANAGER: coordinator.csv_manager,
+                init_module._CSV_UPDATE_LISTENER: MagicMock(),
+                "entry_1": {
+                    "listener": MagicMock(),
+                    "coordinator": coordinator,
+                    "initial_refresh_task": pending_task,
+                },
+            },
+            init_module._SERVICES_REGISTERED: True,
+        }
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        entry = SimpleNamespace(entry_id="entry_1")
+
+        assert await init_module.async_unload_entry(hass, entry) is True
+        return pending_task
+
+    pending_task = asyncio.run(run_unload())
+    assert pending_task.cancelled()
 
 
 def test_migrate_entry_version_one_removes_config_type() -> None:

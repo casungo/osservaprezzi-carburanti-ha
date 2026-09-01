@@ -142,10 +142,6 @@ L'inserimento manuale rimane sempre disponibile durante la configurazione. Per t
 3. Clicca sulla stazione
 4. Nell'URL (es: https://carburanti.mise.gov.it/ospzSearch/dettaglio/1111) copia l'ID (1111)
 
-## 📋 Tipi di Carburante Supportati
-
-L'integrazione creerà sensori per ogni possibile carburante.
-
 ## 🧩 Esempi Dashboard
 
 ### Battery State Card
@@ -277,34 +273,25 @@ response_variable: registry_results
 Il download diagnostico di Home Assistant include opzioni, conteggi del coordinator e stato del
 registro condiviso. ID stazione, identità, indirizzo e coordinate non vengono inclusi.
 
-## Test di Regressione Locali
+## Sviluppo
 
-Crea e attiva un ambiente Python locale, poi installa le dipendenze di validazione:
+Il progetto ha due lane di test (unit test leggeri e contract test su Home Assistant reale) più i
+validatori hassfest/HACS e una smoke regression via Docker. Setup e comandi sono documentati in
+[docs/testing.md](./docs/testing.md) (in inglese).
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-test.txt
-```
+## Risoluzione dei problemi
 
-Esegui la suite automatica con:
-
-```bash
-python -m pytest -q
-```
-
-Se Docker Desktop è avviato in locale, puoi anche eseguire uno smoke test contro il container ufficiale di Home Assistant:
-
-```bash
-python scripts/ha_docker_regression.py --timeout 240
-```
-
-Il test Docker viene eseguito anche da GitHub Actions il 1° e il 15 di ogni mese ed è disponibile
-tramite avvio manuale del workflow.
+- **I prezzi risultano obsoleti**: controlla l'espressione cron e la soglia di obsolescenza nelle
+  opzioni dell'integrazione, poi esegui `osservaprezzi_carburanti.refresh_prices`.
+- **La ricerca nel registro non trova nulla**: la copia locale del registro potrebbe essere
+  obsoleta. Esegui `osservaprezzi_carburanti.force_csv_update` e riprova.
+- **Errori di thread-safety nei log** (es. `Future exception was never retrieved` o warning su
+  `async_write_ha_state`): risolti dalla v2.2.0 in poi. Aggiorna l'integrazione all'ultima release.
 
 ## 📞 Supporto
 
-Per problemi o suggerimenti apri una
+Per i problemi comuni consulta [Risoluzione dei problemi](#risoluzione-dei-problemi). Per problemi
+o suggerimenti apri una
 [issue su GitHub](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
 Quando segnali un problema, indica il metodo di configurazione usato e la versione
 dell'integrazione, e allega il download diagnostico di Home Assistant: non contiene ID stazione,

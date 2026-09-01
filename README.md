@@ -143,10 +143,6 @@ Manual ID entry remains available during configuration. To find a **Station ID**
 3. Click on the station
 4. In the URL (e.g: https://carburanti.mise.gov.it/ospzSearch/dettaglio/1111) copy the ID (1111)
 
-## 📋 Supported Fuel Types
-
-The integration will create sensors for every possible fuel type.
-
 ## 🧩 Dashboard Examples
 
 ### Battery State Card
@@ -278,34 +274,25 @@ response_variable: registry_results
 Home Assistant's diagnostics download includes configuration options, coordinator counts, and
 shared-registry health. Station ID, identity, address, and coordinates are not included.
 
-## Local Regression Tests
+## Development
 
-Create and activate a local Python environment, then install the validation dependencies:
+The project has two test lanes (lightweight unit tests and real Home Assistant contract tests)
+plus hassfest/HACS validators and a Docker smoke regression. Setup and commands are documented in
+[docs/testing.md](./docs/testing.md).
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-test.txt
-```
+## Troubleshooting
 
-Run the automated unit regression suite with:
-
-```bash
-python -m pytest -q
-```
-
-If Docker Desktop is running locally, you can also run a Home Assistant smoke regression against the official Home Assistant container:
-
-```bash
-python scripts/ha_docker_regression.py --timeout 240
-```
-
-The Docker regression also runs in GitHub Actions on the 1st and 15th of each month and is available
-through manual workflow dispatch.
+- **Prices look stale**: check the cron expression and the staleness threshold in the integration
+  options, then run `osservaprezzi_carburanti.refresh_prices`.
+- **Registry search finds nothing**: the local registry copy may be outdated. Run
+  `osservaprezzi_carburanti.force_csv_update` and try again.
+- **Thread-safety errors in the logs** (e.g. `Future exception was never retrieved` or
+  `async_write_ha_state` warnings): fixed in v2.2.0 and later. Update the integration to the
+  latest release.
 
 ## 📞 Support
 
-For issues or suggestions, open a
+For common problems, see [Troubleshooting](#troubleshooting). For issues or suggestions, open a
 [GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
 When reporting an issue, include the setup method used and the integration version, and attach the
 Home Assistant diagnostics download: it excludes station IDs, identity, addresses, and coordinates.

@@ -52,7 +52,7 @@ class TestBinarySensorSetup:
 
         def _add_entities(entities, update_before_add=False):
             added_entities.extend(entities)
-            assert update_before_add is True
+            assert update_before_add is False
 
         asyncio.run(async_setup_entry(hass, entry, _add_entities))
 

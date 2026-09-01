@@ -76,6 +76,9 @@ class FakeCoordinator:
         self.force_error = force_error
         self.refresh_error = refresh_error
         self.data = {}
+        self.last_update_success = False
+        self.station_not_found = False
+        self._listeners = []
         self.config_entry = (
             args[1]
             if len(args) > 1
@@ -88,6 +91,24 @@ class FakeCoordinator:
         self.first_refresh_calls += 1
         if self.raise_first_refresh:
             raise init_module.ConfigEntryNotReady("not ready")
+
+    async def async_refresh(self) -> None:
+        """Track background refreshes."""
+        if self.refresh_error is not None:
+            self.last_update_success = False
+            raise self.refresh_error
+        self.last_update_success = True
+        for listener in self._listeners:
+            listener()
+
+    def async_add_listener(self, listener):
+        """Track coordinator listeners."""
+        self._listeners.append(listener)
+
+        def remove() -> None:
+            self._listeners.remove(listener)
+
+        return remove
 
     async def async_shutdown(self) -> None:
         """Track shutdown calls."""
@@ -105,6 +126,9 @@ class FakeCoordinator:
         self.refresh_calls += 1
         if self.refresh_error is not None:
             raise self.refresh_error
+        self.last_update_success = True
+        for listener in self._listeners:
+            listener()
 
 
 class FakeEntityRegistry:
@@ -128,6 +152,9 @@ class FakeEntityRegistry:
 def _build_hass_with_services() -> tuple[MagicMock, dict[str, object]]:
     hass = MagicMock()
     registered_services: dict[str, object] = {}
+    hass.async_create_task.side_effect = (
+        lambda coroutine, name=None: asyncio.create_task(coroutine, name=name)
+    )
 
     def _register(domain, service, handler, **kwargs):
         registered_services[service] = handler
@@ -1109,29 +1136,261 @@ def test_setup_entry_returns_false_when_cron_schedule_fails(monkeypatch) -> None
     assert "entry_1" not in hass.data.get(init_module.DOMAIN, {})
 
 
-def test_setup_entry_shuts_down_on_first_refresh_not_ready(monkeypatch) -> None:
+def test_setup_entry_runs_refresh_in_background(monkeypatch) -> None:
     created = []
 
-    class NotReadyCoordinator(FakeCoordinator):
+    class DelayedCoordinator(FakeCoordinator):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.raise_first_refresh = True
+            self.refresh_started = asyncio.Event()
+            self.release_refresh = asyncio.Event()
             created.append(self)
 
-    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", NotReadyCoordinator)
+        async def async_refresh(self) -> None:
+            self.refresh_started.set()
+            await self.release_refresh.wait()
+            await super().async_refresh()
+
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", DelayedCoordinator)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", lambda *args: lambda: None)
     monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
     hass, _ = _build_hass_with_services()
     hass.data = {}
-    entry = SimpleNamespace(entry_id="entry_1", title="Test Station", unique_id="station_1", options={})
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        unique_id="station_1",
+        options={},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(return_value=lambda: None),
+    )
 
-    try:
-        asyncio.run(init_module.async_setup_entry(hass, entry))
-    except init_module.ConfigEntryNotReady:
-        pass
-    else:
-        raise AssertionError("Expected ConfigEntryNotReady")
+    async def run_setup() -> None:
+        assert await init_module.async_setup_entry(hass, entry) is True
+        await created[0].refresh_started.wait()
+        created[0].release_refresh.set()
 
-    assert created[0].shutdown_calls == 1
+    asyncio.run(run_setup())
+
+    assert created[0].last_update_success is True
+    assert created[0].shutdown_calls == 0
+
+
+def test_refresh_listener_creates_station_not_found_issue(monkeypatch) -> None:
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", lambda *args: lambda: None)
+    monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        unique_id="station_1",
+        data={init_module.CONF_STATION_ID: "123"},
+        options={},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(return_value=lambda: None),
+    )
+
+    async def run_setup_and_unload() -> None:
+        assert await init_module.async_setup_entry(hass, entry) is True
+        await asyncio.sleep(0)
+        coordinator = hass.data[init_module.DOMAIN][entry.entry_id]["coordinator"]
+        init_module.issue_registry.async_create_issue.reset_mock()
+        coordinator.station_not_found = True
+        coordinator.last_update_success = False
+        coordinator._listeners[0]()
+        init_module.issue_registry.async_create_issue.assert_called_once()
+        assert await init_module.async_unload_entry(hass, entry) is True
+
+    asyncio.run(run_setup_and_unload())
+
+
+def test_initial_refresh_retries_after_transient_failure(monkeypatch) -> None:
+    class RetryingCoordinator(FakeCoordinator):
+        async def async_refresh(self) -> None:
+            self.refresh_calls += 1
+            if self.refresh_calls == 1:
+                self.last_update_success = False
+                return
+            self.last_update_success = True
+
+    coordinator = RetryingCoordinator()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        data={init_module.CONF_STATION_ID: "123"},
+    )
+    hass = MagicMock()
+    stop_event = asyncio.Event()
+    wait_calls = []
+
+    async def timeout_once(awaitable, timeout):
+        wait_calls.append(timeout)
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(init_module.asyncio, "wait_for", timeout_once)
+
+    asyncio.run(init_module._async_initial_refresh(hass, coordinator, entry, stop_event))
+
+    assert coordinator.refresh_calls == 2
+    assert wait_calls == [init_module.INITIAL_REFRESH_RETRY_INTERVAL.total_seconds()]
+
+
+def test_initial_refresh_logs_unexpected_error_then_recovers(monkeypatch) -> None:
+    class ErrorCoordinator(FakeCoordinator):
+        async def async_refresh(self) -> None:
+            self.refresh_calls += 1
+            if self.refresh_calls == 1:
+                raise RuntimeError("boom")
+            self.last_update_success = True
+
+    coordinator = ErrorCoordinator()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        data={init_module.CONF_STATION_ID: "123"},
+    )
+    wait_calls = []
+
+    async def timeout_once(awaitable, timeout):
+        wait_calls.append(timeout)
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(init_module.asyncio, "wait_for", timeout_once)
+
+    asyncio.run(
+        init_module._async_initial_refresh(
+            MagicMock(), coordinator, entry, asyncio.Event()
+        )
+    )
+
+    assert coordinator.refresh_calls == 2
+    assert wait_calls == [init_module.INITIAL_REFRESH_RETRY_INTERVAL.total_seconds()]
+
+
+def test_initial_refresh_propagates_cancellation() -> None:
+    class BlockingCoordinator(FakeCoordinator):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+
+        async def async_refresh(self) -> None:
+            self.started.set()
+            await asyncio.Event().wait()
+
+    async def run_refresh() -> asyncio.Task[None]:
+        coordinator = BlockingCoordinator()
+        entry = SimpleNamespace(entry_id="entry_1", title="Test Station")
+        task = asyncio.create_task(
+            init_module._async_initial_refresh(
+                MagicMock(), coordinator, entry, asyncio.Event()
+            )
+        )
+        await coordinator.started.wait()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return task
+
+    assert asyncio.run(run_refresh()).cancelled()
+
+
+def test_entry_task_uses_config_entry_task_api() -> None:
+    async def run_task() -> None:
+        hass = MagicMock()
+
+        def create_background_task(hass_arg, coroutine, name):
+            assert hass_arg is hass
+            assert name == "initial-refresh"
+            return asyncio.create_task(coroutine)
+
+        entry = SimpleNamespace(async_create_background_task=create_background_task)
+        task = init_module._async_create_entry_task(
+            hass,
+            entry,
+            asyncio.sleep(0),
+            "initial-refresh",
+        )
+        await task
+
+    asyncio.run(run_task())
+
+
+def test_station_not_found_creates_issue_and_success_deletes_it() -> None:
+    class NotFoundCoordinator(FakeCoordinator):
+        def __init__(self):
+            super().__init__()
+            self.not_found = True
+
+        async def async_refresh(self) -> None:
+            self.station_not_found = self.not_found
+            self.last_update_success = not self.not_found
+
+    coordinator = NotFoundCoordinator()
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        title="Test Station",
+        data={init_module.CONF_STATION_ID: "123"},
+    )
+    hass = MagicMock()
+    issue_registry = init_module.issue_registry
+    issue_registry.async_create_issue.reset_mock()
+    issue_registry.async_delete_issue.reset_mock()
+
+    asyncio.run(
+        init_module._async_initial_refresh(hass, coordinator, entry, asyncio.Event())
+    )
+
+    issue_registry.async_create_issue.assert_called_once()
+    assert issue_registry.async_create_issue.call_args.kwargs["translation_key"] == (
+        init_module.STATION_NOT_FOUND_ISSUE
+    )
+
+    coordinator.not_found = False
+    asyncio.run(
+        init_module._async_initial_refresh(hass, coordinator, entry, asyncio.Event())
+    )
+    issue_registry.async_delete_issue.assert_called_once_with(
+        hass, init_module.DOMAIN, "station_not_found_entry_1"
+    )
+
+
+def test_unload_entry_cancels_initial_refresh_task() -> None:
+    async def run_unload() -> asyncio.Task[None]:
+        hass, _ = _build_hass_with_services()
+        coordinator = FakeCoordinator()
+        pending_task = asyncio.create_task(asyncio.Event().wait())
+        hass.data = {
+            init_module.DOMAIN: {
+                init_module._CSV_MANAGER: coordinator.csv_manager,
+                init_module._CSV_UPDATE_LISTENER: MagicMock(),
+                "entry_1": {
+                    "listener": MagicMock(),
+                    "coordinator": coordinator,
+                    "initial_refresh_task": pending_task,
+                },
+            },
+            init_module._SERVICES_REGISTERED: True,
+        }
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        entry = SimpleNamespace(entry_id="entry_1")
+
+        assert await init_module.async_unload_entry(hass, entry) is True
+        return pending_task
+
+    pending_task = asyncio.run(run_unload())
+    assert pending_task.cancelled()
 
 
 def test_migrate_entry_version_one_removes_config_type() -> None:
@@ -1182,12 +1441,82 @@ def test_unload_entry_removes_listener_coordinator_and_services() -> None:
 
 def test_unload_entry_returns_false_without_cleanup() -> None:
     hass, _ = _build_hass_with_services()
-    hass.data = {init_module.DOMAIN: {"entry_1": {"listener": MagicMock(), "coordinator": FakeCoordinator()}}}
+    listener = MagicMock()
+    coordinator = FakeCoordinator()
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {"listener": listener, "coordinator": coordinator}
+        }
+    }
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
     entry = SimpleNamespace(entry_id="entry_1")
 
     assert asyncio.run(init_module.async_unload_entry(hass, entry)) is False
     assert "entry_1" in hass.data[init_module.DOMAIN]
+    listener.assert_not_called()
+    assert coordinator.shutdown_calls == 0
+
+
+def test_failed_unload_restarts_running_initial_refresh(monkeypatch) -> None:
+    async def run_unload() -> tuple[asyncio.Task[None], asyncio.Task[None]]:
+        hass, _ = _build_hass_with_services()
+        coordinator = FakeCoordinator()
+        stop_event = asyncio.Event()
+        original_task = asyncio.create_task(asyncio.Event().wait())
+        cancel_initial_refresh = AsyncMock()
+        monkeypatch.setattr(
+            init_module,
+            "_async_cancel_initial_refresh",
+            cancel_initial_refresh,
+        )
+        hass.data = {
+            init_module.DOMAIN: {
+                "entry_1": {
+                    "listener": MagicMock(),
+                    "coordinator": coordinator,
+                    init_module._INITIAL_REFRESH_TASK: original_task,
+                    init_module._INITIAL_REFRESH_STOP_EVENT: stop_event,
+                }
+            }
+        }
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            title="Test Station",
+            data={init_module.CONF_STATION_ID: "123"},
+        )
+
+        assert await init_module.async_unload_entry(hass, entry) is False
+        replacement_task = hass.data[init_module.DOMAIN]["entry_1"][
+            init_module._INITIAL_REFRESH_TASK
+        ]
+        cancel_initial_refresh.assert_awaited_once_with(original_task)
+        original_task.cancel()
+        replacement_task.cancel()
+        for task in (original_task, replacement_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        return original_task, replacement_task
+
+    original_task, replacement_task = asyncio.run(run_unload())
+    assert original_task.cancelled()
+    assert replacement_task is not original_task
+
+
+def test_remove_entry_deletes_station_not_found_issue() -> None:
+    hass = MagicMock()
+    entry = SimpleNamespace(entry_id="entry_1")
+    init_module.issue_registry.async_delete_issue.reset_mock()
+
+    asyncio.run(init_module.async_remove_entry(hass, entry))
+
+    init_module.issue_registry.async_delete_issue.assert_called_once_with(
+        hass,
+        init_module.DOMAIN,
+        "station_not_found_entry_1",
+    )
 
 
 def test_reload_entry_delegates_to_config_entries() -> None:

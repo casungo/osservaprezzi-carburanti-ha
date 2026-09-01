@@ -840,6 +840,40 @@ def test_config_flow_area_accepts_custom_result_limit(
     assert result["step_id"] == "select_station"
 
 
+@pytest.mark.parametrize(
+    ("step", "user_input"),
+    [
+        ("area", {CONF_MUNICIPALITY: "Roma", CONF_RESULT_LIMIT: 0}),
+        (
+            "home",
+            {CONF_RADIUS_KM: 0, CONF_RESULT_LIMIT: 20},
+        ),
+        (
+            "home",
+            {CONF_RADIUS_KM: 5, CONF_RESULT_LIMIT: 0},
+        ),
+    ],
+)
+def test_config_flow_rejects_out_of_range_search_values(
+    monkeypatch: pytest.MonkeyPatch,
+    step: str,
+    user_input: dict[str, Any],
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow.hass.config.latitude = 41.9
+    flow.hass.config.longitude = 12.5
+    if step == "area":
+        manager = _registry_manager(())
+        monkeypatch.setattr(
+            "custom_components.osservaprezzi_carburanti.config_flow.get_shared_csv_manager",
+            lambda hass: manager,
+        )
+
+    result = asyncio.run(getattr(flow, f"async_step_{step}")(user_input))
+
+    assert result["errors"] == {"base": "unknown"}
+
+
 def test_config_flow_reconfigure_updates_station(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

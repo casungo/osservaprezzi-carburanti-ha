@@ -44,7 +44,6 @@ async def async_setup_entry(
     """Set up binary sensor entities for a station."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     known_unique_ids: set[str] = set()
-    initial_discovery = True
 
     @callback
     def _async_discover_entities() -> None:
@@ -62,10 +61,9 @@ async def async_setup_entry(
         if not new_entities:
             return
         known_unique_ids.update(entity._attr_unique_id for entity in new_entities)
-        async_add_entities(new_entities, update_before_add=initial_discovery)
+        async_add_entities(new_entities, update_before_add=False)
 
     _async_discover_entities()
-    initial_discovery = False
     entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 

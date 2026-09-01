@@ -104,6 +104,12 @@
       "invalid_stale_hours": "Choose one of the supported price freshness thresholds."
     }
   },
+  "issues": {
+    "station_not_found": {
+      "title": "Station not found",
+      "description": "Station {station} (ID {station_id}) was not found by MIMIT. Remove this integration entry and add the station again with a valid ID."
+    }
+  },
   "entity": {
     "sensor": {
       "location": {

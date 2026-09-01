@@ -30,6 +30,7 @@ Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi
 2. **Install the integration**:
    - Search for "Osservaprezzi Carburanti" in HACS.
    - Click "Download".
+   - To test prerelease `v2.6.0-beta.1`, enable pre-releases for the repository or select that version explicitly.
    - Restart Home Assistant.
 
 ### Configuration
@@ -289,7 +290,7 @@ through manual workflow dispatch.
 
 For issues or suggestions, open a
 [GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-When testing `v2.5.1`, include the setup method used and attach the Home Assistant diagnostics
+When testing `v2.6.0-beta.1`, include the setup method used and attach the Home Assistant diagnostics
 download: it excludes station IDs, identity, addresses, and coordinates.
 
 ## 📄 License

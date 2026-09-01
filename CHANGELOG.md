@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0-beta.1] - 2026-09-01
+
+### Added
+- Add multi-station setup from Home location, coordinates, and municipality/province searches while keeping direct station-ID setup available
+- Add configurable nearby-search radius and result limit controls
+- Report 404 stations through a translated Home Assistant Repairs issue
+
+### Changed
+- Keep the initial station refresh in the background so Home Assistant startup is not blocked
+- Skip stations already configured when adding a batch
+- Retry transient initial-refresh failures every 30 minutes
+- Clean up and restart initial-refresh tasks safely across unload and reload
+- Add release checks for version, branch, target commit, and tag consistency
+
 ## [2.5.1] - 2026-09-01
 
 ### Changed

@@ -30,6 +30,7 @@ Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizi
 2.  **Installa l'integrazione**:
     - Cerca "Osservaprezzi Carburanti" in HACS.
     - Clicca "Download".
+    - Per provare la prerelease `v2.6.0-beta.1`, abilita le pre-release del repository oppure seleziona esplicitamente quella versione.
     - Riavvia Home Assistant.
 
 ### Configurazione
@@ -288,7 +289,7 @@ tramite avvio manuale del workflow.
 
 Per problemi o suggerimenti apri una
 [issue su GitHub](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-Se stai provando `v2.5.1`, indica il metodo di configurazione usato e allega il download
+Se stai provando `v2.6.0-beta.1`, indica il metodo di configurazione usato e allega il download
 diagnostico di Home Assistant: non contiene ID stazione, identità, indirizzo o coordinate.
 
 ## 📄 Licenza

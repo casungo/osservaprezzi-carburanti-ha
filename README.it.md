@@ -30,6 +30,7 @@ Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizi
 2.  **Installa l'integrazione**:
     - Cerca "Osservaprezzi Carburanti" in HACS.
     - Clicca "Download".
+    - Per provare la prerelease `v2.6.0-beta.1`, abilita le pre-release del repository oppure seleziona esplicitamente quella versione.
     - Riavvia Home Assistant.
 
 ### Configurazione
@@ -38,13 +39,13 @@ Per configurare l'integrazione, vai su: "Impostazioni" -> "Dispositivi e Servizi
 
 Durante la configurazione puoi:
 
-- trovare le stazioni vicine usando la posizione di casa configurata in Home Assistant e un raggio di 2, 5, 10, 20 o 50 km;
+- trovare le stazioni vicine usando la posizione di casa configurata in Home Assistant e un raggio personalizzato da 0,1 a 200 km;
 - cercare vicino a coordinate inserite manualmente senza salvarle;
 - cercare nel registro ufficiale per comune e provincia opzionale;
 - inserire manualmente l'ID di una stazione Osservaprezzi.
 
-Le ricerche nel registro supportano testo libero, tipologia impianto e un limite di 5, 10 o 20
-risultati. Il confronto ignora maiuscole e accenti. Le coordinate vengono usate solo in memoria per
+Le ricerche nel registro supportano testo libero, tipologia impianto e un limite personalizzato da
+1 a 100 risultati. Il confronto ignora maiuscole e accenti. Le coordinate vengono usate solo in memoria per
 calcolare le distanze e non vengono salvate dall'integrazione né inviate al MIMIT.
 
 Dopo la configurazione puoi usare l'azione **Riconfigura** dell'integrazione per cambiare la
@@ -288,7 +289,7 @@ tramite avvio manuale del workflow.
 
 Per problemi o suggerimenti apri una
 [issue su GitHub](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-Se stai provando `v2.4.0`, indica il metodo di configurazione usato e allega il download
+Se stai provando `v2.6.0-beta.1`, indica il metodo di configurazione usato e allega il download
 diagnostico di Home Assistant: non contiene ID stazione, identità, indirizzo o coordinate.
 
 ## 📄 Licenza

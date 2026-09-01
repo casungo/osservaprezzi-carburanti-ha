@@ -131,6 +131,7 @@ def _make_config_flow(monkeypatch: pytest.MonkeyPatch) -> OsservaprezziCarburant
     flow.hass.async_add_executor_job = AsyncMock(
         side_effect=lambda function, *args: function(*args)
     )
+    flow.hass.config_entries.flow.async_init = AsyncMock()
     flow.async_set_unique_id = AsyncMock()
     flow._abort_if_unique_id_configured = MagicMock()
     flow.async_create_entry = MagicMock(
@@ -141,6 +142,9 @@ def _make_config_flow(monkeypatch: pytest.MonkeyPatch) -> OsservaprezziCarburant
     )
     flow.async_show_menu = MagicMock(
         side_effect=lambda **kwargs: {"type": "menu", **kwargs}
+    )
+    flow.async_abort = MagicMock(
+        side_effect=lambda **kwargs: {"type": "abort", **kwargs}
     )
     flow._get_reconfigure_entry = MagicMock()
     flow._async_current_entries = MagicMock(return_value=[])
@@ -287,6 +291,103 @@ def test_config_flow_home_search_and_selection(monkeypatch: pytest.MonkeyPatch) 
     validate_mock.assert_awaited_once_with(flow.hass, "123")
 
 
+def test_config_flow_adds_multiple_selected_stations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow._nearby_candidates = (_candidate("123"), _candidate("456"))
+    flow._registry_is_stale = False
+    flow._registry_updated = "2026-08-28"
+    validate_mock = AsyncMock(
+        side_effect=[{"name": "First"}, {"name": "Second"}]
+    )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        validate_mock,
+    )
+
+    result = asyncio.run(
+        flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "First",
+        "data": {CONF_STATION_ID: "123"},
+    }
+    flow.hass.config_entries.flow.async_init.assert_awaited_once_with(
+        "osservaprezzi_carburanti",
+        context={"source": "import"},
+        data={CONF_STATION_ID: "456", "name": "Second"},
+    )
+    assert validate_mock.await_args_list == [
+        ((flow.hass, "123"),),
+        ((flow.hass, "456"),),
+    ]
+
+
+def test_config_flow_imports_validated_station(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+
+    assert asyncio.run(flow.async_step_import()) == {
+        "type": "abort",
+        "reason": "invalid_station",
+    }
+    assert asyncio.run(
+        flow.async_step_import({CONF_STATION_ID: "123", "name": "Station"})
+    ) == {
+        "type": "create_entry",
+        "title": "Station",
+        "data": {CONF_STATION_ID: "123"},
+    }
+
+
+def test_config_flow_skips_already_configured_batch_station(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow._nearby_candidates = (_candidate("123"), _candidate("456"))
+    flow._registry_is_stale = False
+    flow._registry_updated = "2026-08-28"
+    flow._async_current_entries.return_value = [
+        MagicMock(data={CONF_STATION_ID: "456"})
+    ]
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        AsyncMock(return_value={"name": "New Station"}),
+    )
+
+    result = asyncio.run(
+        flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
+    )
+
+    assert result == {
+        "type": "create_entry",
+        "title": "New Station",
+        "data": {CONF_STATION_ID: "123"},
+    }
+    flow.hass.config_entries.flow.async_init.assert_not_awaited()
+
+
+def test_config_flow_rejects_batch_when_all_stations_are_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow._nearby_candidates = (_candidate("123"), _candidate("456"))
+    flow._async_current_entries.return_value = [
+        MagicMock(data={CONF_STATION_ID: "123"}),
+        MagicMock(data={CONF_STATION_ID: "456"}),
+    ]
+
+    result = asyncio.run(
+        flow.async_step_select_station({CONF_STATION_ID: ["123", "456"]})
+    )
+
+    assert result["errors"] == {"base": "already_configured"}
+
+
 def test_config_flow_home_uses_stale_registry_notice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -319,6 +420,7 @@ def test_config_flow_home_uses_stale_registry_notice(
     assert result["description_placeholders"] == {
         "registry_updated": "2026-07-27T00:00:00+00:00",
         "result_count": "1",
+        "configured_count": "0",
     }
 
 
@@ -369,16 +471,34 @@ def test_config_flow_home_no_results(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["errors"] == {"base": "no_stations_found"}
 
 
-def test_config_flow_home_rejects_unsupported_radius(
+def test_config_flow_home_accepts_custom_radius_and_result_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     flow = _make_config_flow(monkeypatch)
     flow.hass.config.latitude = 41.9
     flow.hass.config.longitude = 12.5
+    manager = _registry_manager(
+        (
+            {
+                "id": "123",
+                "name": "Station",
+                "latitude": 41.91,
+                "longitude": 12.5,
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow.get_shared_csv_manager",
+        lambda hass: manager,
+    )
 
-    result = asyncio.run(flow.async_step_home({CONF_RADIUS_KM: 3}))
+    result = asyncio.run(
+        flow.async_step_home(
+            {CONF_RADIUS_KM: 3.5, CONF_RESULT_LIMIT: 7}
+        )
+    )
 
-    assert result["errors"] == {"base": "unknown"}
+    assert result["step_id"] == "select_station"
 
 
 def test_config_flow_home_formats_missing_registry_timestamp(
@@ -412,6 +532,7 @@ def test_config_flow_home_formats_missing_registry_timestamp(
     assert result["description_placeholders"] == {
         "registry_updated": "—",
         "result_count": "1",
+        "configured_count": "0",
     }
 
 
@@ -473,6 +594,10 @@ def test_config_flow_nearby_selection_errors(
         "_async_create_station_entry",
         AsyncMock(side_effect=side_effect),
     )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        AsyncMock(return_value={"name": "Station"}),
+    )
 
     result = asyncio.run(
         flow.async_step_select_station({CONF_STATION_ID: "123"})
@@ -501,6 +626,24 @@ def test_candidate_label_without_distance_uses_area_and_avoids_duplicate_brand()
     label = OsservaprezziCarburantiConfigFlow._format_candidate_label(candidate)
 
     assert label == "Brand Roma · Roma, RM · ID 456"
+
+
+def test_candidate_label_caps_long_chip_text() -> None:
+    candidate = StationCandidate(
+        station_id="987654",
+        name="Stazione di servizio con un nome molto lungo",
+        brand="Un marchio altrettanto lungo",
+        address="Via con un indirizzo molto lungo 123456789",
+        municipality="Roma",
+        province="RM",
+        station_type="Stradale",
+        distance_km=1.25,
+    )
+
+    label = OsservaprezziCarburantiConfigFlow._format_candidate_label(candidate)
+
+    assert len(label) == 64
+    assert label.endswith(" · ID 987654")
 
 
 def _registry_manager(
@@ -667,11 +810,19 @@ def test_config_flow_area_reports_no_results_and_registry_error(
     assert result["errors"] == {"base": "registry_unavailable"}
 
 
-def test_config_flow_area_reports_invalid_filter_input(
+def test_config_flow_area_accepts_custom_result_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     flow = _make_config_flow(monkeypatch)
-    manager = _registry_manager(())
+    manager = _registry_manager(
+        (
+            {
+                "id": "123",
+                "name": "Station",
+                "municipality": "Roma",
+            },
+        )
+    )
     monkeypatch.setattr(
         "custom_components.osservaprezzi_carburanti.config_flow.get_shared_csv_manager",
         lambda hass: manager,
@@ -685,6 +836,40 @@ def test_config_flow_area_reports_invalid_filter_input(
             }
         )
     )
+
+    assert result["step_id"] == "select_station"
+
+
+@pytest.mark.parametrize(
+    ("step", "user_input"),
+    [
+        ("area", {CONF_MUNICIPALITY: "Roma", CONF_RESULT_LIMIT: 0}),
+        (
+            "home",
+            {CONF_RADIUS_KM: 0, CONF_RESULT_LIMIT: 20},
+        ),
+        (
+            "home",
+            {CONF_RADIUS_KM: 5, CONF_RESULT_LIMIT: 0},
+        ),
+    ],
+)
+def test_config_flow_rejects_out_of_range_search_values(
+    monkeypatch: pytest.MonkeyPatch,
+    step: str,
+    user_input: dict[str, Any],
+) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow.hass.config.latitude = 41.9
+    flow.hass.config.longitude = 12.5
+    if step == "area":
+        manager = _registry_manager(())
+        monkeypatch.setattr(
+            "custom_components.osservaprezzi_carburanti.config_flow.get_shared_csv_manager",
+            lambda hass: manager,
+        )
+
+    result = asyncio.run(getattr(flow, f"async_step_{step}")(user_input))
 
     assert result["errors"] == {"base": "unknown"}
 

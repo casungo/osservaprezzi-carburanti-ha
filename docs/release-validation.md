@@ -2,6 +2,44 @@
 
 Run these checks before publishing a HACS/Home Assistant release.
 
+## Release guard
+
+Run the guard after committing the release version and changelog, before creating or pushing a tag.
+It reads `manifest.json` from the exact target commit and checks the release naming, tag, and
+remote tag state. It also rejects a dirty worktree and requires the full target SHA to equal the
+live head of the explicitly named remote branch. The remote must be reachable.
+
+For a stable release:
+
+```bash
+VERSION=2.6.0
+TAG="v${VERSION}"
+BRANCH=master
+TARGET_COMMIT="$(git rev-parse HEAD)"
+python scripts/release_guard.py --channel stable --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
+git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"
+git push origin "$TAG"
+gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG"
+```
+
+For a prerelease, include a valid SemVer suffix. A plain `X.Y.Z` is never accepted as a
+prerelease:
+
+```bash
+VERSION=2.6.0-beta.1
+TAG="v${VERSION}"
+BRANCH=release/2.6.0-beta.1
+TARGET_COMMIT="$(git rev-parse HEAD)"
+python scripts/release_guard.py --channel prerelease --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
+git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"
+git push origin "$TAG"
+gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG" --prerelease
+```
+
+If the guard fails, do not create, move, or force-push the tag. It accepts stable versions in the
+form `X.Y.Z` and prereleases with a valid SemVer suffix, such as `X.Y.Z-beta.N` or `X.Y.Z-rc.N`.
+Push the named branch first, and do not change it between the guard and tag push.
+
 ## Local environment
 
 On a host that provides `python3` but not `python`, create and activate a virtual environment first:

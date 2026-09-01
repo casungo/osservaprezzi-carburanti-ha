@@ -288,7 +288,7 @@ tramite avvio manuale del workflow.
 
 Per problemi o suggerimenti apri una
 [issue su GitHub](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-Se stai provando `v2.5.0`, indica il metodo di configurazione usato e allega il download
+Se stai provando `v2.5.1`, indica il metodo di configurazione usato e allega il download
 diagnostico di Home Assistant: non contiene ID stazione, identità, indirizzo o coordinate.
 
 ## 📄 Licenza

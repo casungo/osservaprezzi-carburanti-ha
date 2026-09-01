@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-09-01
+
+### Changed
+- Allow custom search radii and result limits instead of fixed presets
+
 ## [2.5.0] - 2026-08-29
 
 ### Added
@@ -14,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Skip stations already configured when adding a batch, while creating the remaining selections
-- Allow custom search radii and result limits instead of fixed presets
 
 ### Fixed
 - Keep long station labels inside the multi-select view

@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import aiohttp
 import pytest
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.osservaprezzi_carburanti import async_setup
@@ -26,6 +29,49 @@ from custom_components.osservaprezzi_carburanti.const import (
 from custom_components.osservaprezzi_carburanti.csv_manager import CSVStationManager
 
 STATION_ID = "54233"
+
+
+async def test_station_not_found_repair_issue_is_removed_after_refresh(
+    hass: HomeAssistant,
+    monkeypatch,
+) -> None:
+    """Report a missing station and remove the issue after it becomes available."""
+    not_found = aiohttp.ClientResponseError(
+        request_info=cast(Any, SimpleNamespace(real_url="https://example.test")),
+        history=(),
+        status=404,
+        message="not found",
+    )
+    fetch_station_data = AsyncMock(side_effect=[not_found, _station_payload()])
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
+        fetch_station_data,
+    )
+    monkeypatch.setattr(CSVStationManager, "is_data_available", lambda self: True)
+    monkeypatch.setattr(
+        CSVStationManager,
+        "get_station_by_id",
+        lambda self, station_id: {"latitude": 41.8759, "longitude": 12.4633},
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Missing station",
+        unique_id=STATION_ID,
+        data={CONF_STATION_ID: STATION_ID},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    repairs = issue_registry.async_get(hass)
+    issue_id = f"station_not_found_{entry.entry_id}"
+    assert repairs.async_get_issue(DOMAIN, issue_id) is not None
+
+    await hass.data[DOMAIN][entry.entry_id]["coordinator"].async_refresh()
+    assert repairs.async_get_issue(DOMAIN, issue_id) is None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_cache_services_raise_without_active_entries(hass: HomeAssistant) -> None:

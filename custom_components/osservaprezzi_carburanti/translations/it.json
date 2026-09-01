@@ -104,6 +104,12 @@
       "invalid_stale_hours": "Scegli una delle soglie di freschezza supportate."
     }
   },
+  "issues": {
+    "station_not_found": {
+      "title": "Stazione non trovata",
+      "description": "La stazione {station} (ID {station_id}) non è stata trovata dal MIMIT. Rimuovi questa configurazione e aggiungi di nuovo la stazione con un ID valido."
+    }
+  },
   "entity": {
     "sensor": {
       "location": {

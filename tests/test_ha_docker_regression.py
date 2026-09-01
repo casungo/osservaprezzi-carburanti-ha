@@ -49,3 +49,23 @@ def test_log_failure_context_preserves_stage_and_return_code(
     assert "line-20\nline-21" in result
     assert result.index("line-20") < result.index("line-99")
     assert "docker logs test-container" in result
+
+
+def test_copy_integration_excludes_bytecode(
+    regression_script: ModuleType,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    source = repo_root / "custom_components" / regression_script.DOMAIN
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("", encoding="utf-8")
+    bytecode = source / "__pycache__"
+    bytecode.mkdir()
+    (bytecode / "module.pyc").write_bytes(b"cached")
+
+    config_dir = tmp_path / "config"
+    regression_script._copy_integration(repo_root, config_dir)
+
+    copied = config_dir / "custom_components" / regression_script.DOMAIN
+    assert (copied / "__init__.py").is_file()
+    assert not (copied / "__pycache__").exists()

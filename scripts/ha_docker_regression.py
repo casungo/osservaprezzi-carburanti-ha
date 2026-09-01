@@ -109,7 +109,11 @@ def _copy_integration(repo_root: Path, config_dir: Path) -> None:
     """Copy the integration into Home Assistant's config directory."""
     source = repo_root / "custom_components" / DOMAIN
     destination = config_dir / "custom_components" / DOMAIN
-    shutil.copytree(source, destination)
+    shutil.copytree(
+        source,
+        destination,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
 
 
 def _write_config_entries(config_dir: Path, station_ids: list[str]) -> None:

@@ -39,6 +39,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator."""
         self.config_entry = entry
         self.csv_manager = csv_manager
+        self.station_not_found = False
 
         super().__init__(
             hass,
@@ -49,6 +50,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch and enrich the latest station payload."""
+        self.station_not_found = False
         if not self.csv_manager.is_data_available():
             _LOGGER.info("Initializing CSV station data")
             if not await self.csv_manager.async_initialize():
@@ -62,6 +64,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch station data with retry handling."""
         station_id = self.config_entry.data[CONF_STATION_ID]
         last_err: Exception | None = None
+        self.station_not_found = False
 
         for attempt in range(len(RETRY_DELAYS) + 1):
             try:
@@ -69,6 +72,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                 return self._process_station_data(data)
             except aiohttp.ClientResponseError as err:
                 if err.status == 404:
+                    self.station_not_found = True
                     _LOGGER.error("Station with ID %s not found", station_id)
                     raise UpdateFailed(f"Station with ID {station_id} not found") from err
                 last_err = err

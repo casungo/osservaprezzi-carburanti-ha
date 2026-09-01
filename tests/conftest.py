@@ -70,6 +70,7 @@ def _mock_ha_modules():
         "homeassistant.helpers.entity",
         "homeassistant.helpers.entity_registry",
         "homeassistant.helpers.entity_platform",
+        "homeassistant.helpers.issue_registry",
         "homeassistant.helpers.update_coordinator",
         "homeassistant.helpers.typing",
         "homeassistant.helpers.aiohttp_client",
@@ -100,6 +101,7 @@ def _mock_ha_modules():
     sys.modules["homeassistant.helpers.update_coordinator"].CoordinatorEntity = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = Exception
+    sys.modules["homeassistant.helpers.issue_registry"].IssueSeverity = MagicMock(ERROR="error")
     sys.modules["homeassistant.helpers.entity"].DeviceInfo = dict
     sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock(
         DIAGNOSTIC="diagnostic"
@@ -127,6 +129,9 @@ def _mock_ha_modules():
     sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
     sys.modules["homeassistant.helpers"].entity_registry = sys.modules[
         "homeassistant.helpers.entity_registry"
+    ]
+    sys.modules["homeassistant.helpers"].issue_registry = sys.modules[
+        "homeassistant.helpers.issue_registry"
     ]
     sys.modules["homeassistant.helpers"].aiohttp_client = sys.modules[
         "homeassistant.helpers.aiohttp_client"

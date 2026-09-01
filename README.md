@@ -296,7 +296,7 @@ For common problems, see [Troubleshooting](#troubleshooting). For issues or sugg
 [GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
 When reporting an issue, include the setup method used and the integration version, and attach the
 Home Assistant diagnostics download: it excludes station IDs, identity, addresses, and coordinates.
-If you are asked to test a fix, follow [Testing Pre-releases](#-testing-pre-releases).
+If you are asked to test a fix, follow [Testing Pre-releases](#testing-pre-releases).
 
 ## 📄 License
 

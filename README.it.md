@@ -62,7 +62,8 @@ Durante la configurazione puoi:
 - inserire manualmente l'ID di una stazione Osservaprezzi.
 
 Le ricerche nel registro supportano testo libero, tipologia impianto e un limite di 5, 10 o 20
-risultati. Il confronto ignora maiuscole e accenti. Le coordinate vengono usate solo in memoria per
+risultati. Il confronto ignora maiuscole e accenti. Le ricerche per vicinanza usano la copia
+locale e cachata del registro ufficiale MIMIT. Le coordinate vengono usate solo in memoria per
 calcolare le distanze e non vengono salvate dall'integrazione né inviate al MIMIT.
 
 Dopo la configurazione puoi usare l'azione **Riconfigura** dell'integrazione per cambiare la
@@ -297,7 +298,7 @@ Quando segnali un problema, indica il metodo di configurazione usato e la versio
 dell'integrazione, e allega il download diagnostico di Home Assistant: non contiene ID stazione,
 identità, indirizzo o coordinate.
 Se ti viene chiesto di provare una correzione, segui
-[Testare le pre-release](#-testare-le-pre-release).
+[Testare le pre-release](#testare-le-pre-release).
 
 ## 📄 Licenza
 

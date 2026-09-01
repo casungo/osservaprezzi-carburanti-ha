@@ -38,6 +38,18 @@ class _MockCoordinatorEntity(_MockEntity):
         """Mock shutdown hook."""
 
 
+class _SentinelHomeAssistantError(Exception):
+    """Stands in for homeassistant.exceptions.HomeAssistantError."""
+
+
+class _SentinelUpdateFailed(_SentinelHomeAssistantError):
+    """Stands in for homeassistant.helpers.update_coordinator.UpdateFailed."""
+
+
+class _SentinelConfigEntryNotReady(_SentinelHomeAssistantError):
+    """Stands in for homeassistant.exceptions.ConfigEntryNotReady."""
+
+
 class _MockConfigFlow:
     """Minimal config flow test double."""
 
@@ -100,7 +112,7 @@ def _mock_ha_modules():
     )
     sys.modules["homeassistant.helpers.update_coordinator"].CoordinatorEntity = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = _MockCoordinatorEntity
-    sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = Exception
+    sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = _SentinelUpdateFailed
     sys.modules["homeassistant.helpers.issue_registry"].IssueSeverity = MagicMock(ERROR="error")
     sys.modules["homeassistant.helpers.entity"].DeviceInfo = dict
     sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock(
@@ -112,8 +124,8 @@ def _mock_ha_modules():
         BINARY_SENSOR="binary_sensor",
         GEO_LOCATION="geo_location",
     )
-    sys.modules["homeassistant.exceptions"].HomeAssistantError = Exception
-    sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = Exception
+    sys.modules["homeassistant.exceptions"].HomeAssistantError = _SentinelHomeAssistantError
+    sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = _SentinelConfigEntryNotReady
     sys.modules["homeassistant.data_entry_flow"].FlowResult = dict
     sys.modules["homeassistant.config_entries"].ConfigFlow = _MockConfigFlow
     sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict

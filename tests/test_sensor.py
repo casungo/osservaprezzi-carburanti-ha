@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
+
+import pytest
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -583,6 +585,26 @@ class TestPriceMetadata:
             "price_age_minutes": 1500,
             "price_is_stale": True,
         }
+
+    @pytest.mark.parametrize(("minutes", "expected"), [(1440, False), (1441, True)])
+    def test_staleness_boundary_is_exclusive_at_threshold(self, monkeypatch, minutes, expected):
+        updated_at = datetime(2026, 7, 27, 10, 0, tzinfo=timezone.utc)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: updated_at)
+        monkeypatch.setattr(
+            sensor_module.dt_util,
+            "now",
+            lambda: updated_at + timedelta(minutes=minutes),
+        )
+
+        result = _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update="2026-07-27T10:00:00+00:00",
+            stale_hours=24,
+        )
+
+        assert result["price_age_minutes"] == minutes
+        assert result["price_is_stale"] is expected
 
     def test_reports_down_unchanged_and_new_directions(self):
         assert _price_metadata(

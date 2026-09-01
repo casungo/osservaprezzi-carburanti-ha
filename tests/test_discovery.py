@@ -1,10 +1,41 @@
 """Tests for local nearby-station discovery."""
 from __future__ import annotations
 
+import pytest
+
 from custom_components.osservaprezzi_carburanti.discovery import (
     find_nearby_stations,
     find_stations_by_area,
 )
+
+
+def test_find_nearby_stations_distance_matches_geodesic_ground_truth() -> None:
+    candidates = find_nearby_stations(
+        [
+            {"id": "1", "name": "One degree north", "latitude": 42.9, "longitude": 12.5},
+            {"id": "2", "name": "Half degree north", "latitude": 42.4, "longitude": 12.5},
+        ],
+        latitude=41.9,
+        longitude=12.5,
+        radius_km=200,
+        limit=20,
+    )
+
+    by_id = {candidate.station_id: candidate for candidate in candidates}
+    assert by_id["1"].distance_km == pytest.approx(111.19, abs=0.5)
+    assert by_id["2"].distance_km == pytest.approx(55.60, abs=0.5)
+
+
+def test_find_nearby_stations_excludes_station_just_outside_radius() -> None:
+    candidates = find_nearby_stations(
+        [{"id": "1", "name": "Far", "latitude": 42.4, "longitude": 12.5}],
+        latitude=41.9,
+        longitude=12.5,
+        radius_km=50,
+        limit=20,
+    )
+
+    assert candidates == ()
 
 
 def test_find_nearby_stations_filters_sorts_and_limits() -> None:

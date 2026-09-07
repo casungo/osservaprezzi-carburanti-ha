@@ -4,8 +4,8 @@ Status: the local-registry MVP is implemented in the unreleased code. Map/curren
 address geocoding, and live price ranking remain design-only.
 
 Implemented scope: setup method menu, Home Assistant Home location, manual coordinates,
-municipality/province lookup, selectable 2/5/10/20/50 km radius, text and station-type filters,
-selectable 5/10/20 result caps, accent-insensitive matching, local distance calculation over the
+municipality/province lookup, custom 0.1 to 200 km radius, text and station-type filters,
+custom 1 to 100 result caps, accent-insensitive matching, local distance calculation over the
 shared MIMIT registry, stale-cache fallback, final station-detail validation, and the unchanged
 manual-ID path. The integration stores only the selected station ID.
 
@@ -78,7 +78,7 @@ The initial step offers four actions in this order:
 3. **Search the registry** — municipality plus optional province and metadata filters.
 4. **Enter station ID** — the current form, unchanged as the universal fallback.
 
-Default radius is 5 km; selectable values are 2, 5, 10, 20, and 50 km. Filters match
+Default radius is 5 km; users can enter any value from 0.1 to 200 km. Filters match
 name, brand, address, operator, municipality, and province without case or accent sensitivity;
 station type is an additional optional filter. Do not promise fuel availability from the registry
 because current registry fields do not contain fuels. Fuel/price filtering belongs to a later

@@ -8,9 +8,17 @@ import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+)
 
 from .api import fetch_station_data
 from .const import (
@@ -37,9 +45,9 @@ CONF_TEXT_FILTER = "text_filter"
 CONF_STATION_TYPE = "station_type"
 CONF_RESULT_LIMIT = "result_limit"
 DEFAULT_RADIUS_KM = 5
-RADIUS_OPTIONS_KM = (2, 5, 10, 20, 50)
-MAX_NEARBY_STATIONS = 20
-RESULT_LIMIT_OPTIONS = (5, 10, 20)
+DEFAULT_RESULT_LIMIT = 20
+MAX_RADIUS_KM = 200
+MAX_RESULT_LIMIT = 100
 
 
 class CannotConnect(HomeAssistantError):
@@ -81,16 +89,33 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     ) -> OptionsFlowHandler:
         return OptionsFlowHandler(config_entry)
 
-    async def _async_create_station_entry(self, station_id: str) -> ConfigFlowResult:
+    async def _async_create_station_entry(
+        self,
+        station_id: str,
+        station_info: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
         """Validate a station and create its config entry."""
         normalized_station_id = station_id.strip()
         await self.async_set_unique_id(f"station_{normalized_station_id}")
         self._abort_if_unique_id_configured()
 
-        station_info = await _validate_station(self.hass, normalized_station_id)
+        station_info = station_info or await _validate_station(
+            self.hass, normalized_station_id
+        )
         return self.async_create_entry(
             title=station_info["name"],
             data={CONF_STATION_ID: normalized_station_id},
+        )
+
+    async def async_step_import(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Create one entry requested by a batch selection."""
+        if user_input is None:
+            return self.async_abort(reason="invalid_station")
+        return await self._async_create_station_entry(
+            str(user_input[CONF_STATION_ID]),
+            {"name": str(user_input["name"])},
         )
 
     async def _handle_station_input(
@@ -249,9 +274,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     ) -> tuple[ConfigFlowResult | None, str | None]:
         """Run a local coordinate search and return a flow result or error key."""
         try:
-            radius_km = int(user_input[CONF_RADIUS_KM])
-            if radius_km not in RADIUS_OPTIONS_KM:
-                raise ValueError("Unsupported nearby search radius")
+            radius_km = float(user_input[CONF_RADIUS_KM])
+            if not 0 < radius_km <= MAX_RADIUS_KM:
+                raise ValueError("Nearby search radius is out of range")
             limit, text_filter, station_type = self._search_filters(user_input)
             snapshot = await get_shared_csv_manager(
                 self.hass
@@ -281,9 +306,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     @staticmethod
     def _search_filters(user_input: dict[str, Any]) -> tuple[int, str | None, str | None]:
         """Validate and normalize common local-search fields."""
-        limit = int(user_input.get(CONF_RESULT_LIMIT, MAX_NEARBY_STATIONS))
-        if limit not in RESULT_LIMIT_OPTIONS:
-            raise ValueError("Unsupported result limit")
+        limit = int(user_input.get(CONF_RESULT_LIMIT, DEFAULT_RESULT_LIMIT))
+        if not 0 < limit <= MAX_RESULT_LIMIT:
+            raise ValueError("Result limit is out of range")
         text_filter = str(user_input.get(CONF_TEXT_FILTER, "")).strip() or None
         station_type = str(user_input.get(CONF_STATION_TYPE, "")).strip() or None
         return limit, text_filter, station_type
@@ -296,8 +321,15 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             vol.Optional(CONF_STATION_TYPE, default=""): str,
             vol.Required(
                 CONF_RESULT_LIMIT,
-                default=MAX_NEARBY_STATIONS,
-            ): vol.In(RESULT_LIMIT_OPTIONS),
+                default=DEFAULT_RESULT_LIMIT,
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1,
+                    max=MAX_RESULT_LIMIT,
+                    step=1,
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
         }
 
     @classmethod
@@ -309,7 +341,15 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         fields = dict(extra_fields or {})
         fields[
             vol.Required(CONF_RADIUS_KM, default=DEFAULT_RADIUS_KM)
-        ] = vol.In(RADIUS_OPTIONS_KM)
+        ] = NumberSelector(
+            NumberSelectorConfig(
+                min=0.1,
+                max=MAX_RADIUS_KM,
+                step=0.1,
+                unit_of_measurement="km",
+                mode=NumberSelectorMode.BOX,
+            )
+        )
         fields.update(cls._common_search_fields())
         return vol.Schema(fields)
 
@@ -361,12 +401,46 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             return await getattr(self, f"async_step_{source_step}")()
 
         errors: dict[str, str] = {}
+        configured_ids = {
+            str(entry.data.get(CONF_STATION_ID, ""))
+            for entry in self._async_current_entries()
+        }
         if user_input is not None:
             try:
-                station_id = str(user_input.get(CONF_STATION_ID, ""))
-                if station_id not in {candidate.station_id for candidate in candidates}:
+                selected_value = user_input.get(CONF_STATION_ID, [])
+                selected_ids = (
+                    [selected_value]
+                    if isinstance(selected_value, str)
+                    else [str(station_id) for station_id in selected_value]
+                )
+                candidate_ids = {candidate.station_id for candidate in candidates}
+                if not selected_ids or not set(selected_ids) <= candidate_ids:
                     raise InvalidStation("Station is not in the current nearby results")
-                return await self._async_create_station_entry(station_id)
+
+                new_selected_ids = [
+                    station_id
+                    for station_id in selected_ids
+                    if station_id not in configured_ids
+                ]
+                if not new_selected_ids:
+                    errors["base"] = "already_configured"
+                else:
+                    station_info = {
+                        station_id: await _validate_station(self.hass, station_id)
+                        for station_id in new_selected_ids
+                    }
+                    for station_id in new_selected_ids[1:]:
+                        await self.hass.config_entries.flow.async_init(
+                            DOMAIN,
+                            context={"source": SOURCE_IMPORT},
+                            data={
+                                CONF_STATION_ID: station_id,
+                                "name": station_info[station_id]["name"],
+                            },
+                        )
+                    return await self._async_create_station_entry(
+                        new_selected_ids[0], station_info[new_selected_ids[0]]
+                    )
             except InvalidStation:
                 errors["base"] = "invalid_station"
             except CannotConnect:
@@ -375,10 +449,13 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 _LOGGER.exception("Unexpected nearby station selection error: %s", err)
                 errors["base"] = "unknown"
 
-        options = {
-            candidate.station_id: self._format_candidate_label(candidate)
+        options = [
+            SelectOptionDict(
+                value=candidate.station_id,
+                label=self._format_candidate_label(candidate),
+            )
             for candidate in candidates
-        }
+        ]
         step_id = (
             "select_station_stale"
             if getattr(self, "_registry_is_stale", False)
@@ -387,11 +464,18 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         return self.async_show_form(
             step_id=step_id,
             data_schema=vol.Schema(
-                {vol.Required(CONF_STATION_ID): vol.In(options)}
+                {
+                    vol.Required(CONF_STATION_ID): SelectSelector(
+                        SelectSelectorConfig(options=options, multiple=True)
+                    )
+                }
             ),
             errors=errors,
             description_placeholders={
                 "registry_updated": getattr(self, "_registry_updated", "—"),
+                "configured_count": str(
+                    sum(candidate.station_id in configured_ids for candidate in candidates)
+                ),
                 "result_count": str(len(candidates)),
             },
         )
@@ -418,7 +502,12 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         if location:
             parts.append(location)
         parts.append(f"ID {candidate.station_id}")
-        return " · ".join(parts)
+        label = " · ".join(parts)
+        if len(label) <= 64:
+            return label
+        suffix = f" · ID {candidate.station_id}"
+        prefix = " · ".join(parts[:-1])
+        return f"{prefix[: 64 - len(suffix) - 1].rstrip()}…{suffix}"
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None

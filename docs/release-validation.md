@@ -26,9 +26,9 @@ For a prerelease, include a valid SemVer suffix. A plain `X.Y.Z` is never accept
 prerelease:
 
 ```bash
-VERSION=2.6.0-beta.1
+VERSION=2.6.0-beta.2
 TAG="v${VERSION}"
-BRANCH=release/2.6.0-beta.1
+BRANCH=master
 TARGET_COMMIT="$(git rev-parse HEAD)"
 python scripts/release_guard.py --channel prerelease --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
 git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"

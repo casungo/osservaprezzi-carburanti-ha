@@ -334,9 +334,51 @@ class TestCoordinatorUpdates:
             "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
             AsyncMock(side_effect=_make_response_error(404)),
         )
+        monkeypatch.setattr(
+            "custom_components.osservaprezzi_carburanti.coordinator.asyncio.sleep",
+            AsyncMock(),
+        )
 
         with pytest.raises(Exception, match="not found"):
             asyncio.run(coordinator._async_fetch_station_data())
+
+    def test_async_fetch_station_data_404_sets_station_not_found_without_retry(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        coordinator = _make_coordinator()
+        fetch_mock = AsyncMock(side_effect=_make_response_error(404))
+        sleep_mock = AsyncMock()
+        monkeypatch.setattr(
+            "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
+            fetch_mock,
+        )
+        monkeypatch.setattr(
+            "custom_components.osservaprezzi_carburanti.coordinator.asyncio.sleep",
+            sleep_mock,
+        )
+
+        with pytest.raises(Exception, match="not found"):
+            asyncio.run(coordinator._async_fetch_station_data())
+
+        assert coordinator.station_not_found is True
+        assert fetch_mock.await_count == 1
+        sleep_mock.assert_not_awaited()
+
+    def test_station_not_found_resets_after_successful_fetch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        coordinator = _make_coordinator()
+        coordinator.station_not_found = True
+        coordinator._process_station_data = MagicMock(return_value={"ok": True})
+        monkeypatch.setattr(
+            "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
+            AsyncMock(return_value={"id": "123"}),
+        )
+
+        assert asyncio.run(coordinator._async_fetch_station_data()) == {"ok": True}
+        assert coordinator.station_not_found is False
 
     def test_async_fetch_station_data_retries_response_error_then_succeeds(
         self,

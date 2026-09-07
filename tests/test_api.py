@@ -168,6 +168,11 @@ def test_normalize_station_data_defaults_collections_and_preserves_unknowns() ->
         {"id": "123", "name": "Station", "orariapertura": {}},
         {"id": "123", "name": "Station", "fuels": ["bad"]},
         {"id": "123", "name": "Station", "fuels": [{"name": "Benzina"}]},
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [{"name": "Benzina", "fuelId": 1, "isSelf": True, "serviceAreaId": 3}],
+        },
         {"id": "123", "name": "Station", "services": [None]},
         {"id": "123", "name": "Station", "orariapertura": [1]},
     ],

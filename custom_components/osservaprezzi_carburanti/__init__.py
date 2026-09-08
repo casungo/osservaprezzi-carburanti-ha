@@ -241,6 +241,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
+    await coordinator.async_restore()
 
     stop_event = asyncio.Event()
     domain_data[entry.entry_id] = {

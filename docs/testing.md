@@ -65,15 +65,43 @@ hassfest --action validate --path .
 hacs validate integration custom_components/osservaprezzi_carburanti
 ```
 
-## Docker smoke regression
+## Docker state regression
 
-With Docker running locally, you can run a Home Assistant smoke regression against the official
-Home Assistant container:
+With Docker running locally, you can run a two-profile regression against the official Home
+Assistant container:
 
 ```bash
 python scripts/ha_docker_regression.py --timeout 240
 ```
 
-The same regression runs in GitHub Actions on the 1st and 15th of every month and is available
-through manual workflow dispatch. Pre-release validation steps are described in
+The runner first starts a separate builder profile four times in the official Home Assistant
+container. On its first boot, the builder creates stations through the real config-flow manager.
+On every boot it writes 14 days of synthetic state changes through Home Assistant's real state
+machine. Recorder commits those changes to the real SQLite database. After the last shutdown, the
+runner checkpoints SQLite, exports the complete profile to a tar archive, and extracts it into a
+new `lived` profile.
+
+`fresh` is a separate empty profile. `lived` starts from the exported builder profile, with config
+entries, entity registry, station cache, Recorder database, and four previous HA boots already
+present. The dates are synthetic by design; the Docker boots, state writes, Recorder persistence,
+export, and restore are real.
+
+The runner also builds the same aged profile with the previous tagged integration (`v2.6.0-beta.1`),
+replaces only its integration code with the current checkout, and runs the probe as `upgrade`. This
+keeps upgrade compatibility separate from the normal `fresh` and `lived` checks.
+
+Finally, it runs the exported lived profile twice with only the MIMIT hostnames mapped to localhost:
+`outage` checks that cached registry data and the last successful station payload keep entities
+available, while `recovery` restores the network on the same profile and verifies real refresh and
+service calls.
+
+Inside Home Assistant, the test-only probe checks the four setup paths, multi-station selection,
+custom radius and result limits, duplicate skipping, real entity states, service responses, stable
+entity IDs after reload, and persisted entries. The station and registry requests are real MIMIT
+requests. The probe writes only its result file inside the temporary profile.
+
+The runner also checks container startup logs, imports the integration against the container's HA
+runtime, verifies entity-registry counts, and checks nearby discovery. It does not alter the user's
+Home Assistant instance. The same regression runs in GitHub Actions on pushes, pull requests, the
+1st and 15th of every month, and manual workflow dispatch. Pre-release validation steps are described in
 [release-validation.md](./release-validation.md).

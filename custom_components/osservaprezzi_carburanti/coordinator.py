@@ -10,6 +10,7 @@ import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -40,6 +41,12 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         self.config_entry = entry
         self.csv_manager = csv_manager
         self.station_not_found = False
+        self._store: Store[dict[str, Any]] = Store(
+            hass,
+            1,
+            f"{DOMAIN}.{entry.entry_id}.data",
+            atomic_writes=True,
+        )
 
         super().__init__(
             hass,
@@ -47,6 +54,24 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             name=f"{DOMAIN}_{entry.unique_id or entry.entry_id}",
             update_interval=None,
         )
+
+    async def async_restore(self) -> None:
+        """Restore the last successful station payload before entity setup."""
+        try:
+            data = await self._store.async_load()
+        except Exception as err:
+            _LOGGER.warning(
+                "Could not restore station %s data: %s",
+                self.config_entry.data[CONF_STATION_ID],
+                err,
+            )
+            return
+        if isinstance(data, dict):
+            self.data = data
+            _LOGGER.info(
+                "Restored cached station payload for %s",
+                self.config_entry.data[CONF_STATION_ID],
+            )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch and enrich the latest station payload."""
@@ -58,7 +83,16 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                     "CSV station data initialization failed; continuing without CSV enrichment"
                 )
 
-        return await self._async_fetch_station_data()
+        data = await self._async_fetch_station_data()
+        try:
+            await self._store.async_save(data)
+        except Exception as err:
+            _LOGGER.warning(
+                "Could not persist station %s data: %s",
+                self.config_entry.data[CONF_STATION_ID],
+                err,
+            )
+        return data
 
     async def _async_fetch_station_data(self) -> dict[str, Any]:
         """Fetch station data with retry handling."""

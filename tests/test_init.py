@@ -86,6 +86,9 @@ class FakeCoordinator:
         )
         self.raise_first_refresh = False
 
+    async def async_restore(self) -> None:
+        """Track persisted payload restoration."""
+
     async def async_config_entry_first_refresh(self) -> None:
         """Track first refresh calls."""
         self.first_refresh_calls += 1

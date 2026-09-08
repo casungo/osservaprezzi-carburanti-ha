@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -69,3 +71,67 @@ def test_copy_integration_excludes_bytecode(
     copied = config_dir / "custom_components" / regression_script.DOMAIN
     assert (copied / "__init__.py").is_file()
     assert not (copied / "__pycache__").exists()
+
+
+def test_docker_config_declares_profile_and_station_ids(
+    regression_script: ModuleType,
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+
+    regression_script._write_ha_config(config_dir, "lived", ["54233", "54234"])
+
+    configuration = (config_dir / "configuration.yaml").read_text(encoding="utf-8")
+    assert "ha_docker_probe:" in configuration
+    assert "profile: lived" in configuration
+    assert "    - '54233'" in configuration
+    assert "    - '54234'" in configuration
+
+
+def test_lived_profile_requires_persisted_home_assistant_data(
+    regression_script: ModuleType,
+    tmp_path: Path,
+) -> None:
+    storage = tmp_path / ".storage"
+    storage.mkdir()
+    (storage / "core.config_entries").write_text(
+        '{"data": {"entries": [{"domain": "osservaprezzi_carburanti"}]}}',
+        encoding="utf-8",
+    )
+    (storage / "core.entity_registry").write_text(
+        '{"data": {"entities": [{"platform": "osservaprezzi_carburanti"}]}}',
+        encoding="utf-8",
+    )
+    (storage / "osservaprezzi_carburanti_cache.json").write_text(
+        '{"stations": {"54233": {}}}',
+        encoding="utf-8",
+    )
+
+    assert regression_script._assert_persisted_profile(tmp_path) == {
+        "config_entries": 1,
+        "entity_registry_entries": 1,
+        "cached_stations": 1,
+    }
+
+
+def test_lived_profile_requires_multi_day_recorder_history(
+    regression_script: ModuleType,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "lived-profile-builder.json").write_text(
+        '{"boot_count": 4}', encoding="utf-8"
+    )
+    database_path = tmp_path / "home-assistant_v2.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("CREATE TABLE states (last_updated_ts REAL)")
+        connection.executemany(
+            "INSERT INTO states VALUES (?)",
+            [(time.time() - offset * 86400,) for offset in range(14)],
+        )
+
+    summary = regression_script._assert_aged_profile(tmp_path)
+
+    assert summary["boots"] == 4
+    assert summary["history_days"] == 14
+    assert summary["history_span_days"] == 13.0

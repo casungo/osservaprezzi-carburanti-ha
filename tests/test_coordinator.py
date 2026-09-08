@@ -29,6 +29,9 @@ def _make_coordinator() -> CarburantiDataUpdateCoordinator:
     coordinator.config_entry = MagicMock(data={CONF_STATION_ID: "123"})
     coordinator.csv_manager = MagicMock()
     coordinator.data = None
+    coordinator._store = MagicMock()
+    coordinator._store.async_save = AsyncMock()
+    coordinator._store.async_load = AsyncMock(return_value=None)
     return coordinator
 
 
@@ -289,6 +292,30 @@ class TestCoordinatorUpdates:
         assert coordinator.config_entry is entry
         assert coordinator.csv_manager is csv_manager
 
+    def test_async_restore_loads_a_persisted_payload(self) -> None:
+        coordinator = _make_coordinator()
+        coordinator._store.async_load = AsyncMock(return_value={"cached": True})
+
+        asyncio.run(coordinator.async_restore())
+
+        assert coordinator.data == {"cached": True}
+
+    def test_async_restore_ignores_invalid_payload(self) -> None:
+        coordinator = _make_coordinator()
+        coordinator._store.async_load = AsyncMock(return_value=["invalid"])
+
+        asyncio.run(coordinator.async_restore())
+
+        assert coordinator.data is None
+
+    def test_async_restore_ignores_storage_errors(self) -> None:
+        coordinator = _make_coordinator()
+        coordinator._store.async_load = AsyncMock(side_effect=OSError("offline"))
+
+        asyncio.run(coordinator.async_restore())
+
+        assert coordinator.data is None
+
     def test_async_update_data_initializes_csv_and_fetches_station(self) -> None:
         coordinator = _make_coordinator()
         coordinator.csv_manager.is_data_available.return_value = False
@@ -300,6 +327,15 @@ class TestCoordinatorUpdates:
         assert result == {"ok": True}
         coordinator.csv_manager.async_initialize.assert_awaited_once()
         coordinator._async_fetch_station_data.assert_awaited_once()
+        coordinator._store.async_save.assert_awaited_once_with({"ok": True})
+
+    def test_async_update_data_continues_when_storage_save_fails(self) -> None:
+        coordinator = _make_coordinator()
+        coordinator.csv_manager.is_data_available.return_value = True
+        coordinator._async_fetch_station_data = AsyncMock(return_value={"ok": True})
+        coordinator._store.async_save = AsyncMock(side_effect=OSError("read-only"))
+
+        assert asyncio.run(coordinator._async_update_data()) == {"ok": True}
 
     def test_async_update_data_continues_when_csv_initialization_fails(self) -> None:
         coordinator = _make_coordinator()

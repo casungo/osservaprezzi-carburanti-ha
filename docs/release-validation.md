@@ -78,12 +78,28 @@ Run the Docker regression when Docker is available:
 python scripts/ha_docker_regression.py
 ```
 
-This starts a real Home Assistant container, copies the custom integration, creates live config
-entries for known station IDs, checks module imports inside the HA runtime, waits for entities,
-and fails on integration startup tracebacks.
+The runner first boots an isolated builder container four times. The builder configures stations
+through Home Assistant's real config-flow manager and writes 14 days of synthetic state changes
+through the real state machine. Recorder stores them in SQLite. The runner then checkpoints and
+exports that profile, extracts it into a new directory, and uses that exported directory for the
+`lived` run. `fresh` runs against a separate empty directory.
 
-GitHub Actions runs this regression on the 1st and 15th of each month. It can also be started with
-manual workflow dispatch; the local command remains available for pre-release checks.
+A probe running inside Home Assistant checks actual entity states, service responses, setup-flow
+behavior, duplicate handling, and entity IDs after reload in both profiles. The runner also checks
+the exported config entries, entity registry, station cache, Recorder history, module imports,
+nearby discovery, and startup tracebacks. The dates are synthetic, but the four Docker boots,
+state writes, Recorder persistence, export, restore, and final checks use real Home Assistant.
+
+It also creates an aged profile with `v2.6.0-beta.1`, replaces that profile's integration with the
+current checkout, and runs the same probe as `upgrade`. The test fails if the previous and current
+integration versions are accidentally identical.
+
+The final outage/recovery pass reuses the exported lived profile. It blocks only the two MIMIT
+hostnames, confirms cached station entities remain available after a restart, then restores network
+access and verifies refresh plus service behavior on the same data.
+
+GitHub Actions runs this regression on pushes, pull requests, the 1st and 15th of every month, and
+manual workflow dispatch. The local command remains available for pre-release checks.
 
 ## Live upstream contract
 

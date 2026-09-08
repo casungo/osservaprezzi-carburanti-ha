@@ -26,7 +26,7 @@ For a prerelease, include a valid SemVer suffix. A plain `X.Y.Z` is never accept
 prerelease:
 
 ```bash
-VERSION=2.6.0-beta.2
+VERSION=2.6.0-beta.3
 TAG="v${VERSION}"
 BRANCH=master
 TARGET_COMMIT="$(git rev-parse HEAD)"

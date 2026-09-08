@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0-beta.3] - 2026-09-08
+
+### Added
+- Restore the last successful station payload before entity setup so cached station data survives restarts and temporary upstream outages
+- Add a real Home Assistant Docker regression for lived profiles, upgrades, outages, and recovery
+
+### Changed
+- Make the Docker upgrade regression fetch release tags in CI
+
 ## [2.6.0-beta.2] - 2026-09-07
 
 ### Added

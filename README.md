@@ -4,6 +4,29 @@
 
 Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi service provided by the Italian Ministry of Enterprises and Made in Italy (MIMIT).
 
+## Preview
+
+Fuel prices from two public stations, displayed with Home Assistant's built-in dashboard cards.
+
+![Home Assistant dashboard showing petrol and diesel prices for two stations](docs/images/fuel-dashboard.png)
+
+<details>
+<summary>Station discovery and multi-station setup</summary>
+
+Choose Home location, manual coordinates, registry search, or a station ID.
+
+![Station setup dialog with the four discovery methods](docs/images/setup-methods.png)
+
+Select several stations from the search results in one setup flow.
+
+![Nearby station search results with two stations selected](docs/images/station-selection.png)
+
+</details>
+
+Captured on 3 October 2026 with Home Assistant 2026.9.4 and integration 2.6.0 in an isolated demo
+profile. The location used for discovery is central Rome, not a user's home. Station metadata and
+prices come from MIMIT; the prices shown are a snapshot, not a current price quote.
+
 ## ✨ Features
 
 📊 **Automatic Fuel Sensors**: Automatically creates a sensor for each fuel type available at the selected station.

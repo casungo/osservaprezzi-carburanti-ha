@@ -4,6 +4,30 @@
 
 Integrazione per Home Assistant che recupera i prezzi dei carburanti dal servizio Osservaprezzi del Ministero delle Imprese e del Made in Italy (MIMIT).
 
+## Anteprima
+
+Prezzi di due stazioni pubbliche, mostrati con le schede dashboard integrate in Home Assistant.
+
+![Dashboard Home Assistant con i prezzi di benzina e gasolio di due stazioni](docs/images/fuel-dashboard.png)
+
+<details>
+<summary>Ricerca e configurazione di più stazioni</summary>
+
+Scegli tra posizione di casa, coordinate manuali, ricerca nel registro o ID della stazione.
+
+![Dialogo di configurazione con i quattro metodi di ricerca delle stazioni](docs/images/setup-methods.png)
+
+Seleziona più stazioni dai risultati della ricerca in un unico flusso di configurazione.
+
+![Risultati della ricerca di stazioni vicine con due stazioni selezionate](docs/images/station-selection.png)
+
+</details>
+
+Immagini acquisite il 3 ottobre 2026 con Home Assistant 2026.9.4 e integrazione 2.6.0, in un profilo
+demo separato con interfaccia in inglese. La ricerca usa una posizione nel centro di Roma, non
+l'abitazione di un utente. Dati delle stazioni e prezzi provengono dal MIMIT; i prezzi mostrati si
+riferiscono alla cattura e non sono una quotazione attuale.
+
 ## ✨ Caratteristiche
 
 📊 **Sensori Automatici del Carburante**: Crea automaticamente un sensore per ogni tipo di carburante disponibile nella stazione selezionata.

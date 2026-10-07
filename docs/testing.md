@@ -129,3 +129,11 @@ PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_schedule.py --read-pairs 1000
 ```
 
 Both are synthetic microbenchmarks, not end-to-end performance tests.
+
+## Release KPI comparison
+
+Run `make kpi` after integration changes and before releases. It compares the preceding
+stable release with the current integration inside identical Home Assistant containers,
+using one captured real MIMIT snapshot. CI saves the measurements on pushes and PRs.
+See [KPI monitoring](kpi-monitoring.md) for definitions, thresholds, reproduction,
+report locations, and the distinction between replay measurements and live behavior.

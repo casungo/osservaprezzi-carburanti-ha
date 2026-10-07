@@ -76,9 +76,22 @@ entity reads. Existing entity IDs and config-entry data remain compatible, with 
   40.779 ms. Both encodings decoded to the same data.
 - On 1,000 synthetic next-change property-read pairs and 30 alternating samples, cached reads
   took a median 3.823 ms versus 103.258 ms when recomputing both properties (27.0x faster).
+- A repeatable real-Home-Assistant comparison against `v2.6.0` used two alternating runs per
+  version, the same HA image, four stations, and the same captured MIMIT responses. All price,
+  registry, request-count, listener, timer, task, reload, and upgrade guardrails passed; the
+  upgrade preserved all existing entity IDs. The candidate exposed 53 entities versus 49 because
+  this release adds entities.
+- In that short replay, the registry cache file fell from 8,821,562 to 6,658,828 bytes (-24.5%),
+  the search service median fell from 78.207 to 56.285 ms (-28.0%), and 1,000 cached next-change
+  reads fell from 149.966 to 6.362 ms (-95.8%). Full refresh and reload medians were effectively
+  unchanged (8,002.313 vs 8,002.665 ms; 2,001.832 vs 2,002.058 ms). No metric crossed the
+  provisional regression guardrails; the registry parse median rose 10.4%, still within its
+  guardrail. Two runs are directional evidence, not a statistical confidence interval.
 - The live MIMIT payload contract passed. The Home Assistant Docker regression passed `fresh`,
   `lived`, `upgrade`, `outage`, and `recovery`, including upgrade from `v2.6.0-beta.1`.
-- Ruff, mypy, and hassfest passed locally. Remote CI and HACS checks run against the pushed beta.
+- Ruff, mypy, and hassfest passed locally. The release comparison procedure and raw measurements
+  are documented in [docs/kpi-monitoring.md](docs/kpi-monitoring.md); its JSON and Markdown reports
+  accompany the beta release.
 
 The performance numbers are synthetic microbenchmarks, not end-to-end startup or MIMIT latency
 measurements. Full Italian notes for every item are in [docs/quick-wins.md](docs/quick-wins.md).

@@ -30,3 +30,6 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Local release KPI evidence and disposable HA profiles
+/artifacts/kpi/

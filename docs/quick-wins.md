@@ -113,10 +113,31 @@ server MIMIT. La regressione d'integrazione reale è un controllo separato.
 
 ## Verifiche
 
-- 481 test unitari passati, 7 saltati; coverage dell'integrazione al 100%.
+- 491 test unitari passati, 7 saltati; coverage dell'integrazione al 100%.
 - 15 test con Home Assistant reale e 1 contratto live MIMIT passati.
 - Ruff, mypy e hassfest passati.
 - Docker con API ufficiale passato nei profili `fresh`, `lived`, `upgrade`, `outage` e `recovery`.
 - Il profilo persistente ha ripristinato 4 config entry, 53 entity-registry entry, 23.766 stazioni
   in cache e 14 giorni sintetici di Recorder. L'upgrade da `v2.6.0-beta.1` è passato.
-- CI e HACS sul commit beta fanno parte della verifica remota successiva al push.
+
+## Confronto end-to-end con `v2.6.0`
+
+Il confronto ha eseguito due round alternati per versione in Home Assistant reale, con la stessa
+immagine, quattro stazioni e lo stesso snapshot delle risposte MIMIT. Prezzi, contenuto del
+registro, conteggio delle richieste, identità, listener, timer e task hanno superato i controlli;
+l'upgrade della configurazione persistita non ha cambiato gli ID esistenti. La beta espone 53
+entità contro 49, per le nuove entità introdotte.
+
+| Misura | `v2.6.0` | `2.7.0-beta.1` | Differenza |
+| --- | ---: | ---: | ---: |
+| File cache registro | 8.821.562 byte | 6.658.828 byte | −24,5% |
+| Servizio di ricerca, mediana | 78,207 ms | 56,285 ms | −28,0% |
+| 1.000 letture prossimo cambio | 149,966 ms | 6,362 ms | −95,8% |
+| Refresh completo, mediana | 8.002,313 ms | 8.002,665 ms | invariato |
+| Reload, mediana | 2.001,832 ms | 2.002,058 ms | invariato |
+
+Nessuna misura ha superato i guardrail provvisori di regressione. Il parsing del registro è
+aumentato del 10,4%, entro la soglia prevista. I due round sono evidenza direzionale, non una
+prova statistica; il replay non misura latenza live MIMIT, disponibilità prolungata o crescita
+della memoria su più giorni. Il report grezzo con campioni, provenienza e limiti è pubblicato
+insieme alla pre-release; metodo e ripetizione sono descritti in [docs/kpi-monitoring.md](kpi-monitoring.md).

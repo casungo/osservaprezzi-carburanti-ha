@@ -1,4 +1,4 @@
-.PHONY: test test-ha lint typecheck check hassfest hacs
+.PHONY: test test-ha lint typecheck check hassfest hacs kpi
 
 PYTHON ?= .venv/bin/python
 HA_PYTHON ?= .venv-ha/bin/python
@@ -34,3 +34,9 @@ hacs:
 		-e INPUT_COMMENT=false \
 		-e REPOSITORY_REF="$$ref" \
 		ghcr.io/hacs/action:main
+
+# Resolve the preceding stable release by default; override KPI_BASELINE when needed.
+KPI_BASELINE ?= previous-stable
+KPI_ARGS ?=
+kpi:
+	$(PYTHON) scripts/benchmark_release.py --baseline $(KPI_BASELINE) $(KPI_ARGS)

@@ -150,3 +150,42 @@ jobs:
         env:
           OSSERVAPREZZI_LIVE_API: "1"
         run: python -m pytest tests/test_live_api_contract.py -q
+
+  release-kpis:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out code and release tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Pull Home Assistant measurement image
+        run: docker pull ghcr.io/home-assistant/home-assistant:stable
+
+      - name: Compare release KPIs against preceding stable release
+        run: python3 scripts/benchmark_release.py --output artifacts/kpi/ci
+
+      - name: Add KPI comparison to the workflow summary
+        if: always()
+        run: |
+          if [ -f artifacts/kpi/ci/report.md ]; then
+            cat artifacts/kpi/ci/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Preserve KPI evidence even when a guardrail fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-kpis-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: warn
+          path: |
+            artifacts/kpi/ci/*.json
+            artifacts/kpi/ci/*.md
+            artifacts/kpi/ci/*.log
+            artifacts/kpi/ci/inputs/*.json
+            artifacts/kpi/ci/inputs/*.csv
+            artifacts/kpi/ci/scripts/*.py

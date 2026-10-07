@@ -252,3 +252,13 @@ Before finalizing a change:
 - Check `git diff` and make sure unrelated local changes are not reverted.
 - Mention any validators that could not be run.
 - Keep the final summary focused on behavior changed and tests run.
+
+## Release KPI measurements
+
+After integration changes and before releases, run `make kpi` in addition to pytest and
+the real Home Assistant Docker regression. It compares the current integration with the
+preceding stable tag using the same captured MIMIT responses and pinned HA image ID.
+Use `KPI_BASELINE=v2.6.0` for an explicit comparison. Preserve the generated JSON report,
+report the performance flags and correctness failures, and distinguish short replay
+measurements from live upstream behavior and long-running memory observations.
+See `docs/kpi-monitoring.md` for definitions, thresholds, and repeatable commands.

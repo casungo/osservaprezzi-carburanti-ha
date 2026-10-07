@@ -144,3 +144,7 @@ The two existing synthetic JSON and schedule microbenchmarks remain useful for
 isolating a change. Their output is separate from this report's actual version-to-version
 HA measurements. A release decision should include the quantitative report, test and
 Docker results, investigation of performance flags, and a statement of unmeasured scope.
+
+For a 24-hour observation of real cron, Recorder, RSS, reloads and controlled HTTP
+failure recovery, see [HA duration measurements](soak-monitoring.md). The duration
+runner complements these short comparisons and retains independent progress samples.

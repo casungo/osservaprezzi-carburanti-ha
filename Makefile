@@ -40,3 +40,9 @@ KPI_BASELINE ?= previous-stable
 KPI_ARGS ?=
 kpi:
 	$(PYTHON) scripts/benchmark_release.py --baseline $(KPI_BASELINE) $(KPI_ARGS)
+
+# Bounded real HA duration comparison; supply retained inputs and a new output path.
+SOAK_ARGS ?=
+.PHONY: soak
+soak:
+	$(PYTHON) scripts/soak_release.py $(SOAK_ARGS)

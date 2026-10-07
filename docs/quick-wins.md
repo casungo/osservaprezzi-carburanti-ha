@@ -111,6 +111,15 @@ PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_schedule.py --read-pairs 1000
 Sono microbenchmark sintetici: non misurano l'avvio completo di Home Assistant né la latenza dei
 server MIMIT. La regressione d'integrazione reale è un controllo separato.
 
+È disponibile anche `make soak` per confronti di durata con callback cron reali in Home Assistant,
+reload, fault HTTP controllati e recovery. Il controllo breve è terminato con otto callback cron,
+tre reload e due interruzioni HTTP per versione. Durante entrambe le interruzioni, quattro stazioni
+hanno mantenuto prezzi validi; dopo il ripristino del servizio sono tornate quattro risposte HTTP
+positive in circa otto secondi. Non sono rimasti timer, listener o task nominati dopo l'unload. La
+prova dura otto minuti e non consente di stimare una pendenza di memoria. La beta non dichiara un
+risultato di 24 ore. Metodo, limiti e comandi sono in
+[docs/soak-monitoring.md](soak-monitoring.md), con [report e campioni grezzi](benchmarks/2026-10-08-ha-duration-v2.6.0-v2.7.0-beta.1.md).
+
 ## Verifiche
 
 - 491 test unitari passati, 7 saltati; coverage dell'integrazione al 100%.

@@ -34,12 +34,20 @@ class _MockCoordinatorEntity(_MockEntity):
         self.hass = coordinator if args or kwargs else getattr(coordinator, "hass", None)
         self.data = None
 
+    def _handle_coordinator_update(self):
+        """Mock the base coordinator entity state-write callback."""
+
     async def async_shutdown(self):
         """Mock shutdown hook."""
 
 
 class _SentinelHomeAssistantError(Exception):
     """Stands in for homeassistant.exceptions.HomeAssistantError."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.translation_domain = kwargs.get("translation_domain")
+        self.translation_key = kwargs.get("translation_key")
 
 
 class _SentinelUpdateFailed(_SentinelHomeAssistantError):
@@ -53,12 +61,16 @@ class _SentinelConfigEntryNotReady(_SentinelHomeAssistantError):
 class _MockConfigFlow:
     """Minimal config flow test double."""
 
+    def add_suggested_values_to_schema(self, schema, values):
+        """Leave schemas intact in lightweight tests."""
+        return schema
+
     def __init_subclass__(cls, **kwargs):
         """Accept Home Assistant's domain keyword during subclassing."""
         super().__init_subclass__()
 
 
-class _MockOptionsFlow:
+class _MockOptionsFlow(_MockConfigFlow):
     """Minimal options flow test double."""
 
     def __init__(self, config_entry=None):
@@ -73,6 +85,7 @@ def _mock_ha_modules():
         "homeassistant.components",
         "homeassistant.components.diagnostics",
         "homeassistant.components.sensor",
+        "homeassistant.components.button",
         "homeassistant.components.binary_sensor",
         "homeassistant.components.geo_location",
         "homeassistant.config_entries",
@@ -100,6 +113,7 @@ def _mock_ha_modules():
         if mod_name not in sys.modules:
             sys.modules[mod_name] = MagicMock()
 
+    sys.modules["homeassistant.components.button"].ButtonEntity = _MockEntity
     sys.modules["homeassistant.components.sensor"].SensorEntity = _MockSensorEntity
     sys.modules["homeassistant.components.sensor"].SensorStateClass = MagicMock(
         MEASUREMENT="measurement"
@@ -119,11 +133,11 @@ def _mock_ha_modules():
     sys.modules["homeassistant.helpers.storage"].Store = MagicMock()
     sys.modules["homeassistant.helpers.entity"].DeviceInfo = dict
     sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock(
-        DIAGNOSTIC="diagnostic"
+        DIAGNOSTIC="diagnostic", CONFIG="config"
     )
     sys.modules["homeassistant.helpers.typing"].StateType = object
     sys.modules["homeassistant.const"].Platform = MagicMock(
-        SENSOR="sensor",
+        SENSOR="sensor", BUTTON="button",
         BINARY_SENSOR="binary_sensor",
         GEO_LOCATION="geo_location",
     )

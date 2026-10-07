@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from functools import partial
 from typing import Any
 
@@ -19,6 +20,7 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
 )
+from homeassistant.util import dt as dt_util
 
 from .api import fetch_station_data
 from .const import (
@@ -32,6 +34,7 @@ from .const import (
 )
 from .cron_helper import get_next_run_time, validate_cron_expression
 from .csv_manager import RegistrySnapshot, RegistryUnavailableError, get_shared_csv_manager
+from .data_helpers import as_coordinate, parse_coordinate
 from .discovery import StationCandidate, find_nearby_stations, find_stations_by_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,10 +51,21 @@ DEFAULT_RADIUS_KM = 5
 DEFAULT_RESULT_LIMIT = 20
 MAX_RADIUS_KM = 200
 MAX_RESULT_LIMIT = 100
+CONF_REFRESH_SCHEDULE = "refresh_schedule"
+REFRESH_SCHEDULES = {
+    "daily": DEFAULT_CRON_EXPRESSION,
+    "twice_daily": "30 7,19 * * *",
+    "every_six_hours": "0 */6 * * *",
+    "weekdays": "0 8 * * 1-5",
+}
 
 
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""
+
+
+class RateLimited(CannotConnect):
+    """Error to indicate that the upstream service rate-limited the request."""
 
 
 class InvalidStation(HomeAssistantError):
@@ -72,6 +86,8 @@ async def _validate_station(hass: HomeAssistant, station_id: str) -> dict[str, A
     except aiohttp.ClientResponseError as err:
         if err.status == 404:
             raise InvalidStation("Station not found")
+        if err.status == 429:
+            raise RateLimited("Service rate limit exceeded") from err
         raise CannotConnect(f"Service error: {err.status}") from err
     except (aiohttp.ClientError, TimeoutError) as err:
         raise CannotConnect(f"Connection error: {err}")
@@ -81,6 +97,19 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     """Handle the config flow for Osservaprezzi Carburanti."""
 
     VERSION = 2
+
+    def __init__(self) -> None:
+        """Keep search suggestions only for the lifetime of this flow."""
+        super().__init__()
+        self._search_inputs: dict[str, dict[str, Any]] = {}
+        self._nearby_candidates: tuple[StationCandidate, ...] = ()
+        self._registry_is_stale = False
+        self._registry_updated = "—"
+        self._search_step_id = "home"
+        self._results_limited = False
+        self._result_limit = DEFAULT_RESULT_LIMIT
+        self._failed_station = ""
+        self._failed_station_id = ""
 
     @staticmethod
     @callback
@@ -99,17 +128,13 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         await self.async_set_unique_id(f"station_{normalized_station_id}")
         self._abort_if_unique_id_configured()
 
-        station_info = station_info or await _validate_station(
-            self.hass, normalized_station_id
-        )
+        station_info = station_info or await _validate_station(self.hass, normalized_station_id)
         return self.async_create_entry(
             title=station_info["name"],
             data={CONF_STATION_ID: normalized_station_id},
         )
 
-    async def async_step_import(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_import(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Create one entry requested by a batch selection."""
         if user_input is None:
             return self.async_abort(reason="invalid_station")
@@ -128,22 +153,24 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 station_id = str(user_input.get(CONF_STATION_ID, ""))
                 return await self._async_create_station_entry(station_id)
             except InvalidStation:
-                errors["base"] = "invalid_station"
+                errors[CONF_STATION_ID] = "invalid_station"
+            except RateLimited:
+                errors[CONF_STATION_ID] = "rate_limited"
             except CannotConnect:
-                errors["base"] = "cannot_connect"
+                errors[CONF_STATION_ID] = "cannot_connect"
             except (TypeError, ValueError) as err:
                 _LOGGER.exception("Unexpected station validation error: %s", err)
-                errors["base"] = "unknown"
+                errors[CONF_STATION_ID] = "unknown"
 
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema({vol.Required(CONF_STATION_ID): str}),
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema({vol.Required(CONF_STATION_ID): str}), user_input
+            ),
             errors=errors,
         )
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Offer local discovery or manual station ID setup."""
         if user_input is not None and CONF_STATION_ID in user_input:
             return await self._handle_station_input(user_input, "station_id")
@@ -158,25 +185,19 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         """Set up a station from its Osservaprezzi ID."""
         return await self._handle_station_input(user_input, "station_id")
 
-    async def async_step_home(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_home(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Find stations near Home Assistant's configured home."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            latitude = getattr(self.hass.config, "latitude", None)
-            longitude = getattr(self.hass.config, "longitude", None)
-            if (
-                isinstance(latitude, bool)
-                or isinstance(longitude, bool)
-                or not isinstance(latitude, (int, float))
-                or not isinstance(longitude, (int, float))
-            ):
+            self._search_inputs["home"] = dict(user_input)
+            latitude = as_coordinate(self.hass.config.latitude, -90, 90)
+            longitude = as_coordinate(self.hass.config.longitude, -180, 180)
+            if latitude is None or longitude is None:
                 errors["base"] = "home_location_unavailable"
             else:
                 result, error = await self._async_search_nearby(
-                    latitude=float(latitude),
-                    longitude=float(longitude),
+                    latitude=latitude,
+                    longitude=longitude,
                     user_input=user_input,
                     source_step="home",
                 )
@@ -187,7 +208,10 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 
         return self.async_show_form(
             step_id="home",
-            data_schema=self._nearby_search_schema(),
+            data_schema=self.add_suggested_values_to_schema(
+                self._nearby_search_schema(),
+                self._search_inputs.get("home"),
+            ),
             errors=errors,
         )
 
@@ -197,10 +221,11 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         """Find stations near manually supplied coordinates."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            self._search_inputs["coordinates"] = dict(user_input)
             try:
-                latitude = float(user_input[CONF_LATITUDE])
-                longitude = float(user_input[CONF_LONGITUDE])
-                if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                latitude = parse_coordinate(user_input[CONF_LATITUDE], -90, 90)
+                longitude = parse_coordinate(user_input[CONF_LONGITUDE], -180, 180)
+                if latitude is None or longitude is None:
                     raise ValueError("Coordinates are out of range")
                 result, error = await self._async_search_nearby(
                     latitude=latitude,
@@ -217,25 +242,33 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 
         return self.async_show_form(
             step_id="coordinates",
-            data_schema=self._nearby_search_schema(
-                {
-                    vol.Required(CONF_LATITUDE): vol.Coerce(float),
-                    vol.Required(CONF_LONGITUDE): vol.Coerce(float),
-                }
+            data_schema=self.add_suggested_values_to_schema(
+                self._nearby_search_schema(
+                    {
+                        vol.Required(CONF_LATITUDE): self._coordinate_selector(
+                            minimum=-90,
+                            maximum=90,
+                        ),
+                        vol.Required(CONF_LONGITUDE): self._coordinate_selector(
+                            minimum=-180,
+                            maximum=180,
+                        ),
+                    }
+                ),
+                self._search_inputs.get("coordinates"),
             ),
             errors=errors,
         )
 
-    async def async_step_area(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_area(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Find stations by municipality and optional province."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            self._search_inputs["area"] = dict(user_input)
             try:
-                snapshot = await get_shared_csv_manager(
-                    self.hass
-                ).async_ensure_registry(allow_stale=True)
+                snapshot = await get_shared_csv_manager(self.hass).async_ensure_registry(
+                    allow_stale=True
+                )
                 limit, text_filter, station_type = self._search_filters(user_input)
                 candidates = await self.hass.async_add_executor_job(
                     partial(
@@ -245,11 +278,11 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                         province=str(user_input.get(CONF_PROVINCE, "")),
                         text_filter=text_filter,
                         station_type=station_type,
-                        limit=limit,
+                        limit=limit + 1,
                     )
                 )
                 if candidates:
-                    self._store_search_results(candidates, snapshot, "area")
+                    self._store_search_results(candidates[:limit], snapshot, "area", len(candidates) > limit, limit)
                     return await self._async_step_select_station()
                 errors["base"] = "no_stations_found"
             except RegistryUnavailableError:
@@ -260,7 +293,10 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 
         return self.async_show_form(
             step_id="area",
-            data_schema=self._area_search_schema(),
+            data_schema=self.add_suggested_values_to_schema(
+                self._area_search_schema(),
+                self._search_inputs.get("area"),
+            ),
             errors=errors,
         )
 
@@ -278,9 +314,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             if not 0 < radius_km <= MAX_RADIUS_KM:
                 raise ValueError("Nearby search radius is out of range")
             limit, text_filter, station_type = self._search_filters(user_input)
-            snapshot = await get_shared_csv_manager(
-                self.hass
-            ).async_ensure_registry(allow_stale=True)
+            snapshot = await get_shared_csv_manager(self.hass).async_ensure_registry(
+                allow_stale=True
+            )
             candidates = await self.hass.async_add_executor_job(
                 partial(
                     find_nearby_stations,
@@ -288,14 +324,20 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                     latitude=latitude,
                     longitude=longitude,
                     radius_km=radius_km,
-                    limit=limit,
+                    limit=limit + 1,
                     text_filter=text_filter,
                     station_type=station_type,
                 )
             )
             if not candidates:
                 return None, "no_stations_found"
-            self._store_search_results(candidates, snapshot, source_step)
+            self._store_search_results(
+                candidates[:limit],
+                snapshot,
+                source_step,
+                len(candidates) > limit,
+                limit,
+            )
             return await self._async_step_select_station(), None
         except RegistryUnavailableError:
             return None, "registry_unavailable"
@@ -313,12 +355,19 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         station_type = str(user_input.get(CONF_STATION_TYPE, "")).strip() or None
         return limit, text_filter, station_type
 
-    @staticmethod
-    def _common_search_fields() -> dict[Any, Any]:
+    def _common_search_fields(self) -> dict[Any, Any]:
         """Return common optional registry search fields."""
+        station_types = self._registry_station_types()
+        station_type_selector: Any = (
+            SelectSelector(
+                SelectSelectorConfig(options=list(station_types), custom_value=True)
+            )
+            if station_types
+            else str
+        )
         return {
             vol.Optional(CONF_TEXT_FILTER, default=""): str,
-            vol.Optional(CONF_STATION_TYPE, default=""): str,
+            vol.Optional(CONF_STATION_TYPE, default=""): station_type_selector,
             vol.Required(
                 CONF_RESULT_LIMIT,
                 default=DEFAULT_RESULT_LIMIT,
@@ -332,16 +381,13 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             ),
         }
 
-    @classmethod
     def _nearby_search_schema(
-        cls,
+        self,
         extra_fields: dict[Any, Any] | None = None,
     ) -> vol.Schema:
         """Build a coordinate-based search schema."""
         fields = dict(extra_fields or {})
-        fields[
-            vol.Required(CONF_RADIUS_KM, default=DEFAULT_RADIUS_KM)
-        ] = NumberSelector(
+        fields[vol.Required(CONF_RADIUS_KM, default=DEFAULT_RADIUS_KM)] = NumberSelector(
             NumberSelectorConfig(
                 min=0.1,
                 max=MAX_RADIUS_KM,
@@ -350,32 +396,49 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 mode=NumberSelectorMode.BOX,
             )
         )
-        fields.update(cls._common_search_fields())
+        fields.update(self._common_search_fields())
         return vol.Schema(fields)
 
-    @classmethod
-    def _area_search_schema(cls) -> vol.Schema:
+    def _area_search_schema(self) -> vol.Schema:
         """Build a municipality-based search schema."""
         fields: dict[Any, Any] = {
             vol.Required(CONF_MUNICIPALITY): str,
             vol.Optional(CONF_PROVINCE, default=""): str,
         }
-        fields.update(cls._common_search_fields())
+        fields.update(self._common_search_fields())
         return vol.Schema(fields)
+
+    @staticmethod
+    def _coordinate_selector(*, minimum: float, maximum: float) -> NumberSelector:
+        """Return a bounded numeric coordinate selector."""
+        return NumberSelector(
+            NumberSelectorConfig(
+                min=minimum,
+                max=maximum,
+                step="any",
+                mode=NumberSelectorMode.BOX,
+            )
+        )
+
+    def _registry_station_types(self) -> tuple[str, ...]:
+        """Read station-type suggestions from the in-memory registry cache."""
+        return get_shared_csv_manager(self.hass).registry_station_types()
 
     def _store_search_results(
         self,
         candidates: tuple[StationCandidate, ...],
         snapshot: RegistrySnapshot,
         source_step: str,
+        results_limited: bool = False,
+        result_limit: int = DEFAULT_RESULT_LIMIT,
     ) -> None:
         """Keep public station candidates and registry status for selection."""
-        self._nearby_candidates = candidates
+        self._nearby_candidates = tuple(candidates)
         self._registry_is_stale = snapshot.is_stale
-        self._registry_updated = (
-            snapshot.updated_at.isoformat() if snapshot.updated_at is not None else "—"
-        )
+        self._registry_updated = self._format_datetime(snapshot.updated_at)
         self._search_step_id = source_step
+        self._results_limited = results_limited
+        self._result_limit = result_limit
 
     async def async_step_select_station(
         self, user_input: dict[str, Any] | None = None
@@ -393,56 +456,88 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle a nearby station selection."""
-        candidates: tuple[StationCandidate, ...] = getattr(
-            self, "_nearby_candidates", ()
-        )
+        candidates = self._nearby_candidates
         if not candidates:
-            source_step = getattr(self, "_search_step_id", "home")
-            return await getattr(self, f"async_step_{source_step}")()
+            return await self._async_return_to_search_step()
 
         errors: dict[str, str] = {}
+        description_placeholders = self._selection_placeholders()
         configured_ids = {
-            str(entry.data.get(CONF_STATION_ID, ""))
-            for entry in self._async_current_entries()
+            str(entry.data.get(CONF_STATION_ID, "")) for entry in self._async_current_entries()
         }
+        candidate_ids = {candidate.station_id for candidate in candidates}
+        available_candidates = tuple(
+            candidate for candidate in candidates if candidate.station_id not in configured_ids
+        )
+        available_ids = {candidate.station_id for candidate in available_candidates}
+        if not available_candidates:
+            result = await self._async_return_to_search_step()
+            result["errors"] = {"base": "all_stations_configured"}
+            return result
+
+        selected_ids: list[str] = []
         if user_input is not None:
             try:
                 selected_value = user_input.get(CONF_STATION_ID, [])
-                selected_ids = (
-                    [selected_value]
-                    if isinstance(selected_value, str)
-                    else [str(station_id) for station_id in selected_value]
-                )
-                candidate_ids = {candidate.station_id for candidate in candidates}
+                selected_ids = self._deduplicate_station_ids(selected_value)
                 if not selected_ids or not set(selected_ids) <= candidate_ids:
                     raise InvalidStation("Station is not in the current nearby results")
 
                 new_selected_ids = [
-                    station_id
-                    for station_id in selected_ids
-                    if station_id not in configured_ids
+                    station_id for station_id in selected_ids if station_id not in configured_ids
                 ]
                 if not new_selected_ids:
                     errors["base"] = "already_configured"
                 else:
-                    station_info = {
-                        station_id: await _validate_station(self.hass, station_id)
-                        for station_id in new_selected_ids
-                    }
-                    for station_id in new_selected_ids[1:]:
-                        await self.hass.config_entries.flow.async_init(
-                            DOMAIN,
-                            context={"source": SOURCE_IMPORT},
-                            data={
-                                CONF_STATION_ID: station_id,
-                                "name": station_info[station_id]["name"],
-                            },
+                    station_info: dict[str, dict[str, Any]] = {}
+                    for station_id in new_selected_ids:
+                        try:
+                            station_info[station_id] = await _validate_station(
+                                self.hass, station_id
+                            )
+                        except (InvalidStation, CannotConnect) as err:
+                            if len(selected_ids) > 1:
+                                failed_candidate = next(
+                                    candidate
+                                    for candidate in candidates
+                                    if candidate.station_id == station_id
+                                )
+                                self._failed_station = failed_candidate.name
+                                self._failed_station_id = station_id
+                                description_placeholders.update(
+                                    {
+                                        "failed_station": self._failed_station,
+                                        "failed_station_id": station_id,
+                                    }
+                                )
+                                errors["base"] = "station_validation_failed"
+                            elif isinstance(err, InvalidStation):
+                                errors["base"] = "invalid_station"
+                            elif isinstance(err, RateLimited):
+                                errors["base"] = "rate_limited"
+                            else:
+                                errors["base"] = "cannot_connect"
+                            _LOGGER.warning(
+                                "Unable to validate selected station %s: %s", station_id, err
+                            )
+                            break
+                    else:
+                        for station_id in new_selected_ids[1:]:
+                            await self.hass.config_entries.flow.async_init(
+                                DOMAIN,
+                                context={"source": SOURCE_IMPORT},
+                                data={
+                                    CONF_STATION_ID: station_id,
+                                    "name": station_info[station_id]["name"],
+                                },
+                            )
+                        return await self._async_create_station_entry(
+                            new_selected_ids[0], station_info[new_selected_ids[0]]
                         )
-                    return await self._async_create_station_entry(
-                        new_selected_ids[0], station_info[new_selected_ids[0]]
-                    )
             except InvalidStation:
                 errors["base"] = "invalid_station"
+            except RateLimited:
+                errors["base"] = "rate_limited"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except (TypeError, ValueError) as err:
@@ -454,60 +549,133 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 value=candidate.station_id,
                 label=self._format_candidate_label(candidate),
             )
-            for candidate in candidates
+            for candidate in available_candidates
         ]
         step_id = (
             "select_station_stale"
-            if getattr(self, "_registry_is_stale", False)
+            if self._registry_is_stale
             else "select_station"
+        )
+        if self._results_limited:
+            step_id += "_limited"
+        description_placeholders.update(
+            {
+                "failed_station": self._failed_station,
+                "failed_station_id": self._failed_station_id,
+            }
         )
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema(
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Required(CONF_STATION_ID): SelectSelector(
+                            SelectSelectorConfig(options=options, multiple=True)
+                        )
+                    }
+                ),
                 {
-                    vol.Required(CONF_STATION_ID): SelectSelector(
-                        SelectSelectorConfig(options=options, multiple=True)
-                    )
+                    CONF_STATION_ID: [
+                        station_id
+                        for station_id in selected_ids
+                        if station_id in available_ids
+                    ]
                 }
+                if user_input is not None
+                else None,
             ),
             errors=errors,
-            description_placeholders={
-                "registry_updated": getattr(self, "_registry_updated", "—"),
-                "configured_count": str(
-                    sum(candidate.station_id in configured_ids for candidate in candidates)
-                ),
-                "result_count": str(len(candidates)),
-            },
+            description_placeholders=description_placeholders,
         )
+
+    async def async_step_select_station_limited(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle selection after a capped search."""
+        return await self.async_step_select_station(user_input)
+
+    async def async_step_select_station_stale_limited(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle selection from a capped stale registry search."""
+        return await self.async_step_select_station(user_input)
+
+    @staticmethod
+    def _deduplicate_station_ids(selected_value: Any) -> list[str]:
+        """Normalize a selector value and preserve its first-seen order."""
+        raw_ids = [selected_value] if isinstance(selected_value, str) else selected_value
+        selected_ids: list[str] = []
+        seen: set[str] = set()
+        for station_id in raw_ids:
+            normalized_id = str(station_id)
+            if normalized_id not in seen:
+                seen.add(normalized_id)
+                selected_ids.append(normalized_id)
+        return selected_ids
+
+    async def _async_return_to_search_step(self) -> ConfigFlowResult:
+        """Return to the known search step without dynamic method dispatch."""
+        search_steps = {
+            "home": self.async_step_home,
+            "coordinates": self.async_step_coordinates,
+            "area": self.async_step_area,
+        }
+        return await search_steps.get(self._search_step_id, self.async_step_home)()
+
+    def _selection_placeholders(self) -> dict[str, str]:
+        """Build selection description values for the current search."""
+        configured_ids = {
+            str(entry.data.get(CONF_STATION_ID, "")) for entry in self._async_current_entries()
+        }
+        return {
+            "registry_updated": self._registry_updated,
+            "configured_count": str(
+                sum(candidate.station_id in configured_ids for candidate in self._nearby_candidates)
+            ),
+            "result_count": str(len(self._nearby_candidates)),
+            "result_limit": str(self._result_limit),
+        }
+
+    @staticmethod
+    def _format_datetime(value: datetime | None) -> str:
+        """Format a timestamp in the Home Assistant local timezone."""
+        return dt_util.as_local(value).strftime("%Y-%m-%d %H:%M %Z") if value else "—"
 
     @staticmethod
     def _format_candidate_label(candidate: StationCandidate) -> str:
         """Build a compact, accessible label for a station choice."""
-        parts: list[str] = []
+        prefix = ""
         if candidate.distance_km is not None:
             distance = (
                 f"{candidate.distance_km:.1f}"
                 if candidate.distance_km < 10
                 else f"{candidate.distance_km:.0f}"
             )
-            parts.append(f"{distance} km")
-        parts.append(candidate.name)
+            prefix = f"{distance} km · "
+        suffix = f" · ID {candidate.station_id}"
+        location = candidate.address or ", ".join(
+            value for value in (candidate.municipality, candidate.province) if value
+        )
+        parts = [candidate.name]
+        if location:
+            parts.append(location)
         if candidate.brand and candidate.brand.casefold() not in candidate.name.casefold():
             parts.append(candidate.brand)
         if candidate.station_type:
             parts.append(candidate.station_type)
-        location = candidate.address or ", ".join(
-            value for value in (candidate.municipality, candidate.province) if value
-        )
-        if location:
-            parts.append(location)
-        parts.append(f"ID {candidate.station_id}")
-        label = " · ".join(parts)
+        label = prefix + " · ".join(parts) + suffix
         if len(label) <= 64:
             return label
-        suffix = f" · ID {candidate.station_id}"
-        prefix = " · ".join(parts[:-1])
-        return f"{prefix[: 64 - len(suffix) - 1].rstrip()}…{suffix}"
+
+        def shorten(value: str, budget: int) -> str:
+            return value if len(value) <= budget else value[: budget - 1].rstrip() + "…"
+
+        budget = 64 - len(prefix) - len(suffix)
+        if location:
+            name = shorten(candidate.name, min(18, budget // 2))
+            location = shorten(location, budget - len(name) - 3)
+            return prefix + name + " · " + location + suffix
+        return prefix + shorten(candidate.name, budget) + suffix
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -517,39 +685,41 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         errors: dict[str, str] = {}
         if user_input is not None:
             station_id = str(user_input.get(CONF_STATION_ID, "")).strip()
-            try:
-                station_info = await _validate_station(self.hass, station_id)
-                unique_id = f"station_{station_id}"
-                duplicate = any(
-                    other.entry_id != entry.entry_id and other.unique_id == unique_id
-                    for other in self._async_current_entries()
-                )
-                if duplicate:
-                    errors["base"] = "already_configured"
-                else:
+            unique_id = f"station_{station_id}"
+            duplicate = bool(station_id) and any(
+                other.entry_id != entry.entry_id and other.unique_id == unique_id
+                for other in self._async_current_entries()
+            )
+            if not station_id:
+                errors[CONF_STATION_ID] = "invalid_station"
+            elif duplicate:
+                errors[CONF_STATION_ID] = "already_configured"
+            else:
+                try:
+                    station_info = await _validate_station(self.hass, station_id)
                     return self.async_update_and_abort(
                         entry,
                         unique_id=unique_id,
                         title=station_info["name"],
                         data_updates={CONF_STATION_ID: station_id},
                     )
-            except InvalidStation:
-                errors["base"] = "invalid_station"
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except (TypeError, ValueError) as err:
-                _LOGGER.exception("Unexpected station reconfiguration error: %s", err)
-                errors["base"] = "unknown"
+                except InvalidStation:
+                    errors[CONF_STATION_ID] = "invalid_station"
+                except RateLimited:
+                    errors[CONF_STATION_ID] = "rate_limited"
+                except CannotConnect:
+                    errors[CONF_STATION_ID] = "cannot_connect"
+                except (TypeError, ValueError) as err:
+                    _LOGGER.exception("Unexpected station reconfiguration error: %s", err)
+                    errors[CONF_STATION_ID] = "unknown"
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_STATION_ID,
-                        default=entry.data[CONF_STATION_ID],
-                    ): str
-                }
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {vol.Required(CONF_STATION_ID, default=entry.data[CONF_STATION_ID]): str}
+                ),
+                user_input,
             ),
             errors=errors,
         )
@@ -558,76 +728,90 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
     """Handle an options flow for Osservaprezzi Carburanti."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Manage the options."""
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose a preset schedule or a custom cron expression."""
+        current_cron = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+        current_schedule = next(
+            (key for key, cron in REFRESH_SCHEDULES.items() if cron == current_cron),
+            "custom",
+        )
         errors: dict[str, str] = {}
         if user_input is not None:
-            cron_expr = user_input[CONF_CRON_EXPRESSION]
-            old_cron_expr = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
             try:
                 stale_hours = int(
                     user_input.get(
                         CONF_PRICE_STALE_HOURS,
-                        DEFAULT_PRICE_STALE_HOURS,
+                        self.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
                     )
                 )
             except (TypeError, ValueError):
-                errors["base"] = "invalid_stale_hours"
+                stale_hours = 0
+            if stale_hours not in PRICE_STALE_HOUR_OPTIONS:
+                errors[CONF_PRICE_STALE_HOURS] = "invalid_stale_hours"
             else:
-                if stale_hours not in PRICE_STALE_HOUR_OPTIONS:
-                    errors["base"] = "invalid_stale_hours"
-                elif validate_cron_expression(cron_expr):
-                    if cron_expr != old_cron_expr:
-                        _LOGGER.info(
-                            "Cron expression updated from '%s' to '%s' for %s",
-                            old_cron_expr,
-                            cron_expr,
-                            self.config_entry.title,
-                        )
-                    return self.async_create_entry(
-                        title="",
-                        data={
-                            CONF_CRON_EXPRESSION: cron_expr,
-                            CONF_PRICE_STALE_HOURS: stale_hours,
-                        },
+                self._stale_hours = stale_hours
+                schedule = user_input.get(CONF_REFRESH_SCHEDULE, "custom")
+                if schedule == "custom":
+                    # Accept existing clients that submit cron directly.
+                    return await self.async_step_custom(
+                        user_input if CONF_CRON_EXPRESSION in user_input else None
                     )
-                else:
-                    _LOGGER.warning(
-                        "Invalid cron expression submitted: '%s' for %s",
-                        cron_expr,
-                        self.config_entry.title,
-                    )
-                    errors["base"] = "invalid_cron_expression"
-
-        preview_expression = self.options.get(
-            CONF_CRON_EXPRESSION,
-            DEFAULT_CRON_EXPRESSION,
-        )
-        try:
-            next_run = get_next_run_time(preview_expression).isoformat()
-        except (ImportError, TypeError, ValueError):
-            next_run = "—"
+                if schedule in REFRESH_SCHEDULES:
+                    return self._save_schedule(REFRESH_SCHEDULES[schedule])
+                errors[CONF_REFRESH_SCHEDULE] = "invalid_schedule"
 
         schema = vol.Schema(
             {
-                vol.Required(
-                    CONF_CRON_EXPRESSION,
-                    default=self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION),
-                ): str,
+                vol.Required(CONF_REFRESH_SCHEDULE, default=current_schedule): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[*REFRESH_SCHEDULES, "custom"],
+                        translation_key="refresh_schedule",
+                    )
+                ),
                 vol.Required(
                     CONF_PRICE_STALE_HOURS,
-                    default=self.options.get(
-                        CONF_PRICE_STALE_HOURS,
-                        DEFAULT_PRICE_STALE_HOURS,
-                    ),
+                    default=self.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
                 ): vol.In(PRICE_STALE_HOUR_OPTIONS),
             }
         )
         return self.async_show_form(
             step_id="init",
-            data_schema=schema,
+            data_schema=self.add_suggested_values_to_schema(schema, user_input),
             errors=errors,
-            description_placeholders={"next_run": next_run},
+            description_placeholders={"next_run": self._next_run(current_cron)},
         )
+
+    async def async_step_custom(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Edit a custom cron while retaining the submitted value on errors."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            cron = user_input[CONF_CRON_EXPRESSION]
+            if validate_cron_expression(cron):
+                return self._save_schedule(cron)
+            errors[CONF_CRON_EXPRESSION] = "invalid_cron_expression"
+        current_cron = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+        schema = vol.Schema({vol.Required(CONF_CRON_EXPRESSION, default=current_cron): str})
+        return self.async_show_form(
+            step_id="custom",
+            data_schema=self.add_suggested_values_to_schema(schema, user_input),
+            errors=errors,
+            description_placeholders={"next_run": self._next_run(current_cron)},
+        )
+
+    def _save_schedule(self, cron: str) -> ConfigFlowResult:
+        """Keep the existing persisted cron and freshness option contract."""
+        return self.async_create_entry(
+            title="",
+            data={
+                CONF_CRON_EXPRESSION: cron,
+                CONF_PRICE_STALE_HOURS: self._stale_hours,
+            },
+        )
+
+    @staticmethod
+    def _next_run(cron: str) -> str:
+        """Return the next scheduled refresh when cron support is available."""
+        try:
+            return OsservaprezziCarburantiConfigFlow._format_datetime(get_next_run_time(cron))
+        except (ImportError, TypeError, ValueError):
+            return "—"

@@ -108,6 +108,11 @@ Quando configuri una stazione, l'integrazione crea automaticamente i seguenti se
 - Include attributi per nome del carburante, tipo di servizio, ora dell'ultimo aggiornamento e data di validità
 - Indica variazione, direzione `up`/`down`/`unchanged`, età in minuti e stato obsoleto del prezzo
 
+### Aggiornamento manuale
+
+Ogni dispositivo ha un pulsante **Aggiorna prezzi** che aggiorna solo quella stazione.
+Il pulsante permette di riprovare anche dopo un errore di connessione.
+
 ### Sensori Informazioni sulla Stazione
 
 - **Nome Stazione**: Il nome dell'impianto di carburante
@@ -141,15 +146,18 @@ Vengono creati sensori binari per ogni servizio disponibile presso la stazione:
 - 🚗 **Autolavaggio**: Servizi di lavaggio veicoli
 - 🔌 **Ricarica Elettrica**: Stazioni di ricarica veicoli elettrici
 
-### Configurazione dell'Espressione Cron
+### Frequenza di aggiornamento
 
-L'integrazione utilizza un'espressione cron per programmare gli aggiornamenti automatici. Le opzioni
+Nelle opzioni puoi scegliere un aggiornamento giornaliero alle 08:30, due aggiornamenti alle
+07:30 e 19:30, ogni 6 ore oppure nei giorni feriali alle 08:00. Scegli **Personalizzata**
+per inserire una cron a cinque campi. Le cron già configurate vengono mantenute.
+Gli orari seguono il fuso orario di Home Assistant. Le opzioni
 mostrano anche l'anteprima della prossima esecuzione e permettono di considerare i prezzi obsoleti
 dopo 6, 12, 24, 48, 72 o 168 ore.
 
 **Valore predefinito**: `30 8 * * *` (ogni giorno alle 8:30)
 
-Puoi modificare questa espressione per personalizzare quando desideri che vengano aggiornati i dati. Puoi usare [Crontab Guru](https://crontab.guru) per aiutarti a costruire e validare le tue espressioni cron. Questo strumento fornisce un'interfaccia utile per capire quando verranno eseguiti i tuoi aggiornamenti programmati.
+Con la frequenza Personalizzata puoi modificare questa espressione. Puoi usare [Crontab Guru](https://crontab.guru) per aiutarti a costruire e validare le tue espressioni cron. Questo strumento fornisce un'interfaccia utile per capire quando verranno eseguiti i tuoi aggiornamenti programmati.
 
 Esempi comuni:
 
@@ -297,6 +305,10 @@ response_variable: registry_results
 
 Il download diagnostico di Home Assistant include opzioni, conteggi del coordinator e stato del
 registro condiviso. ID stazione, identità, indirizzo e coordinate non vengono inclusi.
+
+Il confronto restituisce anche `price_delta`, `price_direction`, `price_age_minutes` e
+`price_is_stale`, usando la soglia impostata per ciascuna stazione. Un aggiornamento dei prezzi
+che fallisce o usa soltanto la cache viene segnalato come errore anche dall'azione e dal pulsante.
 
 ## Sviluppo
 

@@ -18,20 +18,19 @@ from .const import (
     ATTR_LATITUDE,
     ATTR_LONGITUDE,
     ATTR_PREVIOUS_PRICE,
-    ATTR_PRICE_AGE_MINUTES,
     ATTR_PRICE_CHANGED_AT,
-    ATTR_PRICE_DELTA,
-    ATTR_PRICE_DIRECTION,
-    ATTR_PRICE_IS_STALE,
     ATTR_STATION_ADDRESS,
     ATTR_STATION_BRAND,
     ATTR_STATION_NAME,
     ATTR_VALIDITY_DATE,
+    CONF_STATION_ID,
     CONF_PRICE_STALE_HOURS,
     DEFAULT_PRICE_STALE_HOURS,
     DOMAIN,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
+from .data_helpers import fuel_display_name, station_display_name
+from .price_metadata import price_metadata as _price_metadata
 from .entity import (
     OsservaprezziBaseEntity,
     ScheduleAwareEntity,
@@ -41,14 +40,14 @@ from .entity import (
 )
 
 INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
-    ("name", "Nome", "mdi:gas-station"),
-    ("nomeImpianto", "Nome impianto", "mdi:gas-station"),
-    ("id", "ID Osservaprezzi", "mdi:identifier"),
-    ("brand", "Marchio", "mdi:tag"),
-    ("company", "Società", "mdi:office-building"),
-    ("phoneNumber", "Telefono", "mdi:phone"),
-    ("email", "Email", "mdi:email"),
-    ("website", "Sito web", "mdi:web"),
+    ("name", "station_name", "mdi:gas-station"),
+    ("nomeImpianto", "station_display_name", "mdi:gas-station"),
+    ("id", "station_id", "mdi:identifier"),
+    ("brand", "station_brand", "mdi:tag"),
+    ("company", "station_company", "mdi:office-building"),
+    ("phoneNumber", "station_phone", "mdi:phone"),
+    ("email", "station_email", "mdi:email"),
+    ("website", "station_website", "mdi:web"),
 )
 
 
@@ -66,48 +65,6 @@ def _get_fuel_icon(fuel_name: str) -> str:
     return "mdi:currency-eur"
 
 
-def _price_metadata(
-    *,
-    price: Any,
-    previous_price: Any,
-    last_update: Any,
-    stale_hours: int,
-) -> dict[str, Any]:
-    """Return derived, presentation-safe price metadata."""
-    price_is_number = isinstance(price, (int, float)) and not isinstance(price, bool)
-    previous_is_number = isinstance(previous_price, (int, float)) and not isinstance(
-        previous_price, bool
-    )
-    price_delta: float | None = None
-    price_direction: str | None = None
-    if price_is_number and previous_is_number:
-        price_delta = round(float(price) - float(previous_price), 3)
-        if price_delta > 0:
-            price_direction = "up"
-        elif price_delta < 0:
-            price_direction = "down"
-        else:
-            price_direction = "unchanged"
-    elif price_is_number:
-        price_direction = "new"
-
-    age_minutes: int | None = None
-    price_is_stale: bool | None = None
-    if isinstance(last_update, str):
-        parsed_update = dt_util.parse_datetime(last_update)
-        if parsed_update is not None and parsed_update.tzinfo is not None:
-            age_minutes = max(
-                0,
-                int((dt_util.now() - parsed_update).total_seconds() / 60),
-            )
-            price_is_stale = age_minutes > stale_hours * 60
-
-    return {
-        ATTR_PRICE_DELTA: price_delta,
-        ATTR_PRICE_DIRECTION: price_direction,
-        ATTR_PRICE_AGE_MINUTES: age_minutes,
-        ATTR_PRICE_IS_STALE: price_is_stale,
-    }
 
 
 async def async_setup_entry(
@@ -117,6 +74,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up sensor entities for a station."""
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    station_id = entry.data[CONF_STATION_ID]
     known_unique_ids: set[str] = set()
 
     @callback
@@ -128,22 +86,30 @@ async def async_setup_entry(
             for fuel_key in fuels:
                 if not isinstance(fuel_key, str) or "_" not in fuel_key:
                     continue
+                if f"{station_id}_{fuel_key}" in known_unique_ids:
+                    continue
                 entities.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
         station_info = data.get("station_info", {})
         if isinstance(station_info, dict):
-            for info_key, name, icon in INFO_SENSOR_DESCRIPTORS:
-                if station_info.get(info_key):
-                    entities.append(StationInfoSensor(coordinator, entry, info_key, name, icon))
-        entities.append(StationLocationSensor(coordinator, entry))
-        if _has_valid_opening_hours(data):
+            for info_key, translation_key, icon in INFO_SENSOR_DESCRIPTORS:
+                if (
+                    station_info.get(info_key)
+                    and f"{station_id}_{info_key}" not in known_unique_ids
+                ):
+                    entities.append(
+                        StationInfoSensor(coordinator, entry, info_key, translation_key, icon)
+                    )
+        if f"{station_id}_location" not in known_unique_ids:
+            entities.append(StationLocationSensor(coordinator, entry))
+        if (
+            _has_valid_opening_hours(data)
+            and f"{station_id}_next_change" not in known_unique_ids
+        ):
             entities.append(StationNextChangeSensor(coordinator, entry))
-        new_entities = [
-            entity for entity in entities if entity._attr_unique_id not in known_unique_ids
-        ]
-        if not new_entities:
+        if not entities:
             return
-        known_unique_ids.update(entity._attr_unique_id for entity in new_entities)
-        async_add_entities(new_entities, update_before_add=False)
+        known_unique_ids.update(entity._attr_unique_id for entity in entities)
+        async_add_entities(entities, update_before_add=False)
 
     _async_discover_entities()
     entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
@@ -166,10 +132,13 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
         super().__init__(coordinator, entry)
         self._fuel_key = fuel_key
 
-        fuel_name, service_type = fuel_key.rsplit("_", 1)
-        self._attr_name = f"{fuel_name.replace('_', ' ').title()} {service_type.title()}"
+        self._fuel_name, self._service_type = fuel_key.rsplit("_", 1)
+        self._fuel_display_name = fuel_display_name(self._fuel_name)
+        self._is_self_service = self._service_type == "self"
+        self._attr_name = f"{self._fuel_display_name} {self._service_type.title()}"
         self._attr_unique_id = f"{self._station_id}_{fuel_key}"
-        self._attr_icon = _get_fuel_icon(fuel_name)
+        self._attr_icon = _get_fuel_icon(self._fuel_name)
+        self._attr_suggested_display_precision = 3
 
     @property
     def native_value(self) -> StateType:
@@ -188,13 +157,12 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
         if not fuel_info:
             return {}
 
-        fuel_name, service_type = self._fuel_key.rsplit("_", 1)
         attributes = {
-            ATTR_FUEL_TYPE_NAME: fuel_name.replace("_", " ").title(),
-            ATTR_IS_SELF: service_type == "self",
+            ATTR_FUEL_TYPE_NAME: self._fuel_display_name,
+            ATTR_IS_SELF: self._is_self_service,
             ATTR_LAST_UPDATE: fuel_info.get("last_update"),
             ATTR_VALIDITY_DATE: fuel_info.get("validity_date"),
-            ATTR_STATION_NAME: self.station_info.get("nomeImpianto") or self.station_info.get("name"),
+            ATTR_STATION_NAME: station_display_name(self.station_info, self._station_id),
             ATTR_STATION_ADDRESS: self.station_info.get("address"),
             ATTR_STATION_BRAND: self.station_info.get("brand"),
             ATTR_PREVIOUS_PRICE: fuel_info.get("previous_price"),
@@ -233,7 +201,7 @@ class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
         """Initialize the info sensor."""
         super().__init__(coordinator, entry)
         self._info_key = info_key
-        self._attr_name = name
+        self._attr_translation_key = name
         self._attr_unique_id = f"{self._station_id}_{info_key}"
         self._attr_icon = icon
 
@@ -253,19 +221,21 @@ class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize location sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Posizione"
+        self._attr_translation_key = "location"
         self._attr_unique_id = f"{self._station_id}_location"
 
     @property
     def native_value(self) -> StateType:
         """Return the station address for map cards and diagnostics."""
-        return self.station_info.get("address") or self.station_info.get("nomeImpianto") or self.station_info.get("name")
+        return self.station_info.get("address") or station_display_name(
+            self.station_info, self._station_id
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes including coordinates for map cards."""
         return {
-            ATTR_STATION_NAME: self.station_info.get("nomeImpianto") or self.station_info.get("name"),
+            ATTR_STATION_NAME: station_display_name(self.station_info, self._station_id),
             ATTR_STATION_ADDRESS: self.station_info.get("address"),
             ATTR_STATION_BRAND: self.station_info.get("brand"),
             ATTR_LATITUDE: self.station_info.get(ATTR_LATITUDE),
@@ -295,16 +265,40 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the next-change sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Prossimo cambio orario"
+        self._attr_translation_key = "next_change"
         self._attr_unique_id = f"{self._station_id}_next_change"
+        self._next_change: tuple[str, datetime | None] = ("no_schedule", None)
+        self._next_change_now: datetime | None = None
 
-    def _compute_next_change(self) -> tuple[str, datetime | None]:
+    async def async_added_to_hass(self) -> None:
+        """Prime the cached schedule result after Home Assistant attaches the entity."""
+        await super().async_added_to_hass()
+        self._refresh_next_change()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Recompute the schedule result once for each coordinator update."""
+        self._refresh_next_change()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _handle_time_tick(self, now: datetime) -> None:
+        """Recompute the schedule result once for each clock tick."""
+        self._refresh_next_change(dt_util.as_local(now))
+        super()._handle_time_tick(now)
+
+    def _refresh_next_change(self, now: datetime | None = None) -> None:
+        """Cache the next schedule transition used by all entity properties."""
+        self._next_change_now = now or dt_util.now()
+        self._next_change = self._compute_next_change(self._next_change_now)
+
+    def _compute_next_change(self, now: datetime | None = None) -> tuple[str, datetime | None]:
         """Compute the next opening or closing time and type."""
         opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
         if not opening_hours:
             return "no_schedule", None
 
-        now = dt_util.now()
+        now = now or dt_util.now()
         intervals: list[tuple[datetime, datetime]] = []
         for day_offset in range(-1, 8):
             local_date = now.date() + timedelta(days=day_offset)
@@ -336,25 +330,26 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the next change description."""
-        change_type, change_time = self._compute_next_change()
+        change_type, change_time = self._next_change
         if not change_time:
             return change_type
 
         time_str = change_time.strftime("%H:%M")
-        if change_time.date() != dt_util.now().date():
+        if self._next_change_now is not None and change_time.date() != self._next_change_now.date():
             return f"{time_str} ({change_time.strftime('%d/%m')})"
         return time_str
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        change_type, change_time = self._compute_next_change()
+        change_type, change_time = self._next_change
         attributes: dict[str, Any] = {
             "change_type": change_type,
             "next_change_time": change_time.isoformat() if change_time else None,
         }
         if change_time:
-            attributes["minutes_until_change"] = int((change_time - dt_util.now()).total_seconds() / 60)
+            now = self._next_change_now or dt_util.now()
+            attributes["minutes_until_change"] = int((change_time - now).total_seconds() / 60)
         return attributes
 
     @property

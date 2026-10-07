@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -175,6 +176,58 @@ def test_normalize_station_data_defaults_collections_and_preserves_unknowns() ->
         },
         {"id": "123", "name": "Station", "services": [None]},
         {"id": "123", "name": "Station", "orariapertura": [1]},
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": True,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": -0.1,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": math.inf,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": 1.8,
+                    "fuelId": 1,
+                    "isSelf": 1,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
     ],
 )
 def test_normalize_station_data_rejects_invalid_payloads(payload: Any) -> None:
@@ -260,3 +313,7 @@ def test_wait_for_request_slot_sleeps_when_throttled(monkeypatch: pytest.MonkeyP
 
     assert slept == [2.5]
     assert api._NEXT_ALLOWED_REQUEST_AT == 24.0
+
+
+def test_price_validator_rejects_overflowing_integer():
+    assert api._is_valid_fuel_price(10 ** 1000) is False

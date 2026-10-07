@@ -105,3 +105,20 @@ runtime, verifies entity-registry counts, and checks nearby discovery. It does n
 Home Assistant instance. The same regression runs in GitHub Actions on pushes, pull requests, the
 1st and 15th of every month, and manual workflow dispatch. Pre-release validation steps are described in
 [release-validation.md](./release-validation.md).
+
+## Local checks
+
+With the two environments above installed, `make check` runs Ruff, mypy, the unit suite under
+coverage, and the real Home Assistant contract suite. The unit suite runs once and enforces the
+same 100% coverage threshold as CI. Individual targets are `make lint`, `make typecheck`,
+`make test`, and `make test-ha`. Override `PYTHON` or `HA_PYTHON` to use another environment.
+
+Registry benchmark, using synthetic station data and reporting median elapsed time:
+
+```bash
+PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_registry.py --stations 20000 --repeats 9
+```
+
+This benchmark compares snapshot copying with reuse and formatted JSON with compact JSON.
+It checks that both JSON encodings decode to the same data. It does not measure upstream
+latency or Home Assistant startup.

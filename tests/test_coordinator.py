@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
@@ -29,6 +30,7 @@ def _make_coordinator() -> CarburantiDataUpdateCoordinator:
     coordinator.config_entry = MagicMock(data={CONF_STATION_ID: "123"})
     coordinator.csv_manager = MagicMock()
     coordinator.data = None
+    coordinator.last_refresh_from_cache = False
     coordinator._store = MagicMock()
     coordinator._store.async_save = AsyncMock()
     coordinator._store.async_load = AsyncMock(return_value=None)
@@ -156,13 +158,27 @@ class TestStationProcessing:
             (None, None),
             ("2025-03-01T10:11:12.123456+00:00", "2025-03-01T10:11:12+00:00"),
             ("2025-03-01T10:11:12Z", "2025-03-01T10:11:12+00:00"),
-            ("not-a-date", "not-a-date"),
+            ("not-a-date", None),
         ],
     )
     def test_parse_iso_datetime(self, value: str | None, expected: str | None) -> None:
         coordinator = _make_coordinator()
 
         assert coordinator._parse_iso_datetime(value) == expected
+
+    def test_parse_iso_datetime_assigns_home_assistant_timezone_to_naive_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        coordinator = _make_coordinator()
+        local_timezone = ZoneInfo("Europe/Rome")
+        monkeypatch.setattr(
+            coordinator_module.dt_util,
+            "get_default_time_zone",
+            lambda: local_timezone,
+        )
+        assert coordinator._parse_iso_datetime("2025-01-15T10:11:12") == (
+            "2025-01-15T10:11:12+01:00"
+        )
 
     def test_process_station_data_preserves_price_change_metadata(
         self, monkeypatch: pytest.MonkeyPatch
@@ -294,11 +310,61 @@ class TestCoordinatorUpdates:
 
     def test_async_restore_loads_a_persisted_payload(self) -> None:
         coordinator = _make_coordinator()
-        coordinator._store.async_load = AsyncMock(return_value={"cached": True})
+        cached = {
+            "station_info": {"id": 123, "name": "Station"},
+            "fuels": {},
+            "services": [],
+            "opening_hours": [],
+            "last_update": "2025-03-01T12:00:00+00:00",
+        }
+        coordinator._store.async_load = AsyncMock(return_value=cached)
 
         asyncio.run(coordinator.async_restore())
 
-        assert coordinator.data == {"cached": True}
+        assert coordinator.data == cached
+        assert coordinator.last_refresh_from_cache is False
+
+    @pytest.mark.parametrize(
+        "cached",
+        [
+            {
+                "station_info": {"id": 456},
+                "fuels": {},
+                "services": [],
+                "opening_hours": [],
+                "last_update": "2025-03-01T12:00:00+00:00",
+            },
+            {
+                "station_info": {"id": 123},
+                "fuels": [],
+                "services": [],
+                "opening_hours": [],
+                "last_update": "2025-03-01T12:00:00+00:00",
+            },
+            {
+                "station_info": {"id": 123},
+                "fuels": {"Benzina_self": "invalid"},
+                "services": [],
+                "opening_hours": [],
+                "last_update": "2025-03-01T12:00:00+00:00",
+            },
+            {
+                "station_info": {"id": 123},
+                "fuels": {},
+                "services": [],
+                "opening_hours": [],
+            },
+        ],
+    )
+    def test_async_restore_rejects_wrong_station_or_invalid_structure(
+        self, cached: dict[str, Any]
+    ) -> None:
+        coordinator = _make_coordinator()
+        coordinator._store.async_load = AsyncMock(return_value=cached)
+
+        asyncio.run(coordinator.async_restore())
+
+        assert coordinator.data is None
 
     def test_async_restore_ignores_invalid_payload(self) -> None:
         coordinator = _make_coordinator()
@@ -358,6 +424,7 @@ class TestCoordinatorUpdates:
         result = asyncio.run(coordinator._async_fetch_station_data())
 
         assert result == processed
+        assert coordinator.last_refresh_from_cache is False
         fetch_mock.assert_awaited_once_with(coordinator.hass, "123")
         coordinator._process_station_data.assert_called_once_with({"id": "123"})
 
@@ -455,6 +522,25 @@ class TestCoordinatorUpdates:
         result = asyncio.run(coordinator._async_fetch_station_data())
 
         assert result == {"last": "known"}
+        assert coordinator.last_refresh_from_cache is True
+
+    def test_async_update_data_does_not_persist_identical_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        coordinator = _make_coordinator()
+        coordinator.data = {
+            "station_info": {"id": "123"},
+            "fuels": {},
+            "services": [],
+            "opening_hours": [],
+            "last_update": "2025-03-01T12:00:00+00:00",
+        }
+        coordinator.csv_manager.is_data_available.return_value = True
+        coordinator._async_fetch_station_data = AsyncMock(return_value=coordinator.data)
+        monkeypatch.setattr(coordinator, "last_refresh_from_cache", True)
+
+        assert asyncio.run(coordinator._async_update_data()) is coordinator.data
+        coordinator._store.async_save.assert_not_awaited()
 
     def test_invalid_payload_exhausts_retries_on_initial_refresh(
         self,
@@ -504,6 +590,17 @@ class TestCoordinatorUpdates:
         with pytest.raises(Exception, match="Error fetching station data"):
             asyncio.run(coordinator._async_fetch_station_data())
 
+    def test_retry_after_accepts_http_date(self) -> None:
+        err = _make_response_error(429, {"Retry-After": "Sat, 01 Mar 2025 12:00:20 GMT"})
+
+        assert CarburantiDataUpdateCoordinator._get_retry_delay(err, 30) == 20
+
+    @pytest.mark.parametrize("retry_after", ["nan", "inf", "-inf", "1e309"])
+    def test_retry_after_rejects_nonfinite_values(self, retry_after: str) -> None:
+        err = _make_response_error(429, {"Retry-After": retry_after})
+
+        assert CarburantiDataUpdateCoordinator._get_retry_delay(err, 30) == 30
+
     def test_async_force_csv_update_propagates_success(self) -> None:
         coordinator = _make_coordinator()
         coordinator.csv_manager.async_update_csv_data = AsyncMock(return_value=True)
@@ -516,3 +613,21 @@ class TestCoordinatorUpdates:
         coordinator.csv_manager.async_update_csv_data = AsyncMock(return_value=False)
 
         assert asyncio.run(coordinator.async_force_csv_update()) is False
+
+
+def test_restore_rejects_missing_station_object():
+    coordinator = _make_coordinator()
+    coordinator._store.async_load = AsyncMock(return_value={"station_info": []})
+    asyncio.run(coordinator.async_restore())
+    assert coordinator.data is None
+
+
+def test_retry_after_without_explicit_time_zone(monkeypatch):
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: datetime(2025, 3, 1, 12, 0))
+    error = _make_response_error(429, {"Retry-After": "Sat, 01 Mar 2025 12:00:20 -0000"})
+    assert CarburantiDataUpdateCoordinator._get_retry_delay(error, 30) == 20
+
+
+def test_naive_date_uses_utc_when_timezone_is_unavailable(monkeypatch):
+    monkeypatch.setattr(coordinator_module.dt_util, "get_default_time_zone", lambda: None)
+    assert _make_coordinator()._parse_iso_datetime("2026-10-05T12:00:00") == "2026-10-05T12:00:00+00:00"

@@ -251,6 +251,9 @@ async def _exercise_home_path(hass: HomeAssistant, *, require_multi: bool) -> No
         "home",
         {CONF_RADIUS_KM: 20, CONF_RESULT_LIMIT: 2},
     )
+    if result.get("errors", {}).get("base") == "all_stations_configured":
+        hass.config_entries.flow.async_abort(flow_id)
+        return
     options = _selector_options(result)
     _assert(bool(options), f"home returned no candidates: {result}")
     selected = [station_id for station_id in options if station_id not in _configured_station_ids(hass)]
@@ -278,7 +281,17 @@ async def _exercise_home_path(hass: HomeAssistant, *, require_multi: bool) -> No
         "home",
         {CONF_RADIUS_KM: 20, CONF_RESULT_LIMIT: 2},
     )
+    if duplicate_result.get("errors", {}).get("base") == "all_stations_configured":
+        hass.config_entries.flow.async_abort(duplicate_flow_id)
+        return
     duplicate_options = _selector_options(duplicate_result)
+    if not set(selected).intersection(duplicate_options):
+        _assert(
+            not set(duplicate_options).intersection(_configured_station_ids(hass)),
+            f"home still offers configured stations: {duplicate_result}",
+        )
+        hass.config_entries.flow.async_abort(duplicate_flow_id)
+        return
     duplicate_ids = [station_id for station_id in selected if station_id in duplicate_options]
     _assert(bool(duplicate_ids), f"home duplicate candidates disappeared: {duplicate_result}")
     duplicate = await _configure(
@@ -304,6 +317,9 @@ async def _exercise_coordinates_path(hass: HomeAssistant) -> None:
             CONF_RESULT_LIMIT: 1,
         },
     )
+    if result.get("errors", {}).get("base") == "all_stations_configured":
+        hass.config_entries.flow.async_abort(flow_id)
+        return
     options = _selector_options(result)
     _assert(len(options) <= 1 and bool(options), f"coordinates limit failed: {result}")
     selected = options[0]
@@ -328,6 +344,9 @@ async def _exercise_area_path(hass: HomeAssistant) -> None:
             CONF_RESULT_LIMIT: 1,
         },
     )
+    if result.get("errors", {}).get("base") == "all_stations_configured":
+        hass.config_entries.flow.async_abort(flow_id)
+        return
     options = _selector_options(result)
     _assert(len(options) <= 1 and bool(options), f"area limit failed: {result}")
     result = await _configure(hass, flow_id, {CONF_STATION_ID: [options[0]]})
@@ -358,7 +377,13 @@ async def _search(
     result = await _configure(hass, result["flow_id"], user_input)
     _assert(
         result["type"] is FlowResultType.FORM
-        and str(result.get("step_id", "")).startswith("select_station"),
+        and (
+            str(result.get("step_id", "")).startswith("select_station")
+            or (
+                result.get("step_id") == step
+                and result.get("errors", {}).get("base") == "all_stations_configured"
+            )
+        ),
         f"{step} search: {result}",
     )
     return result["flow_id"], result

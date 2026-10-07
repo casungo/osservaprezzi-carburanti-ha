@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from math import isfinite
+from typing import cast
 
 import aiohttp
 
@@ -17,17 +18,21 @@ from .const import (
     DEFAULT_HEADERS,
     STATION_ENDPOINT,
 )
+from .models import StationPayload
 
 _LOGGER = logging.getLogger(__name__)
 _REQUEST_LOCK = asyncio.Lock()
 _NEXT_ALLOWED_REQUEST_AT = 0.0
+REQUIRED_FUEL_FIELDS = frozenset(
+    {"name", "price", "fuelId", "isSelf", "serviceAreaId"}
+)
 
 
 class InvalidStationPayloadError(aiohttp.ClientError):
     """Raised when a successful station response has an unusable structure."""
 
 
-def normalize_station_data(data: Any, station_id: str) -> dict[str, Any]:
+def normalize_station_data(data: object, station_id: str) -> StationPayload:
     """Validate and normalize the station fields consumed by the integration."""
     if not isinstance(data, dict):
         raise InvalidStationPayloadError("station response is not a mapping")
@@ -50,9 +55,13 @@ def normalize_station_data(data: Any, station_id: str) -> dict[str, Any]:
         elif not isinstance(value, list):
             raise InvalidStationPayloadError(f"station response {key} is not a list")
 
-    required_fuel_fields = {"name", "price", "fuelId", "isSelf", "serviceAreaId"}
     for fuel in normalized["fuels"]:
-        if not isinstance(fuel, dict) or not required_fuel_fields <= fuel.keys():
+        if (
+            not isinstance(fuel, dict)
+            or not REQUIRED_FUEL_FIELDS <= fuel.keys()
+            or not isinstance(fuel.get("isSelf"), bool)
+            or not _is_valid_fuel_price(fuel.get("price"))
+        ):
             raise InvalidStationPayloadError("station response contains an invalid fuel")
     if not all(isinstance(item, dict) for item in normalized["orariapertura"]):
         raise InvalidStationPayloadError("station response contains invalid opening hours")
@@ -62,14 +71,24 @@ def normalize_station_data(data: Any, station_id: str) -> dict[str, Any]:
     ):
         raise InvalidStationPayloadError("station response contains an invalid service")
 
-    return normalized
+    return cast(StationPayload, normalized)
+
+
+def _is_valid_fuel_price(value: object) -> bool:
+    """Return whether an API fuel price is a finite, non-negative number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return isfinite(float(value)) and value >= 0
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 async def fetch_station_data(
     hass: HomeAssistant,
     station_id: str,
     timeout: int = 30,
-) -> dict[str, Any]:
+) -> StationPayload:
     """Fetch station data from the API.
 
     Args:
@@ -89,64 +108,61 @@ async def fetch_station_data(
 
     _LOGGER.debug("Fetching station data from: %s", url)
 
-    try:
-        async with _REQUEST_LOCK:
-            await _wait_for_request_slot(station_id)
-            async with session.get(
-                url,
-                headers=DEFAULT_HEADERS,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as response:
-                _LOGGER.debug(
-                    "Station API response for %s: status=%s", station_id, response.status
-                )
+    async with _REQUEST_LOCK:
+        await _wait_for_request_slot(station_id)
+        async with session.get(
+            url,
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            _LOGGER.debug(
+                "Station API response for %s: status=%s", station_id, response.status
+            )
 
-                if response.status == 200:
-                    data = await response.json()
-                    values = data.values() if isinstance(data, dict) else (data,)
-                    collection_counts = {
-                        "lists": sum(isinstance(value, list) for value in values),
-                        "mappings": sum(isinstance(value, dict) for value in values),
-                    }
-                    _LOGGER.debug(
-                        "Station API response for %s: status=%s, payload_type=%s, "
-                        "field_count=%s, collection_counts=%s",
-                        station_id,
-                        response.status,
-                        type(data).__name__,
-                        len(data) if isinstance(data, dict) else "n/a",
-                        collection_counts,
-                    )
-                    try:
-                        return normalize_station_data(data, station_id)
-                    except InvalidStationPayloadError as err:
-                        _LOGGER.warning("Invalid station API response structure: %s", err)
-                        raise
-                if response.status == 404:
-                    raise aiohttp.ClientResponseError(
-                        request_info=response.request_info,
-                        history=response.history,
-                        status=response.status,
-                        message=f"Station with ID {station_id} not found",
-                        headers=response.headers,
-                    )
-                if response.status == 429:
-                    raise aiohttp.ClientResponseError(
-                        request_info=response.request_info,
-                        history=response.history,
-                        status=response.status,
-                        message="Rate limit exceeded. Please try again later.",
-                        headers=response.headers,
-                    )
+            if response.status == 200:
+                data = await response.json()
+                values = data.values() if isinstance(data, dict) else (data,)
+                collection_counts = {
+                    "lists": sum(isinstance(value, list) for value in values),
+                    "mappings": sum(isinstance(value, dict) for value in values),
+                }
+                _LOGGER.debug(
+                    "Station API response for %s: status=%s, payload_type=%s, "
+                    "field_count=%s, collection_counts=%s",
+                    station_id,
+                    response.status,
+                    type(data).__name__,
+                    len(data) if isinstance(data, dict) else "n/a",
+                    collection_counts,
+                )
+                try:
+                    return normalize_station_data(data, station_id)
+                except InvalidStationPayloadError as err:
+                    _LOGGER.warning("Invalid station API response structure: %s", err)
+                    raise
+            if response.status == 404:
                 raise aiohttp.ClientResponseError(
                     request_info=response.request_info,
                     history=response.history,
                     status=response.status,
-                    message=f"Service error: {response.status} - {response.reason}",
+                    message=f"Station with ID {station_id} not found",
                     headers=response.headers,
                 )
-    except (aiohttp.ClientError, asyncio.TimeoutError):
-        raise
+            if response.status == 429:
+                raise aiohttp.ClientResponseError(
+                    request_info=response.request_info,
+                    history=response.history,
+                    status=response.status,
+                    message="Rate limit exceeded. Please try again later.",
+                    headers=response.headers,
+                )
+            raise aiohttp.ClientResponseError(
+                request_info=response.request_info,
+                history=response.history,
+                status=response.status,
+                message=f"Service error: {response.status} - {response.reason}",
+                headers=response.headers,
+            )
 
 
 async def _wait_for_request_slot(station_id: str) -> None:

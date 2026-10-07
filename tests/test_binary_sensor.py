@@ -215,8 +215,8 @@ class TestServiceBinarySensor:
 
         assert entity._attr_unique_id == "12345_service_8"
         assert entity._attr_has_entity_name is True
-        assert entity._attr_name == "Wi-Fi"
-        assert not hasattr(entity, "_attr_translation_key")
+        assert entity._attr_translation_key == "wifi"
+        assert not hasattr(entity, "_attr_name")
         assert entity.is_on is True
 
     def test_service_entity_falls_back_to_name_for_unknown_service(self):

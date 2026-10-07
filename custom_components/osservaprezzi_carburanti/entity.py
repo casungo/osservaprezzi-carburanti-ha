@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_STATION_ID, DOMAIN
 from .coordinator import CarburantiDataUpdateCoordinator
+from .data_helpers import station_display_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def _parse_time(time_str: str | None) -> time | None:
         return None
 
 
-def _has_valid_opening_hours(data: dict[str, Any] | None) -> bool:
+def _has_valid_opening_hours(data: Mapping[str, Any] | None) -> bool:
     """Check if opening hours data contains valid schedule information."""
     if not data:
         return False
@@ -130,28 +131,6 @@ def _find_schedule_for_day(
         if day.get("giornoSettimanaId") == weekday:
             return day
     return None
-
-
-def _is_schedule_open(schedule: dict[str, Any], current_time: time) -> bool:
-    """Check if a station is open based on a schedule entry and current time."""
-    if schedule.get("flagOrarioContinuato"):
-        open_time = _parse_time(schedule.get("oraAperturaOrarioContinuato"))
-        close_time = _parse_time(schedule.get("oraChiusuraOrarioContinuato"))
-        if open_time and close_time:
-            if open_time <= close_time:
-                return open_time <= current_time <= close_time
-            return current_time >= open_time or current_time <= close_time
-        return False
-
-    morning_open = _parse_time(schedule.get("oraAperturaMattina"))
-    morning_close = _parse_time(schedule.get("oraChiusuraMattina"))
-    afternoon_open = _parse_time(schedule.get("oraAperturaPomeriggio"))
-    afternoon_close = _parse_time(schedule.get("oraChiusuraPomeriggio"))
-    if morning_open and morning_close and morning_open <= current_time <= morning_close:
-        return True
-    if afternoon_open and afternoon_close and afternoon_open <= current_time <= afternoon_close:
-        return True
-    return False
 
 
 def _schedule_intervals_for_date(
@@ -206,12 +185,16 @@ class OsservaprezziBaseEntity(CoordinatorEntity):
     def device_info(self) -> DeviceInfo:
         """Return the device info shared by all station entities."""
         station_info = self.station_info
-        station_name = station_info.get("nomeImpianto") or station_info.get("name") or self._station_id
+        station_name = station_display_name(station_info, self._station_id)
         return DeviceInfo(
             identifiers={(DOMAIN, self._station_id)},
             name=station_name,
             manufacturer=station_info.get("brand"),
             model=station_info.get("station_type") or "Fuel Station",
+            configuration_url=(
+                "https://carburanti.mise.gov.it/ospzSearch/dettaglio/"
+                f"{self._station_id}"
+            ),
         )
 
 

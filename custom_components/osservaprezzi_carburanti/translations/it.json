@@ -53,14 +53,14 @@
       },
       "select_station": {
         "title": "Scegli le stazioni",
-        "description": "{result_count} stazioni corrispondenti. Già configurate: {configured_count}, verranno saltate. Selezionane una o più. Registro aggiornato: {registry_updated}.",
+        "description": "{result_count} stazioni corrispondenti. Già configurate: {configured_count}, escluse dalla selezione. Selezionane una o più. Registro aggiornato: {registry_updated}.",
         "data": {
           "station_id": "Stazioni"
         }
       },
       "select_station_stale": {
         "title": "Scegli le stazioni",
-        "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile. Già configurate: {configured_count}, verranno saltate. Selezionane una o più. Cache aggiornata il {registry_updated}.",
+        "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile. Già configurate: {configured_count}, escluse dalla selezione. Selezionane una o più. Cache aggiornata il {registry_updated}.",
         "data": {
           "station_id": "Stazioni"
         }
@@ -70,6 +70,20 @@
         "description": "Inserisci un altro ID stazione. Le entità esistenti verranno ricaricate per la stazione selezionata.",
         "data": {
           "station_id": "Stazione"
+        }
+      },
+      "select_station_limited": {
+        "title": "Scegli le stazioni",
+        "description": "{result_count} stazioni corrispondenti. Già configurate: {configured_count}, escluse dalla selezione. Selezionane una o più. Registro aggiornato: {registry_updated}. Sono mostrati solo i primi {result_limit} risultati. Restringi la ricerca per trovare altre stazioni.",
+        "data": {
+          "station_id": "Stazioni"
+        }
+      },
+      "select_station_stale_limited": {
+        "title": "Scegli le stazioni",
+        "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile. Già configurate: {configured_count}, escluse dalla selezione. Selezionane una o più. Cache aggiornata il {registry_updated}. Sono mostrati solo i primi {result_limit} risultati. Restringi la ricerca per trovare altre stazioni.",
+        "data": {
+          "station_id": "Stazioni"
         }
       }
     },
@@ -81,7 +95,10 @@
       "invalid_location": "Inserisci coordinate di latitudine e longitudine valide.",
       "registry_unavailable": "Il registro ufficiale delle stazioni non è disponibile. Riprova oppure usa l'ID stazione.",
       "no_stations_found": "Nessuna stazione corrisponde alla ricerca. Amplia l'area o i filtri oppure usa l'ID stazione.",
-      "already_configured": "Questa stazione è già configurata."
+      "already_configured": "Questa stazione è già configurata.",
+      "all_stations_configured": "Tutte le stazioni trovate sono già configurate. Amplia la ricerca o modifica i filtri per aggiungerne altre.",
+      "rate_limited": "Il servizio ha ricevuto troppe richieste. Attendi qualche istante e riprova.",
+      "station_validation_failed": "Impossibile verificare {failed_station} (ID {failed_station_id}). Controlla la selezione e riprova."
     },
     "abort": {
       "already_configured": "Questa configurazione è già stata impostata",
@@ -92,22 +109,30 @@
     "step": {
       "init": {
         "title": "Opzioni Osservaprezzi Carburanti",
-        "description": "Configura aggiornamento e freschezza dei prezzi. Prossimo aggiornamento pianificato: {next_run}.\n\nUsa una normale espressione cron a cinque campi, ad esempio 30 7 * * *.",
+        "description": "Scegli la frequenza di aggiornamento e la soglia di freschezza dei prezzi. Per inserire una cron, scegli Personalizzata. Prossimo aggiornamento della configurazione attuale: {next_run}.",
         "data": {
-          "cron_expression": "Espressione cron",
-          "price_stale_hours": "Considera i prezzi obsoleti dopo (ore)"
+          "price_stale_hours": "Considera i prezzi obsoleti dopo (ore)",
+          "refresh_schedule": "Frequenza di aggiornamento"
+        }
+      },
+      "custom": {
+        "title": "Aggiornamento personalizzato",
+        "description": "Inserisci una cron a cinque campi, ad esempio 30 7 * * * per ogni giorno alle 07:30. Gli orari seguono il fuso orario di Home Assistant. Prossimo aggiornamento della configurazione attuale: {next_run}.",
+        "data": {
+          "cron_expression": "Espressione cron"
         }
       }
     },
     "error": {
       "invalid_cron_expression": "L'espressione cron non è valida. Esempio: 30 7 * * * (ogni giorno alle 07:30).",
-      "invalid_stale_hours": "Scegli una delle soglie di freschezza supportate."
+      "invalid_stale_hours": "Scegli una delle soglie di freschezza supportate.",
+      "invalid_schedule": "Scegli una frequenza di aggiornamento disponibile."
     }
   },
   "issues": {
     "station_not_found": {
       "title": "Stazione non trovata",
-      "description": "La stazione {station} (ID {station_id}) non è stata trovata dal MIMIT. Rimuovi questa configurazione e aggiungi di nuovo la stazione con un ID valido."
+      "description": "La stazione {station} (ID {station_id}) non è stata trovata dal MIMIT. Apri Impostazioni > Dispositivi e servizi > Osservaprezzi Carburanti e scegli Riconfigura nel menu della stazione per inserire un ID valido."
     }
   },
   "entity": {
@@ -194,6 +219,11 @@
       "ev_charging": {
         "name": "Ricarica elettrica"
       }
+    },
+    "button": {
+      "refresh_prices": {
+        "name": "Aggiorna prezzi"
+      }
     }
   },
   "services": {
@@ -211,12 +241,74 @@
     },
     "refresh_prices": {
       "name": "Aggiorna prezzi carburanti",
-      "description": "Aggiorna tutte le stazioni attive oppure solo gli ID stazione richiesti."
+      "description": "Aggiorna tutte le stazioni attive oppure solo gli ID stazione richiesti.",
+      "fields": {
+        "station_ids": {
+          "name": "ID delle stazioni",
+          "description": "Elenco facoltativo degli ID delle stazioni configurate da aggiornare."
+        }
+      }
     },
     "search_registry": {
       "name": "Cerca nel registro stazioni",
-      "description": "Cerca nel registro ufficiale memorizzato localmente e restituisce le stazioni corrispondenti."
+      "description": "Cerca nel registro ufficiale memorizzato localmente e restituisce le stazioni corrispondenti.",
+      "fields": {
+        "query": {
+          "name": "Testo",
+          "description": "Testo contenuto nel nome, marchio, indirizzo, gestore, comune o provincia."
+        },
+        "municipality": {
+          "name": "Comune",
+          "description": "Nome del comune o parte di esso."
+        },
+        "province": {
+          "name": "Provincia",
+          "description": "Nome, sigla o parte del nome della provincia."
+        },
+        "station_type": {
+          "name": "Tipo di impianto",
+          "description": "Tipo di impianto o parte di esso."
+        },
+        "limit": {
+          "name": "Risultati massimi",
+          "description": "Numero massimo di stazioni da restituire."
+        }
+      }
     }
   },
-  "title": "Osservaprezzi Carburanti"
+  "title": "Osservaprezzi Carburanti",
+  "selector": {
+    "refresh_schedule": {
+      "options": {
+        "daily": "Ogni giorno alle 08:30",
+        "twice_daily": "Ogni giorno alle 07:30 e 19:30",
+        "every_six_hours": "Ogni 6 ore",
+        "weekdays": "Giorni feriali alle 08:00",
+        "custom": "Personalizzata"
+      }
+    }
+  },
+  "exceptions": {
+    "refresh_failed": {
+      "message": "Non è stato possibile aggiornare i prezzi della stazione. Riprova più tardi."
+    },
+    "no_active_entries": {
+      "message": "Nessuna stazione Osservaprezzi attiva."
+    },
+    "no_matching_entries": {
+      "message": "Nessuna stazione attiva corrisponde agli ID indicati."
+    },
+    "cache_update_failed": {
+      "message": "Impossibile aggiornare il registro delle stazioni. Riprova più tardi."
+    },
+    "cache_reset_failed": {
+      "message": "Impossibile ricreare la cache delle stazioni. Riprova più tardi."
+    },
+    "station_refresh_failed": {
+      "message": "Per {count} stazioni non è stato possibile ottenere prezzi aggiornati. Riprova più tardi."
+    },
+    "registry_unavailable": {
+      "message": "Il registro delle stazioni non è disponibile. Riprova più tardi."
+    }
+  }
 }

@@ -147,6 +147,19 @@ def test_find_nearby_stations_rejects_invalid_inputs_and_rows() -> None:
         )
         == ()
     )
+
+
+def test_find_nearby_stations_keeps_coordinate_validation_numeric_only() -> None:
+    assert (
+        find_nearby_stations(
+            [{"id": "1", "latitude": "41.9", "longitude": 12.5}],
+            latitude="41.9",
+            longitude=12.5,
+            radius_km=5,
+            limit=20,
+        )
+        == ()
+    )
     assert (
         find_nearby_stations(
             (),

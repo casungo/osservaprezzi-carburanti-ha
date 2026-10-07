@@ -53,14 +53,14 @@
       },
       "select_station": {
         "title": "Choose stations",
-        "description": "{result_count} matching stations. Already configured: {configured_count}, these will be skipped. Select one or more. Registry updated: {registry_updated}.",
+        "description": "{result_count} matching stations. Already configured: {configured_count}, excluded from selection. Select one or more. Registry updated: {registry_updated}.",
         "data": {
           "station_id": "Stations"
         }
       },
       "select_station_stale": {
         "title": "Choose stations",
-        "description": "{result_count} matching stations from the last available cache. Already configured: {configured_count}, these will be skipped. Select one or more. Cache updated: {registry_updated}.",
+        "description": "{result_count} matching stations from the last available cache. Already configured: {configured_count}, excluded from selection. Select one or more. Cache updated: {registry_updated}.",
         "data": {
           "station_id": "Stations"
         }
@@ -70,6 +70,20 @@
         "description": "Enter another station ID. Existing entities will be reloaded for the selected station.",
         "data": {
           "station_id": "Station"
+        }
+      },
+      "select_station_limited": {
+        "title": "Choose stations",
+        "description": "{result_count} matching stations. Already configured: {configured_count}, excluded from selection. Select one or more. Registry updated: {registry_updated}. Only the first {result_limit} results are shown. Narrow the search to find other stations.",
+        "data": {
+          "station_id": "Stations"
+        }
+      },
+      "select_station_stale_limited": {
+        "title": "Choose stations",
+        "description": "{result_count} matching stations from the last available cache. Already configured: {configured_count}, excluded from selection. Select one or more. Cache updated: {registry_updated}. Only the first {result_limit} results are shown. Narrow the search to find other stations.",
+        "data": {
+          "station_id": "Stations"
         }
       }
     },
@@ -81,7 +95,10 @@
       "invalid_location": "Enter valid latitude and longitude coordinates.",
       "registry_unavailable": "The official station registry is currently unavailable. Try again or use a station ID.",
       "no_stations_found": "No stations matched the search. Broaden the area or filters, or use a station ID.",
-      "already_configured": "That station is already configured."
+      "already_configured": "That station is already configured.",
+      "all_stations_configured": "All matching stations are already configured. Expand the search or change the filters to add other stations.",
+      "rate_limited": "The service received too many requests. Wait a moment and retry.",
+      "station_validation_failed": "Could not validate {failed_station} (ID {failed_station_id}). Check the selection and retry."
     },
     "abort": {
       "already_configured": "This configuration is already set up",
@@ -92,22 +109,30 @@
     "step": {
       "init": {
         "title": "Osservaprezzi Carburanti Options",
-        "description": "Configure refresh and price freshness. Next scheduled refresh: {next_run}.\n\nUse a standard five-field cron expression such as 30 7 * * *.",
+        "description": "Choose the refresh schedule and price freshness threshold. Choose Custom to enter a cron expression. Next refresh for the current configuration: {next_run}.",
         "data": {
-          "cron_expression": "Cron expression",
-          "price_stale_hours": "Mark prices stale after (hours)"
+          "price_stale_hours": "Mark prices stale after (hours)",
+          "refresh_schedule": "Refresh schedule"
+        }
+      },
+      "custom": {
+        "title": "Custom refresh schedule",
+        "description": "Enter a five-field cron, for example 30 7 * * * for every day at 07:30. Times use the Home Assistant time zone. Next refresh for the current configuration: {next_run}.",
+        "data": {
+          "cron_expression": "Cron expression"
         }
       }
     },
     "error": {
       "invalid_cron_expression": "The cron expression is invalid. Example: 30 7 * * * (daily at 07:30).",
-      "invalid_stale_hours": "Choose one of the supported price freshness thresholds."
+      "invalid_stale_hours": "Choose one of the supported price freshness thresholds.",
+      "invalid_schedule": "Choose an available refresh schedule."
     }
   },
   "issues": {
     "station_not_found": {
       "title": "Station not found",
-      "description": "Station {station} (ID {station_id}) was not found by MIMIT. Remove this integration entry and add the station again with a valid ID."
+      "description": "MIMIT could not find station {station} (ID {station_id}). Open Settings > Devices & services > Osservaprezzi Carburanti and choose Reconfigure from the station menu to enter a valid ID."
     }
   },
   "entity": {
@@ -194,6 +219,11 @@
       "ev_charging": {
         "name": "EV Charging"
       }
+    },
+    "button": {
+      "refresh_prices": {
+        "name": "Refresh prices"
+      }
     }
   },
   "services": {
@@ -211,12 +241,74 @@
     },
     "refresh_prices": {
       "name": "Refresh fuel prices",
-      "description": "Refreshes all active stations, or only the requested station IDs."
+      "description": "Refreshes all active stations, or only the requested station IDs.",
+      "fields": {
+        "station_ids": {
+          "name": "Station IDs",
+          "description": "Optional list of configured station IDs to refresh."
+        }
+      }
     },
     "search_registry": {
       "name": "Search station registry",
-      "description": "Searches the locally cached official registry and returns matching stations."
+      "description": "Searches the locally cached official registry and returns matching stations.",
+      "fields": {
+        "query": {
+          "name": "Text",
+          "description": "Text contained in the name, brand, address, operator, municipality or province."
+        },
+        "municipality": {
+          "name": "Municipality",
+          "description": "Municipality name or fragment."
+        },
+        "province": {
+          "name": "Province",
+          "description": "Province name, abbreviation or fragment."
+        },
+        "station_type": {
+          "name": "Station type",
+          "description": "Station type or fragment."
+        },
+        "limit": {
+          "name": "Maximum results",
+          "description": "Maximum number of stations to return."
+        }
+      }
     }
   },
-  "title": "Osservaprezzi Carburanti"
+  "title": "Osservaprezzi Carburanti",
+  "selector": {
+    "refresh_schedule": {
+      "options": {
+        "daily": "Every day at 08:30",
+        "twice_daily": "Every day at 07:30 and 19:30",
+        "every_six_hours": "Every 6 hours",
+        "weekdays": "Weekdays at 08:00",
+        "custom": "Custom"
+      }
+    }
+  },
+  "exceptions": {
+    "refresh_failed": {
+      "message": "Unable to refresh station prices. Try again later."
+    },
+    "no_active_entries": {
+      "message": "No active Osservaprezzi entries."
+    },
+    "no_matching_entries": {
+      "message": "No matching active Osservaprezzi entries."
+    },
+    "cache_update_failed": {
+      "message": "Unable to update the station cache. Try again later."
+    },
+    "cache_reset_failed": {
+      "message": "Unable to reset the station cache. Try again later."
+    },
+    "station_refresh_failed": {
+      "message": "{count} stations could not retrieve updated prices. Try again later."
+    },
+    "registry_unavailable": {
+      "message": "The station registry is unavailable. Try again later."
+    }
+  }
 }

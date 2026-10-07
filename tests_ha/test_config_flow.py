@@ -55,6 +55,7 @@ async def test_nearby_home_path_adds_selected_stations(
     hass.config.latitude = 41.9
     hass.config.longitude = 12.5
     manager = MagicMock()
+    manager.registry_station_types.return_value = ()
     manager.async_ensure_registry = AsyncMock(
         return_value=RegistrySnapshot(
             stations=(
@@ -159,3 +160,114 @@ async def test_reconfigure_changes_station_in_place(
     assert entry.data == {CONF_STATION_ID: "456"}
     assert entry.unique_id == "station_456"
     assert entry.title == "New Station"
+
+
+def _suggestions(result) -> dict:
+    """Read suggestions as Home Assistant's frontend receives them."""
+    return {
+        marker.schema: marker.description["suggested_value"]
+        for marker in result["data_schema"].schema
+        if marker.description and "suggested_value" in marker.description
+    }
+
+
+async def test_area_retry_preserves_fields_and_excludes_configured(hass, monkeypatch) -> None:
+    """Keep the user's filters and selections through a temporary API failure."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    existing = MockConfigEntry(domain=DOMAIN, unique_id="station_123", data={CONF_STATION_ID: "123"})
+    existing.add_to_hass(hass)
+    snapshot = RegistrySnapshot(
+        stations=tuple({"id": station_id, "name": f"Station {station_id}", "municipality": "Roma"}
+                       for station_id in ("123", "456")),
+        updated_at=datetime.now(timezone.utc), is_stale=False,
+    )
+    manager = MagicMock()
+    manager.registry_station_types.return_value = ()
+    manager.async_ensure_registry = AsyncMock(return_value=snapshot)
+    monkeypatch.setattr(config_flow, "get_shared_csv_manager", lambda hass: manager)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "area"})
+    values = {"municipality": "Unknown", "province": "", "text_filter": "", "result_limit": 9}
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], values)
+    assert result["errors"] == {"base": "no_stations_found"}
+    assert _suggestions(result)["municipality"] == "Unknown"
+    assert _suggestions(result)["result_limit"] == 9
+
+    values["municipality"] = "Roma"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], values)
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert [option["value"] for option in selector.config["options"]] == ["456"]
+    validate = AsyncMock(side_effect=config_flow.CannotConnect("offline"))
+    monkeypatch.setattr(config_flow, "_validate_station", validate)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_STATION_ID: ["456"]})
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert _suggestions(result)[CONF_STATION_ID] == ["456"]
+
+    second = MockConfigEntry(domain=DOMAIN, unique_id="station_456", data={CONF_STATION_ID: "456"})
+    second.add_to_hass(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_STATION_ID: ["456"]})
+    assert result["step_id"] == "area"
+    assert result["errors"] == {"base": "all_stations_configured"}
+    assert _suggestions(result)["municipality"] == "Roma"
+    assert _suggestions(result)["result_limit"] == 9
+    validate.assert_awaited_once()
+
+
+async def test_options_presets_and_custom_cron(hass) -> None:
+    """Preserve existing custom schedules and use native translated selectors."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from custom_components.osservaprezzi_carburanti.const import CONF_CRON_EXPRESSION, CONF_PRICE_STALE_HOURS
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="station_123", data={CONF_STATION_ID: "123"},
+        options={CONF_CRON_EXPRESSION: "17 9 * * 2", CONF_PRICE_STALE_HOURS: 48},
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    fields = result["data_schema"].schema
+    schedule_marker = next(marker for marker in fields if marker.schema == "refresh_schedule")
+    assert schedule_marker.default() == "custom"
+    assert fields[schedule_marker].config["translation_key"] == "refresh_schedule"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"refresh_schedule": "custom", CONF_PRICE_STALE_HOURS: 72}
+    )
+    assert result["step_id"] == "custom"
+    assert next(iter(result["data_schema"].schema)).default() == "17 9 * * 2"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_CRON_EXPRESSION: "bad"})
+    assert result["errors"] == {CONF_CRON_EXPRESSION: "invalid_cron_expression"}
+    assert _suggestions(result)[CONF_CRON_EXPRESSION] == "bad"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_CRON_EXPRESSION: "0 6 * * *"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options == {CONF_CRON_EXPRESSION: "0 6 * * *", CONF_PRICE_STALE_HOURS: 72}
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"refresh_schedule": "every_six_hours", CONF_PRICE_STALE_HOURS: 24}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options == {CONF_CRON_EXPRESSION: "0 */6 * * *", CONF_PRICE_STALE_HOURS: 24}
+
+
+async def test_docker_probe_accepts_all_configured_search_results(hass, monkeypatch) -> None:
+    """Keep the Docker regression compatible with the duplicate-free selectors."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from scripts import ha_docker_probe as probe
+
+    hass.config.latitude = probe.ROME[config_flow.CONF_LATITUDE]
+    hass.config.longitude = probe.ROME[config_flow.CONF_LONGITUDE]
+    MockConfigEntry(
+        domain=DOMAIN, unique_id="station_123", data={CONF_STATION_ID: "123"}
+    ).add_to_hass(hass)
+    manager = MagicMock()
+    manager.registry_station_types.return_value = ()
+    manager.async_ensure_registry = AsyncMock(return_value=RegistrySnapshot(
+        stations=({"id": "123", "name": "Station", "municipality": "Roma", "province": "RM",
+                   "latitude": hass.config.latitude, "longitude": hass.config.longitude},),
+        updated_at=datetime.now(timezone.utc), is_stale=False,
+    ))
+    monkeypatch.setattr(config_flow, "get_shared_csv_manager", lambda hass: manager)
+    await probe._exercise_home_path(hass, require_multi=True)
+    await probe._exercise_coordinates_path(hass)
+    await probe._exercise_area_path(hass)
+    assert not hass.config_entries.flow.async_progress()

@@ -270,3 +270,43 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         entity_id: "unavailable" for entity_id in entity_ids_after_reload
     }
     assert fetch_station_data.await_count >= 3
+
+
+async def test_refresh_button_is_translated_and_targets_its_station(hass, monkeypatch) -> None:
+    """Register a native device action and exercise it through HA services."""
+    from homeassistant.helpers import device_registry as dr
+
+    fetch = AsyncMock(return_value=_station_payload())
+    monkeypatch.setattr("custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data", fetch)
+    monkeypatch.setattr(CSVStationManager, "is_data_available", lambda self: True)
+    monkeypatch.setattr(CSVStationManager, "get_station_by_id", lambda self, station_id: {})
+    entry = MockConfigEntry(domain=DOMAIN, title="Station", unique_id=f"station_{STATION_ID}", data={CONF_STATION_ID: STATION_ID})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("button", DOMAIN, f"{STATION_ID}_refresh_prices")
+    assert entity_id is not None
+    entity = registry.async_get(entity_id)
+    device = dr.async_get(hass).async_get(entity.device_id)
+    assert (DOMAIN, STATION_ID) in device.identifiers
+    assert hass.states.get(entity_id).attributes["friendly_name"].endswith("Refresh prices")
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    refresh = AsyncMock()
+    monkeypatch.setattr(coordinator, "async_request_refresh", refresh)
+    await hass.services.async_call("button", "press", {"entity_id": entity_id}, blocking=True)
+    refresh.assert_awaited_once()
+    coordinator.last_update_success = False
+    coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state != "unavailable"
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call("button", "press", {"entity_id": entity_id}, blocking=True)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "unavailable"
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registry.async_get_entity_id("button", DOMAIN, f"{STATION_ID}_refresh_prices") == entity_id
+    assert hass.states.get(entity_id).state != "unavailable"
+    assert await hass.config_entries.async_unload(entry.entry_id)

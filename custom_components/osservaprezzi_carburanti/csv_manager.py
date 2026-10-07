@@ -12,7 +12,6 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from math import isfinite
 from types import MappingProxyType
 from typing import Any
 
@@ -23,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .const import CSV_UPDATE_INTERVAL, CSV_URL, DEFAULT_HEADERS, DOMAIN
+from .data_helpers import parse_coordinate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,13 +78,18 @@ def _write_json_file_atomic_sync(path: str, data: dict[str, Any]) -> None:
             suffix=".tmp",
         ) as file_handle:
             temp_path = file_handle.name
-            json.dump(data, file_handle, ensure_ascii=False, indent=2)
+            json.dump(data, file_handle, ensure_ascii=False, separators=(",", ":"))
         os.replace(temp_path, path)
         temp_path = None
     finally:
         if temp_path is not None:
             with contextlib.suppress(OSError):
                 os.remove(temp_path)
+
+
+def _build_registry_snapshot(stations: dict[str, dict[str, Any]]) -> tuple[Mapping[str, Any], ...]:
+    """Copy one registry version into immutable station mappings."""
+    return tuple(MappingProxyType(dict(station)) for station in stations.values())
 
 
 class CSVStationManager:
@@ -95,6 +100,8 @@ class CSVStationManager:
         self.hass = hass
         self.session = async_get_clientsession(hass)
         self._stations_cache: dict[str, dict[str, Any]] = {}
+        self._snapshot_cache: tuple[Mapping[str, Any], ...] | None = None
+        self._snapshot_source: dict[str, dict[str, Any]] | None = None
         self._last_update: datetime | None = None
         self._csv_etag: str | None = None
         self._csv_last_modified: str | None = None
@@ -214,6 +221,8 @@ class CSVStationManager:
             self._csv_last_modified = csv_last_modified
             self._detected_separator = separator
             self._stations_cache = stations_cache
+            self._snapshot_cache = None
+            self._snapshot_source = None
             self._last_update = now
 
             _LOGGER.info("Successfully updated CSV station data")
@@ -265,7 +274,8 @@ class CSVStationManager:
 
             value = values[idx].strip()
             if internal_col in ("latitude", "longitude"):
-                station_data[internal_col] = self._parse_coordinate(value)
+                minimum, maximum = (-90, 90) if internal_col == "latitude" else (-180, 180)
+                station_data[internal_col] = parse_coordinate(value, minimum, maximum)
             else:
                 station_data[internal_col] = value or None
 
@@ -334,18 +344,6 @@ class CSVStationManager:
 
         return separator
 
-    @staticmethod
-    def _parse_coordinate(value: str) -> float | None:
-        """Parse a latitude/longitude value from the CSV."""
-        if not value:
-            return None
-
-        try:
-            coordinate = float(value.replace(",", "."))
-        except (TypeError, ValueError):
-            return None
-        return coordinate if isfinite(coordinate) else None
-
     async def async_load_cached_data(self) -> bool:
         """Load cached station data from local file."""
         async with self._operation_lock:
@@ -354,53 +352,55 @@ class CSVStationManager:
     async def _async_load_cached_data(self) -> bool:
         """Load cached station data while the operation lock is held."""
         try:
-                _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
-                data = await self.hass.async_add_executor_job(
-                    _load_json_file_sync, self._cache_path
-                )
+            _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
+            data = await self.hass.async_add_executor_job(
+                _load_json_file_sync, self._cache_path
+            )
 
-                cache_version = data.get("version", "1.0")
-                stations = data.get("stations", {})
-                last_update = data.get("last_update")
-                separator = data.get("csv_separator", "|")
-                csv_etag = data.get("csv_etag")
-                csv_last_modified = data.get("csv_last_modified")
-                if not isinstance(cache_version, str):
-                    raise ValueError("Cache version must be a string")
-                if not isinstance(stations, dict) or not all(
-                    isinstance(station_id, str) and isinstance(station, dict)
-                    for station_id, station in stations.items()
-                ):
-                    raise ValueError("Cache stations must be an object of station objects")
-                if last_update is not None and not isinstance(last_update, str):
-                    raise ValueError("Cache last_update must be a string or null")
-                if not isinstance(separator, str):
-                    raise ValueError("Cache csv_separator must be a string")
-                if csv_etag is not None and not isinstance(csv_etag, str):
-                    raise ValueError("Cache csv_etag must be a string or null")
-                if csv_last_modified is not None and not isinstance(csv_last_modified, str):
-                    raise ValueError("Cache csv_last_modified must be a string or null")
-                if cache_version != CACHE_VERSION:
-                    _LOGGER.info(
-                        "Cache version %s is outdated (expected %s), forcing update",
-                        cache_version,
-                        CACHE_VERSION,
-                    )
-                    return False
-
-                parsed_last_update = self._parse_cached_datetime(last_update)
-                self._stations_cache = stations
-                self._last_update = parsed_last_update
-                self._detected_separator = separator
-                self._csv_etag = csv_etag
-                self._csv_last_modified = csv_last_modified
+            cache_version = data.get("version", "1.0")
+            stations = data.get("stations", {})
+            last_update = data.get("last_update")
+            separator = data.get("csv_separator", "|")
+            csv_etag = data.get("csv_etag")
+            csv_last_modified = data.get("csv_last_modified")
+            if not isinstance(cache_version, str):
+                raise ValueError("Cache version must be a string")
+            if not isinstance(stations, dict) or not all(
+                isinstance(station_id, str) and isinstance(station, dict)
+                for station_id, station in stations.items()
+            ):
+                raise ValueError("Cache stations must be an object of station objects")
+            if last_update is not None and not isinstance(last_update, str):
+                raise ValueError("Cache last_update must be a string or null")
+            if not isinstance(separator, str):
+                raise ValueError("Cache csv_separator must be a string")
+            if csv_etag is not None and not isinstance(csv_etag, str):
+                raise ValueError("Cache csv_etag must be a string or null")
+            if csv_last_modified is not None and not isinstance(csv_last_modified, str):
+                raise ValueError("Cache csv_last_modified must be a string or null")
+            if cache_version != CACHE_VERSION:
                 _LOGGER.info(
-                    "Loaded %d stations from cache (version %s, separator: %s)",
-                    len(self._stations_cache),
+                    "Cache version %s is outdated (expected %s), forcing update",
                     cache_version,
-                    self._detected_separator,
+                    CACHE_VERSION,
                 )
-                return True
+                return False
+
+            parsed_last_update = self._parse_cached_datetime(last_update)
+            self._stations_cache = stations
+            self._snapshot_cache = None
+            self._snapshot_source = None
+            self._last_update = parsed_last_update
+            self._detected_separator = separator
+            self._csv_etag = csv_etag
+            self._csv_last_modified = csv_last_modified
+            _LOGGER.info(
+                "Loaded %d stations from cache (version %s, separator: %s)",
+                len(self._stations_cache),
+                cache_version,
+                self._detected_separator,
+            )
+            return True
 
         except FileNotFoundError:
             _LOGGER.info("No cached data found, will download from CSV")
@@ -476,7 +476,8 @@ class CSVStationManager:
 
     def get_station_by_id(self, station_id: str) -> dict[str, Any] | None:
         """Get station data by ID."""
-        return self._stations_cache.get(station_id)
+        station = self._stations_cache.get(station_id)
+        return dict(station) if station is not None else None
 
     def is_data_available(self) -> bool:
         """Check if station data is available."""
@@ -502,22 +503,34 @@ class CSVStationManager:
     async def async_ensure_registry(self, *, allow_stale: bool = True) -> RegistrySnapshot:
         """Initialize the registry and return an immutable snapshot."""
         initialized = await self.async_initialize()
-        if not initialized and (not allow_stale or not self._stations_cache):
-            raise RegistryUnavailableError("No station registry is available")
+        async with self._operation_lock:
+            if not initialized and (not allow_stale or not self._stations_cache):
+                raise RegistryUnavailableError("No station registry is available")
+            last_update = self._last_update
+            is_stale = (
+                last_update is None
+                or dt_util.now() - last_update >= timedelta(hours=CSV_UPDATE_INTERVAL)
+            )
+            if not allow_stale and is_stale:
+                raise RegistryUnavailableError("The station registry is stale")
+            if self._snapshot_cache is None or self._snapshot_source is not self._stations_cache:
+                stations = await self.hass.async_add_executor_job(
+                    _build_registry_snapshot, self._stations_cache
+                )
+                self._snapshot_cache = stations
+                self._snapshot_source = self._stations_cache
+            return RegistrySnapshot(
+                stations=self._snapshot_cache,
+                updated_at=last_update,
+                is_stale=is_stale,
+            )
 
-        last_update = self._last_update
-        is_stale = (
-            last_update is None
-            or dt_util.now() - last_update >= timedelta(hours=CSV_UPDATE_INTERVAL)
-        )
-        stations = tuple(
-            MappingProxyType(dict(station)) for station in self._stations_cache.values()
-        )
-        return RegistrySnapshot(
-            stations=stations,
-            updated_at=last_update,
-            is_stale=is_stale,
-        )
+    def registry_station_types(self) -> tuple[str, ...]:
+        """Return station types already available in the local registry."""
+        return tuple(sorted({
+            value.strip() for station in self._stations_cache.values()
+            if isinstance(value := station.get("station_type"), str) and value.strip()
+        }, key=str.casefold))
 
     async def async_initialize(self) -> bool:
         """Initialize the CSV manager."""
@@ -561,15 +574,16 @@ class CSVStationManager:
 
     async def async_periodic_update(self) -> bool:
         """Perform periodic update of CSV data."""
-        success = await self.async_update_csv_data()
-        return success
+        return await self.async_update_csv_data()
 
     async def async_clear_cache(self) -> bool:
         """Clear the CSV cache files and in-memory data."""
         async with self._operation_lock:
             self._cache_generation += 1
             self._initialized = False
-            self._stations_cache.clear()
+            self._stations_cache = {}
+            self._snapshot_cache = None
+            self._snapshot_source = None
             self._last_update = None
             self._csv_etag = None
             self._csv_last_modified = None

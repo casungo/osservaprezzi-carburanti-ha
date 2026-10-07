@@ -107,6 +107,11 @@ When you configure a station, the integration automatically creates the followin
 - Includes attributes for fuel name, service type, last update time, and validity date
 - Reports price delta, `up`/`down`/`unchanged` direction, age in minutes, and whether the price is stale
 
+### Manual refresh
+
+Each device has a **Refresh prices** button that refreshes only that station.
+The button also lets you retry after a connection error.
+
 ### Station Information Sensors
 
 - **Station Name**: The name of the fuel station
@@ -140,15 +145,17 @@ Binary sensors are created for each available service at the station:
 - 🚗 **Car Wash**: Vehicle washing services
 - 🔌 **Electric Charging**: Electric vehicle charging stations
 
-### Cron Expression Configuration
+### Refresh schedule
 
-The integration uses a cron expression to schedule automatic data updates. This can be configured
-after initial installation through the integration options, which also previews the next run.
+In the options, choose daily at 08:30, twice daily at 07:30 and 19:30, every 6 hours,
+or weekdays at 08:00. Choose **Custom** to enter a five-field cron expression. Existing cron
+expressions are preserved. Times use the Home Assistant time zone. The options also preview
+the next refresh for the current configuration.
 The same screen lets you choose when prices are marked stale: 6, 12, 24, 48, 72, or 168 hours.
 
 **Default value**: `30 8 * * *` (daily at 8:30 AM)
 
-You can modify this expression to customize when you want the data to be updated. You can use [Crontab Guru](https://crontab.guru) to help build and validate your cron expressions. This tool provides a helpful interface to understand when your scheduled updates will run.
+With the Custom schedule, you can edit this expression. You can use [Crontab Guru](https://crontab.guru) to help build and validate your cron expressions. This tool provides a helpful interface to understand when your scheduled updates will run.
 
 Common examples:
 
@@ -296,6 +303,10 @@ response_variable: registry_results
 
 Home Assistant's diagnostics download includes configuration options, coordinator counts, and
 shared-registry health. Station ID, identity, address, and coordinates are not included.
+
+Comparison responses also include `price_delta`, `price_direction`, `price_age_minutes`, and
+`price_is_stale`, using each station's configured threshold. A price refresh that fails or only
+uses cached data is reported as an error by the action and the device button.
 
 ## Development
 

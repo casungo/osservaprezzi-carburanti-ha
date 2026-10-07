@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
+from .data_helpers import as_coordinate
+
 EARTH_RADIUS_KM = 6371.0088
 
 
@@ -22,16 +24,6 @@ class StationCandidate:
     province: str | None
     station_type: str | None
     distance_km: float | None = None
-
-
-def _as_coordinate(value: Any, minimum: float, maximum: float) -> float | None:
-    """Return a valid coordinate or None."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    coordinate = float(value)
-    if not minimum <= coordinate <= maximum:
-        return None
-    return coordinate
 
 
 def _haversine_distance_km(
@@ -76,9 +68,8 @@ def _station_matches_filters(
     text_filter: str | None,
     station_type: str | None,
 ) -> bool:
-    """Return whether a station matches optional registry filters."""
+    """Return whether a station matches already-normalized query filters."""
     if text_filter:
-        needle = _normalize_text(text_filter).strip()
         searchable = " ".join(
             _normalize_text(station.get(field))
             for field in (
@@ -90,12 +81,11 @@ def _station_matches_filters(
                 "province",
             )
         )
-        if needle not in searchable:
+        if text_filter not in searchable:
             return False
 
     if station_type:
-        expected_type = _normalize_text(station_type).strip()
-        if expected_type not in _normalize_text(station.get("station_type")):
+        if station_type not in _normalize_text(station.get("station_type")):
             return False
     return True
 
@@ -138,27 +128,32 @@ def find_nearby_stations(
     station_type: str | None = None,
 ) -> tuple[StationCandidate, ...]:
     """Return a deterministic list of stations inside the requested radius."""
-    origin_latitude = _as_coordinate(latitude, -90, 90)
-    origin_longitude = _as_coordinate(longitude, -180, 180)
+    origin_latitude = as_coordinate(latitude, -90, 90)
+    origin_longitude = as_coordinate(longitude, -180, 180)
     if (
         origin_latitude is None
         or origin_longitude is None
         or isinstance(radius_km, bool)
+        or not isinstance(radius_km, (int, float))
         or radius_km <= 0
+        or isinstance(limit, bool)
+        or not isinstance(limit, int)
         or limit <= 0
     ):
         return ()
 
+    normalized_text_filter = _normalize_text(text_filter).strip() or None
+    normalized_station_type = _normalize_text(station_type).strip() or None
     candidates: list[StationCandidate] = []
     for station in stations:
         if not _station_matches_filters(
             station,
-            text_filter=text_filter,
-            station_type=station_type,
+            text_filter=normalized_text_filter,
+            station_type=normalized_station_type,
         ):
             continue
-        station_latitude = _as_coordinate(station.get("latitude"), -90, 90)
-        station_longitude = _as_coordinate(station.get("longitude"), -180, 180)
+        station_latitude = as_coordinate(station.get("latitude"), -90, 90)
+        station_longitude = as_coordinate(station.get("longitude"), -180, 180)
         if station_latitude is None or station_longitude is None:
             continue
 
@@ -197,14 +192,18 @@ def find_stations_by_area(
     """Return stations matching a municipality and optional province."""
     municipality_filter = _normalize_text(municipality).strip()
     province_filter = _normalize_text(province).strip()
+    normalized_text_filter = _normalize_text(text_filter).strip()
+    normalized_station_type = _normalize_text(station_type).strip()
     if (
-        limit <= 0
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or limit <= 0
         or not any(
             (
                 municipality_filter,
                 province_filter,
-                _normalize_text(text_filter).strip(),
-                _normalize_text(station_type).strip(),
+                normalized_text_filter,
+                normalized_station_type,
             )
         )
     ):
@@ -220,8 +219,8 @@ def find_stations_by_area(
             continue
         if not _station_matches_filters(
             station,
-            text_filter=text_filter,
-            station_type=station_type,
+            text_filter=normalized_text_filter or None,
+            station_type=normalized_station_type or None,
         ):
             continue
         candidate = _candidate_from_station(station, distance_km=None)

@@ -1,4 +1,22 @@
-.PHONY: hassfest hacs
+.PHONY: test test-ha lint typecheck check hassfest hacs
+
+PYTHON ?= .venv/bin/python
+HA_PYTHON ?= .venv-ha/bin/python
+
+test:
+	$(PYTHON) -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
+	$(PYTHON) -m coverage report --fail-under=100
+
+test-ha:
+	$(HA_PYTHON) -m pytest -c pytest-ha.ini -q
+
+lint:
+	$(PYTHON) -m ruff check .
+
+typecheck:
+	$(PYTHON) -m mypy
+
+check: lint typecheck test test-ha
 
 hassfest:
 	docker run --rm -v "$(CURDIR):/github/workspace" ghcr.io/home-assistant/hassfest

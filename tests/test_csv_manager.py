@@ -241,14 +241,7 @@ class TestCSVParsing:
         assert csv_manager._parse_station_values([], indices) is None
         assert csv_manager._parse_station_values(["12345"], indices) is None
 
-    def test_parse_coordinate_invalid_values(self):
-        assert CSVStationManager._parse_coordinate("") is None
-        assert CSVStationManager._parse_coordinate("not-a-number") is None
-        assert CSVStationManager._parse_coordinate("NaN") is None
-        assert CSVStationManager._parse_coordinate("inf") is None
-        assert CSVStationManager._parse_coordinate("-inf") is None
 
-class TestCSVCacheValidation:
     def test_builds_conditional_headers(self, csv_manager):
         csv_manager._csv_etag = '"abc123"'
         csv_manager._csv_last_modified = "Wed, 01 Jan 2025 00:00:00 GMT"
@@ -1038,3 +1031,49 @@ class TestCSVCacheValidation:
             assert await load_task is True
 
         asyncio.run(_exercise())
+
+
+def test_registry_rejects_stale_initialized_cache(csv_manager, monkeypatch):
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+    csv_manager._initialized = True
+    csv_manager._stations_cache = {"1": {"id": "1"}}
+    csv_manager._last_update = now - timedelta(hours=48)
+    with pytest.raises(RegistryUnavailableError, match="stale"):
+        asyncio.run(csv_manager.async_ensure_registry(allow_stale=False))
+
+
+def test_registry_snapshot_reuse_and_replacement(csv_manager, monkeypatch):
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+    csv_manager._initialized = True
+    csv_manager._last_update = now
+    csv_manager._stations_cache = {"1": {"id": "1", "name": "Original"}}
+    first = asyncio.run(csv_manager.async_ensure_registry())
+    second = asyncio.run(csv_manager.async_ensure_registry())
+    assert first.stations is second.stations
+    csv_manager._stations_cache = {"1": {"id": "1", "name": "Updated"}}
+    third = asyncio.run(csv_manager.async_ensure_registry())
+    assert first.stations[0]["name"] == "Original"
+    assert third.stations[0]["name"] == "Updated"
+    assert first.stations is not third.stations
+
+
+def test_registry_station_type_suggestions(csv_manager):
+    csv_manager._stations_cache = {"1": {"station_type": " Stradale "}, "2": {"station_type": "Autostradale"}, "3": {"station_type": None}, "4": {"station_type": "Stradale"}}
+    assert csv_manager.registry_station_types() == ("Autostradale", "Stradale")
+
+
+@pytest.mark.parametrize("column,value", [("latitude", "91"), ("longitude", "181"), ("latitude", "NaN"), ("longitude", "inf")])
+def test_csv_rejects_out_of_range_coordinates(csv_manager, column, value):
+    values = ["1", "41", "12"]
+    indices = {"id": 0, "latitude": 1, "longitude": 2}
+    values[indices[column]] = value
+    assert csv_manager._parse_station_values(values, indices) is None
+
+
+def test_station_lookup_cannot_modify_shared_registry(csv_manager):
+    csv_manager._stations_cache = {"1": {"id": "1", "name": "Original"}}
+    station = csv_manager.get_station_by_id("1")
+    station["name"] = "Changed"
+    assert csv_manager.get_station_by_id("1")["name"] == "Original"

@@ -1,0 +1,991 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-07T01:35:04.491403+00:00",
+  "sources": {
+    "baseline": {
+      "ref": "v2.6.0",
+      "commit": "119610b0f34cbafff382217c179286b2d17b99e8",
+      "source_sha256": "50144b63c498883afd75bb083feb266a171761b13beb89fcbfb24b82306613b3",
+      "version": "2.6.0"
+    },
+    "candidate": {
+      "ref": "working-tree",
+      "commit": "e0881b7576ed4980db79da18288fc23a352cce92",
+      "source_sha256": "25cf47de4e9bfd8e922802748593051ac6bea581059693a20ee97e0b53de11b4",
+      "version": "2.7.0-beta.1"
+    }
+  },
+  "image_id": "sha256:cd74b0e02cee84de9f53b0f8fc079c8979796b81a6b02e1ee0cd09f038703afd",
+  "image_digests": [
+    "ghcr.io/home-assistant/home-assistant@sha256:3e6710a7ab2a61311d9d899b719f6c3657791c63e8f4942cec4ebc42401d6b76"
+  ],
+  "runner_sha256": "5ab1fc5147874299c03b362dc459f817383d360f9c3e7fa4a27bd9575291bc63",
+  "inputs": {
+    "captured_at": "2026-10-07T01:24:02.092220+00:00",
+    "station_ids": [
+      "54233",
+      "54234",
+      "54404",
+      "54235"
+    ],
+    "sources": [
+      {
+        "url": "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv",
+        "status": 200,
+        "bytes": 3572970,
+        "etag": "\"3684ea-65d266c41f64f\"",
+        "last_modified": "Tue, 06 Oct 2026 06:51:06 GMT"
+      },
+      {
+        "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54233",
+        "status": 200,
+        "bytes": 3587,
+        "etag": null,
+        "last_modified": null
+      },
+      {
+        "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54234",
+        "status": 200,
+        "bytes": 3574,
+        "etag": null,
+        "last_modified": null
+      },
+      {
+        "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54404",
+        "status": 200,
+        "bytes": 3946,
+        "etag": null,
+        "last_modified": null
+      },
+      {
+        "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54235",
+        "status": 200,
+        "bytes": 3671,
+        "etag": null,
+        "last_modified": null
+      }
+    ],
+    "sha256": {
+      "registry.csv": "755a4d8ee0bbdec8df581f348b89eed454328402e73b077d3251e1ed64fd27d4",
+      "stations.json": "505af55ee427327ad63135a2171e48068293ebaa8c78d2f40e6a29bfe27ed76d"
+    }
+  },
+  "probe_sha256": "f16b69066002daf47c83d183a7d877149cdae46f9ad7ce1b617460372c4e5c1d",
+  "settings": {
+    "baseline": "v2.6.0",
+    "candidate": "working-tree",
+    "image": "ghcr.io/home-assistant/home-assistant:stable",
+    "output": "artifacts/kpi/2.6-vs-2.7-final-20261007",
+    "inputs": "artifacts/kpi/smoke-20261007/inputs",
+    "station_ids": [
+      "54233",
+      "54234",
+      "54404",
+      "54235"
+    ],
+    "rounds": 2,
+    "repeats": 10,
+    "reloads": 5,
+    "idle_seconds": 60,
+    "timeout": 1200,
+    "cpus": 2,
+    "memory": "1g",
+    "fail_on_performance": false
+  },
+  "guardrail_failures": {
+    "round-1-baseline": [],
+    "round-1-candidate": [],
+    "round-2-candidate": [],
+    "round-2-baseline": [],
+    "upgrade": []
+  },
+  "not_measured": [
+    "24\u201372 hour memory slope",
+    "production availability over time",
+    "live upstream latency and freshness",
+    "full retry/backoff and outage recovery",
+    "1/10/50 station scaling",
+    "cron and opening-hours boundary delay",
+    "independent geographic search oracle",
+    "OS-level disk write bytes"
+  ],
+  "cross_version_identity_changes": 0,
+  "comparison": [
+    {
+      "metric": "setup_to_entities_ms",
+      "unit": "ms",
+      "baseline": 14047.88445821032,
+      "candidate": 14047.021057922393,
+      "delta": -0.863400287926197,
+      "delta_percent": -0.006146123215169105,
+      "baseline_run_range": 8.983190171420574,
+      "threshold_absolute": 2107.182668731548,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          14052.37605329603,
+          14043.392863124609
+        ],
+        "candidate": [
+          14045.683586038649,
+          14048.358529806137
+        ]
+      }
+    },
+    {
+      "metric": "registry_cache_bytes",
+      "unit": "bytes",
+      "baseline": 8821562.0,
+      "candidate": 6658828.0,
+      "delta": -2162734.0,
+      "delta_percent": -24.51645184832346,
+      "baseline_run_range": 0.0,
+      "threshold_absolute": 1323234.3,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          8821562.0,
+          8821562.0
+        ],
+        "candidate": [
+          6658828.0,
+          6658828.0
+        ]
+      }
+    },
+    {
+      "metric": "registry_parse_ms.median",
+      "unit": "ms",
+      "baseline": 157.92236221022904,
+      "candidate": 174.37566176522523,
+      "delta": 16.453299554996192,
+      "delta_percent": 10.418600206279379,
+      "baseline_run_range": 8.824233431369066,
+      "threshold_absolute": 23.688354331534356,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          162.33447892591357,
+          153.5102454945445
+        ],
+        "candidate": [
+          175.36093504168093,
+          173.39038848876953
+        ]
+      }
+    },
+    {
+      "metric": "registry_conditional_update_ms.median",
+      "unit": "ms",
+      "baseline": 486.5569347748533,
+      "candidate": 437.5218141358346,
+      "delta": -49.035120639018714,
+      "delta_percent": -10.077982068369646,
+      "baseline_run_range": 28.460777597501874,
+      "threshold_absolute": 72.983540216228,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          472.32654597610235,
+          500.7873235736042
+        ],
+        "candidate": [
+          434.5631224568933,
+          440.4805058147758
+        ]
+      }
+    },
+    {
+      "metric": "search_service_ms.median",
+      "unit": "ms",
+      "baseline": 78.20690865628421,
+      "candidate": 56.28452403470874,
+      "delta": -21.922384621575475,
+      "delta_percent": -28.03126347561358,
+      "baseline_run_range": 1.7435052432119846,
+      "threshold_absolute": 11.731036298442632,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          77.33515603467822,
+          79.0786612778902
+        ],
+        "candidate": [
+          57.204629527404904,
+          55.36441854201257
+        ]
+      }
+    },
+    {
+      "metric": "nearby_search_ms.median",
+      "unit": "ms",
+      "baseline": 40.64766445662826,
+      "candidate": 40.37537320982665,
+      "delta": -0.27229124680161476,
+      "delta_percent": -0.6698816535748421,
+      "baseline_run_range": 3.033163258805871,
+      "threshold_absolute": 6.0971496684942394,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          39.13108282722533,
+          42.1642460860312
+        ],
+        "candidate": [
+          40.83844204433262,
+          39.91230437532067
+        ]
+      }
+    },
+    {
+      "metric": "compare_service_ms.median",
+      "unit": "ms",
+      "baseline": 0.012353528290987015,
+      "candidate": 0.05247513763606548,
+      "delta": 0.04012160934507847,
+      "delta_percent": 324.77854423461116,
+      "baseline_run_range": 0.0005057081580162048,
+      "threshold_absolute": 1.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          0.012100674211978912,
+          0.012606382369995117
+        ],
+        "candidate": [
+          0.05310750566422939,
+          0.05184276960790157
+        ]
+      }
+    },
+    {
+      "metric": "next_change_read_pairs_1000_ms.median",
+      "unit": "ms",
+      "baseline": 149.96607170905918,
+      "candidate": 6.361597799696028,
+      "delta": -143.60447390936315,
+      "delta_percent": -95.75797530254856,
+      "baseline_run_range": 3.0486194882541895,
+      "threshold_absolute": 22.494910756358877,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          148.44176196493208,
+          151.49038145318627
+        ],
+        "candidate": [
+          6.796142319217324,
+          5.927053280174732
+        ]
+      }
+    },
+    {
+      "metric": "refresh_ms.median",
+      "unit": "ms",
+      "baseline": 8002.312926808372,
+      "candidate": 8002.6646016631275,
+      "delta": 0.3516748547554016,
+      "delta_percent": 0.004394665117097126,
+      "baseline_run_range": 1.2146118097007275,
+      "threshold_absolute": 1200.3469390212558,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          8001.705620903522,
+          8002.9202327132225
+        ],
+        "candidate": [
+          8002.272247802466,
+          8003.056955523789
+        ]
+      }
+    },
+    {
+      "metric": "refresh_cpu_ms.median",
+      "unit": "ms CPU",
+      "baseline": 83.28823025000088,
+      "candidate": 82.41535049999982,
+      "delta": -0.8728797500010614,
+      "delta_percent": -1.0480229287871707,
+      "baseline_run_range": 0.21842950000028338,
+      "threshold_absolute": 12.49323453750013,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          83.17901550000073,
+          83.39744500000101
+        ],
+        "candidate": [
+          81.37519950000005,
+          83.45550149999958
+        ]
+      }
+    },
+    {
+      "metric": "reload_ms.median",
+      "unit": "ms",
+      "baseline": 2001.832481008023,
+      "candidate": 2002.0580918062478,
+      "delta": 0.22561079822480679,
+      "delta_percent": 0.011270213684973301,
+      "baseline_run_range": 0.5990061908960342,
+      "threshold_absolute": 300.27487215120345,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          2001.532977912575,
+          2002.131984103471
+        ],
+        "candidate": [
+          2002.282918896526,
+          2001.8332647159696
+        ]
+      }
+    },
+    {
+      "metric": "process_lifetime_peak_mib",
+      "unit": "MiB",
+      "baseline": 528.666015625,
+      "candidate": 505.169921875,
+      "delta": -23.49609375,
+      "delta_percent": -4.444411604975672,
+      "baseline_run_range": 3.20703125,
+      "threshold_absolute": 79.29990234374999,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          530.26953125,
+          527.0625
+        ],
+        "candidate": [
+          525.625,
+          484.71484375
+        ]
+      }
+    },
+    {
+      "metric": "rss_steady_mib",
+      "unit": "MiB",
+      "baseline": 365.44140625,
+      "candidate": 369.328125,
+      "delta": 3.88671875,
+      "delta_percent": 1.0635682447382766,
+      "baseline_run_range": 11.9296875,
+      "threshold_absolute": 54.816210937499996,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          359.4765625,
+          371.40625
+        ],
+        "candidate": [
+          367.84765625,
+          370.80859375
+        ]
+      }
+    },
+    {
+      "metric": "rss_reload_growth_mib",
+      "unit": "MiB per reload sequence",
+      "baseline": 0.103515625,
+      "candidate": 0.23828125,
+      "delta": 0.134765625,
+      "delta_percent": 130.18867924528303,
+      "baseline_run_range": 0.07421875,
+      "threshold_absolute": 5.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          0.06640625,
+          0.140625
+        ],
+        "candidate": [
+          0.23828125,
+          0.23828125
+        ]
+      }
+    },
+    {
+      "metric": "event_loop_lag_ms.refresh.p95",
+      "unit": "ms",
+      "baseline": 0.7003224454820156,
+      "candidate": 0.7145579438656569,
+      "delta": 0.014235498383641243,
+      "delta_percent": 2.0327062877219766,
+      "baseline_run_range": 0.019914470613002777,
+      "threshold_absolute": 5.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          0.6903652101755142,
+          0.710279680788517
+        ],
+        "candidate": [
+          0.7058409973978996,
+          0.7232748903334141
+        ]
+      }
+    },
+    {
+      "metric": "event_loop_lag_ms.parse.p95",
+      "unit": "ms",
+      "baseline": 12.97962898388505,
+      "candidate": 12.041606940329075,
+      "delta": -0.938022043555975,
+      "delta_percent": -7.226878709095483,
+      "baseline_run_range": 2.6728762313723564,
+      "threshold_absolute": 5.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          14.316067099571228,
+          11.643190868198872
+        ],
+        "candidate": [
+          10.883567854762077,
+          13.199646025896072
+        ]
+      }
+    },
+    {
+      "metric": "refresh_station_requests",
+      "unit": "requests",
+      "baseline": 40.0,
+      "candidate": 40.0,
+      "delta": 0.0,
+      "delta_percent": 0.0,
+      "baseline_run_range": 0.0,
+      "threshold_absolute": 6.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          40.0,
+          40.0
+        ],
+        "candidate": [
+          40.0,
+          40.0
+        ]
+      }
+    },
+    {
+      "metric": "refresh_csv_requests",
+      "unit": "requests",
+      "baseline": 0.0,
+      "candidate": 0.0,
+      "delta": 0.0,
+      "delta_percent": null,
+      "baseline_run_range": 0.0,
+      "threshold_absolute": 0.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          0.0,
+          0.0
+        ],
+        "candidate": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "metric": "station_cache_writes",
+      "unit": "writes",
+      "baseline": 40.0,
+      "candidate": 40.0,
+      "delta": 0.0,
+      "delta_percent": 0.0,
+      "baseline_run_range": 0.0,
+      "threshold_absolute": 6.0,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          40.0,
+          40.0
+        ],
+        "candidate": [
+          40.0,
+          40.0
+        ]
+      }
+    },
+    {
+      "metric": "refresh_state_events",
+      "unit": "events",
+      "baseline": 20.5,
+      "candidate": 21.0,
+      "delta": 0.5,
+      "delta_percent": 2.4390243902439024,
+      "baseline_run_range": 1.0,
+      "threshold_absolute": 3.0749999999999997,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          21.0,
+          20.0
+        ],
+        "candidate": [
+          21.0,
+          21.0
+        ]
+      }
+    },
+    {
+      "metric": "recorder_rows_total",
+      "unit": "rows",
+      "baseline": 237.0,
+      "candidate": 260.0,
+      "delta": 23.0,
+      "delta_percent": 9.70464135021097,
+      "baseline_run_range": 2.0,
+      "threshold_absolute": 35.55,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          238.0,
+          236.0
+        ],
+        "candidate": [
+          260.0,
+          260.0
+        ]
+      }
+    },
+    {
+      "metric": "recorder_rows_common_entities",
+      "unit": "rows",
+      "baseline": 237.0,
+      "candidate": 238.0,
+      "delta": 1.0,
+      "delta_percent": 0.42194092827004215,
+      "baseline_run_range": 2.0,
+      "threshold_absolute": 35.55,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          238.0,
+          236.0
+        ],
+        "candidate": [
+          238.0,
+          238.0
+        ]
+      }
+    },
+    {
+      "metric": "database_bytes",
+      "unit": "bytes",
+      "baseline": 315392.0,
+      "candidate": 331776.0,
+      "delta": 16384.0,
+      "delta_percent": 5.194805194805195,
+      "baseline_run_range": 0.0,
+      "threshold_absolute": 47308.799999999996,
+      "status": "within_guardrail",
+      "run_values": {
+        "baseline": [
+          315392.0,
+          315392.0
+        ],
+        "candidate": [
+          331776.0,
+          331776.0
+        ]
+      }
+    }
+  ],
+  "input_quality": {
+    "registry_rows": 23882,
+    "distinct_station_ids": 23882,
+    "duplicate_ids": 0,
+    "invalid_coordinate_or_id_rows": 116,
+    "usable_station_ids": 23766,
+    "fuel_count": 10,
+    "price_ages_hours_at_capture": {
+      "54233": [
+        31.137525616666668,
+        31.137525616666668
+      ],
+      "54234": [
+        31.137803394444447,
+        31.137803394444447
+      ],
+      "54404": [
+        42.388914505555555,
+        42.388914505555555,
+        42.388914505555555,
+        42.388914505555555
+      ],
+      "54235": [
+        16.889470061111112,
+        16.889470061111112
+      ]
+    },
+    "unknown_price_timestamps": 0,
+    "source_prices_older_than_24h": 8,
+    "capture_reference": "2026-10-07T01:24:02.092220+00:00"
+  },
+  "common_entity_count": 49,
+  "postprocessing": {
+    "purpose": "Independent CSV coverage, RSS and shared-entity Recorder aggregates from retained observations; timing samples unchanged",
+    "tools_sha256": "a7e8901a761da092349153b583151071ad57b3183fb9bb1d1fda4c2752aed495",
+    "script_sha256": "f284620e1f8d28555fbbeaa9ff4b8373780302c66b059eeb2b516c4dc5d8837c"
+  },
+  "per_run": [
+    {
+      "role": "baseline",
+      "round": 1,
+      "entity_count": 49,
+      "recorder_rows_total": 238,
+      "recorder_rows_common_entities": 238,
+      "listeners_after_reloads": [
+        61,
+        61,
+        61,
+        61,
+        61,
+        61
+      ],
+      "timers_after_reloads": [
+        7,
+        7,
+        7,
+        7,
+        7,
+        7
+      ],
+      "rss_after_refresh_mib": [
+        359.43359375,
+        359.44140625,
+        359.453125,
+        359.45703125,
+        359.46484375,
+        359.46484375,
+        359.47265625,
+        359.4765625,
+        359.4765625,
+        359.4765625
+      ],
+      "rss_after_reload_mib": [
+        359.4765625,
+        359.4921875,
+        359.5078125,
+        359.515625,
+        359.5390625,
+        359.54296875
+      ],
+      "fuel_availability_samples": {
+        "parse": {
+          "observations": 630,
+          "valid": 630,
+          "fraction": 1.0
+        },
+        "registry": {
+          "observations": 1920,
+          "valid": 1920,
+          "fraction": 1.0
+        },
+        "search": {
+          "observations": 440,
+          "valid": 440,
+          "fraction": 1.0
+        },
+        "properties": {
+          "observations": 40,
+          "valid": 40,
+          "fraction": 1.0
+        },
+        "refresh": {
+          "observations": 38470,
+          "valid": 38470,
+          "fraction": 1.0
+        },
+        "reload": {
+          "observations": 4960,
+          "valid": 4960,
+          "fraction": 1.0
+        },
+        "idle": {
+          "observations": 29560,
+          "valid": 29560,
+          "fraction": 1.0
+        }
+      }
+    },
+    {
+      "role": "candidate",
+      "round": 1,
+      "entity_count": 53,
+      "recorder_rows_total": 260,
+      "recorder_rows_common_entities": 238,
+      "listeners_after_reloads": [
+        65,
+        65,
+        65,
+        65,
+        65,
+        65
+      ],
+      "timers_after_reloads": [
+        7,
+        7,
+        7,
+        7,
+        7,
+        7
+      ],
+      "rss_after_refresh_mib": [
+        367.6015625,
+        367.640625,
+        367.6796875,
+        367.69921875,
+        367.73828125,
+        367.75390625,
+        367.78125,
+        367.80859375,
+        367.828125,
+        367.84765625
+      ],
+      "rss_after_reload_mib": [
+        367.84765625,
+        367.9375,
+        367.98046875,
+        368.02734375,
+        368.07421875,
+        368.0859375
+      ],
+      "fuel_availability_samples": {
+        "parse": {
+          "observations": 690,
+          "valid": 690,
+          "fraction": 1.0
+        },
+        "registry": {
+          "observations": 1810,
+          "valid": 1810,
+          "fraction": 1.0
+        },
+        "search": {
+          "observations": 380,
+          "valid": 380,
+          "fraction": 1.0
+        },
+        "properties": {
+          "observations": 30,
+          "valid": 30,
+          "fraction": 1.0
+        },
+        "refresh": {
+          "observations": 38470,
+          "valid": 38470,
+          "fraction": 1.0
+        },
+        "reload": {
+          "observations": 4970,
+          "valid": 4968,
+          "fraction": 0.9995975855130784
+        },
+        "idle": {
+          "observations": 29550,
+          "valid": 29550,
+          "fraction": 1.0
+        }
+      }
+    },
+    {
+      "role": "candidate",
+      "round": 2,
+      "entity_count": 53,
+      "recorder_rows_total": 260,
+      "recorder_rows_common_entities": 238,
+      "listeners_after_reloads": [
+        65,
+        65,
+        65,
+        65,
+        65,
+        65
+      ],
+      "timers_after_reloads": [
+        7,
+        7,
+        7,
+        7,
+        7,
+        7
+      ],
+      "rss_after_refresh_mib": [
+        370.5859375,
+        370.62109375,
+        370.64453125,
+        370.66015625,
+        370.71484375,
+        370.73046875,
+        370.75390625,
+        370.76953125,
+        370.79296875,
+        370.80859375
+      ],
+      "rss_after_reload_mib": [
+        370.80859375,
+        370.90234375,
+        370.96484375,
+        371.0390625,
+        371.11328125,
+        371.046875
+      ],
+      "fuel_availability_samples": {
+        "parse": {
+          "observations": 690,
+          "valid": 690,
+          "fraction": 1.0
+        },
+        "registry": {
+          "observations": 1810,
+          "valid": 1810,
+          "fraction": 1.0
+        },
+        "search": {
+          "observations": 380,
+          "valid": 380,
+          "fraction": 1.0
+        },
+        "properties": {
+          "observations": 20,
+          "valid": 20,
+          "fraction": 1.0
+        },
+        "refresh": {
+          "observations": 38470,
+          "valid": 38470,
+          "fraction": 1.0
+        },
+        "reload": {
+          "observations": 4970,
+          "valid": 4970,
+          "fraction": 1.0
+        },
+        "idle": {
+          "observations": 29560,
+          "valid": 29560,
+          "fraction": 1.0
+        }
+      }
+    },
+    {
+      "role": "baseline",
+      "round": 2,
+      "entity_count": 49,
+      "recorder_rows_total": 236,
+      "recorder_rows_common_entities": 236,
+      "listeners_after_reloads": [
+        61,
+        61,
+        61,
+        61,
+        61,
+        61
+      ],
+      "timers_after_reloads": [
+        7,
+        7,
+        7,
+        7,
+        7,
+        7
+      ],
+      "rss_after_refresh_mib": [
+        371.35546875,
+        371.3671875,
+        371.375,
+        371.37890625,
+        371.3828125,
+        371.390625,
+        371.39453125,
+        371.40234375,
+        371.40234375,
+        371.40625
+      ],
+      "rss_after_reload_mib": [
+        371.40625,
+        371.4609375,
+        371.49609375,
+        371.50390625,
+        371.53125,
+        371.546875
+      ],
+      "fuel_availability_samples": {
+        "parse": {
+          "observations": 620,
+          "valid": 620,
+          "fraction": 1.0
+        },
+        "registry": {
+          "observations": 2040,
+          "valid": 2040,
+          "fraction": 1.0
+        },
+        "search": {
+          "observations": 470,
+          "valid": 470,
+          "fraction": 1.0
+        },
+        "properties": {
+          "observations": 30,
+          "valid": 30,
+          "fraction": 1.0
+        },
+        "refresh": {
+          "observations": 38490,
+          "valid": 38490,
+          "fraction": 1.0
+        },
+        "reload": {
+          "observations": 4970,
+          "valid": 4970,
+          "fraction": 1.0
+        },
+        "idle": {
+          "observations": 29550,
+          "valid": 29550,
+          "fraction": 1.0
+        }
+      }
+    }
+  ],
+  "upgrade": {
+    "status": "passed",
+    "identity_changes_from_persisted": 0,
+    "identity_changes_after_reload": 0,
+    "fuel_mismatches": [],
+    "timers_after_unload": 0,
+    "listeners_after_unload": 0,
+    "tasks_after_unload": []
+  },
+  "validation": {
+    "unit_tests": {
+      "passed": 491,
+      "skipped": 7,
+      "integration_coverage_percent": 100
+    },
+    "real_ha_tests": {
+      "passed": 15
+    },
+    "ruff": "passed",
+    "mypy": "passed",
+    "hassfest": "passed, zero invalid integrations",
+    "hacs_local": "not run: standalone validator unavailable; Makefile target validates the remote ref",
+    "latest_runner_end_to_end_smoke": "passed",
+    "live_docker_profiles": [
+      "upgrade",
+      "fresh",
+      "lived",
+      "outage",
+      "recovery"
+    ],
+    "live_docker_upgrade_from": "v2.6.0-beta.1",
+    "measured_replay_upgrade_from": "v2.6.0",
+    "live_docker_log_sha256": "6184ad0a7a7f604ff9554ae461d4c2786873bbed8c3f761209880fae9964819d"
+  }
+}

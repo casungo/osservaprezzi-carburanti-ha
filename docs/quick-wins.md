@@ -139,5 +139,6 @@ entità contro 49, per le nuove entità introdotte.
 Nessuna misura ha superato i guardrail provvisori di regressione. Il parsing del registro è
 aumentato del 10,4%, entro la soglia prevista. I due round sono evidenza direzionale, non una
 prova statistica; il replay non misura latenza live MIMIT, disponibilità prolungata o crescita
-della memoria su più giorni. Il report grezzo con campioni, provenienza e limiti è pubblicato
-insieme alla pre-release; metodo e ripetizione sono descritti in [docs/kpi-monitoring.md](kpi-monitoring.md).
+della memoria su più giorni. Il [report completo](benchmarks/2026-10-07-v2.6.0-v2.7.0-beta.1.md)
+riporta campioni, provenienza e limiti; metodo e ripetizione sono descritti in
+[docs/kpi-monitoring.md](kpi-monitoring.md).

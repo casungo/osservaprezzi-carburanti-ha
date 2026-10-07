@@ -90,7 +90,8 @@ entity reads. Existing entity IDs and config-entry data remain compatible, with 
 - The live MIMIT payload contract passed. The Home Assistant Docker regression passed `fresh`,
   `lived`, `upgrade`, `outage`, and `recovery`, including upgrade from `v2.6.0-beta.1`.
 - Ruff, mypy, and hassfest passed locally. The release comparison procedure and raw measurements
-  are documented in [docs/kpi-monitoring.md](docs/kpi-monitoring.md); its JSON and Markdown reports
+  are documented in [docs/kpi-monitoring.md](docs/kpi-monitoring.md) and the
+  [v2.6.0 comparison report](docs/benchmarks/2026-10-07-v2.6.0-v2.7.0-beta.1.md); raw samples
   accompany the beta release.
 
 The performance numbers are synthetic microbenchmarks, not end-to-end startup or MIMIT latency

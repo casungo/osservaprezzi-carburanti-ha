@@ -1,8 +1,9 @@
-# Interventi dell'audit
+# Cambiamenti inclusi in v2.7.0-beta.1
 
-I numeri corrispondono ai 50 interventi autorizzati. Le prime sei correzioni UX, già presenti
-nel checkout, sono mantenute. Le modifiche non richiedono migrazioni delle configurazioni e
-mantengono gli ID delle entità.
+Questa beta raccoglie tutti i 50 interventi concordati. Le modifiche mantengono gli ID delle
+entità e non richiedono migrazioni. Insieme, fanno emergere gli errori invece di presentarli come
+aggiornamenti riusciti, migliorano i flussi di configurazione e riducono il lavoro ripetuto nelle
+letture delle entità.
 
 | N. | Intervento | Area |
 | --- | --- | --- |
@@ -57,37 +58,65 @@ mantengono gli ID delle entità.
 | 49 | Cache pip nei job Python | CI |
 | 50 | Comandi locali `make` per test e verifiche | Sviluppo |
 
-## Misure del registro
+## Confronto prima e dopo
 
-Benchmark sintetico con 20.000 stazioni e nove ripetizioni, mediana sullo stesso host:
+Confronto tra il genitore `96dbdd7` e `cc7dd69`, eseguito sullo stesso host e negli stessi
+ambienti: Python 3.11 per i test unitari, Python 3.14 per i test Home Assistant e i benchmark.
 
-| Operazione | Risultato |
-| --- | --- |
-| Copiare lo snapshot | 12,518 ms |
-| Riusare lo snapshot | 0,000113 ms |
-| JSON formattato | 5.975.648 byte, 44,761 ms |
-| JSON compatto | 4.155.632 byte, 41,616 ms |
+| Suite | Prima | Dopo |
+| --- | --- | --- |
+| Test unitari | 389 passati, 7 saltati | 481 passati, 7 saltati |
+| Coverage integrazione | 100% su 1.759 statement | 100% su 2.051 statement |
+| Test con Home Assistant reale | 6 passati | 15 passati |
 
-Il JSON compatto occupa il 30,5% in meno. Il benchmark verifica che i due formati decodifichino
-agli stessi dati. Lo snapshot viene ricreato dopo la sostituzione del registro e dopo la pulizia
-della cache; una copia delle informazioni della singola stazione protegge i dati interni.
-Le misure sono riproducibili con il comando documentato in [testing.md](testing.md).
+La suite è cresciuta di 92 test senza un aumento misurabile del tempo di esecuzione. La coverage
+è rimasta al 100% con 292 statement in più. La coverage misura l'esecuzione, non dimostra da sola
+la correttezza di ogni comportamento.
 
-Per il prossimo cambio di orario, nove ripetizioni di 1.000 coppie di letture sullo stesso
-host hanno misurato 106,759 ms ricalcolando entrambe le proprietà e 3,861 ms leggendo il risultato
-preparato all'aggiornamento. Il calcolo agli aggiornamenti resta necessario. Il timer aggiorna
-il risultato ogni minuto e i test reali verificano sia il tick sia la modifica degli orari.
+## Benchmark ripetibili
+
+Il benchmark della cache usa 20.000 record sintetici, 30 campioni dopo il riscaldamento e alterna
+l'ordine delle codifiche. Confronta il JSON formattato, come nella versione precedente, con il JSON
+compatto. Verifica anche che entrambi decodifichino negli stessi dati. Mediane e intervalli sono
+stati misurati sullo stesso host:
+
+| Codifica cache | Dimensione | Mediana per serializzazione | Intervallo dei 30 campioni |
+| --- | ---: | ---: | ---: |
+| JSON formattato | 5.975.648 byte | 40,779 ms | 37,629–46,485 ms |
+| JSON compatto | 4.155.632 byte | 38,435 ms | 36,827–43,657 ms |
+
+Il JSON compatto occupa il 30,5% in meno e in questa prova ha ridotto il tempo mediano del 5,7%.
+Il risultato principale è il risparmio di spazio; i tempi variano con la macchina e i due
+intervalli si sovrappongono.
+
+Per il sensore del prossimo cambio orario, ogni campione esegue 1.000 coppie di letture. Sono
+stati raccolti 30 campioni alternando l'ordine tra il ricalcolo completo e la lettura delle
+proprietà preparate all'aggiornamento:
+
+| Lettura | Mediana per 1.000 coppie | Intervallo dei 30 campioni |
+| --- | ---: | ---: |
+| Ricalcolare entrambe le proprietà | 103,258 ms | 101,440–119,606 ms |
+| Leggere il valore preparato | 3,823 ms | 3,669–4,606 ms |
+
+In questo carico sintetico le letture preparate sono 27,0 volte più veloci. Il calcolo resta
+necessario quando cambiano i dati o al tick del timer, non a ogni lettura dello stato.
+
+Per ripetere entrambe le prove:
 
 ```bash
-PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_schedule.py
+PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_registry.py --stations 20000 --repeats 30
+PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_schedule.py --read-pairs 1000 --repeats 30
 ```
+
+Sono microbenchmark sintetici: non misurano l'avvio completo di Home Assistant né la latenza dei
+server MIMIT. La regressione d'integrazione reale è un controllo separato.
 
 ## Verifiche
 
-- Suite leggera: 481 test passati, 7 saltati; coverage del codice dell'integrazione al 100%.
-- Home Assistant reale: 15 test passati, compresi selezione con risultati limitati e tick nel fuso Europe/Rome.
-- Ruff, mypy, hassfest e controllo del diff: passati.
-- Docker con API ufficiale: passati i profili fresh, upgrade, lived, outage e recovery.
-- HACS locale non eseguito: il CLI non è installato e il target del progetto valida il ref GitHub remoto.
-
-Le modifiche rimangono locali, senza commit, push, release o deploy.
+- 481 test unitari passati, 7 saltati; coverage dell'integrazione al 100%.
+- 15 test con Home Assistant reale e 1 contratto live MIMIT passati.
+- Ruff, mypy e hassfest passati.
+- Docker con API ufficiale passato nei profili `fresh`, `lived`, `upgrade`, `outage` e `recovery`.
+- Il profilo persistente ha ripristinato 4 config entry, 53 entity-registry entry, 23.766 stazioni
+  in cache e 14 giorni sintetici di Recorder. L'upgrade da `v2.6.0-beta.1` è passato.
+- CI e HACS sul commit beta fanno parte della verifica remota successiva al push.

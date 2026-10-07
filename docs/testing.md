@@ -113,12 +113,19 @@ coverage, and the real Home Assistant contract suite. The unit suite runs once a
 same 100% coverage threshold as CI. Individual targets are `make lint`, `make typecheck`,
 `make test`, and `make test-ha`. Override `PYTHON` or `HA_PYTHON` to use another environment.
 
-Registry benchmark, using synthetic station data and reporting median elapsed time:
+Registry serialization benchmark, using 20,000 synthetic stations, 30 warmed samples, alternating
+operation order, medians, and observed ranges:
 
 ```bash
-PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_registry.py --stations 20000 --repeats 9
+PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_registry.py --stations 20000 --repeats 30
 ```
 
-This benchmark compares snapshot copying with reuse and formatted JSON with compact JSON.
-It checks that both JSON encodings decode to the same data. It does not measure upstream
-latency or Home Assistant startup.
+This benchmark compares the previous formatted JSON encoding with compact JSON and checks that
+both decode to the same data. It does not measure upstream latency or Home Assistant startup.
+The next-change benchmark uses the same warmed, alternating 30-sample method:
+
+```bash
+PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_schedule.py --read-pairs 1000 --repeats 30
+```
+
+Both are synthetic microbenchmarks, not end-to-end performance tests.

@@ -258,4 +258,3 @@ def async_unregister_services(hass: HomeAssistant) -> None:
     """Remove actions after the last station unloads."""
     for name in hass.data.pop(_SERVICES_REGISTERED, ()):
         hass.services.async_remove(DOMAIN, name)
-

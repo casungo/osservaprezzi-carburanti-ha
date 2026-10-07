@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0-beta.1] - 2026-10-07
+
+This prerelease includes all 50 changes from the quality audit. It adds station-level refresh,
+useful schedule presets, clearer price freshness, stronger validation, and lower repeated work in
+entity reads. Existing entity IDs and config-entry data remain compatible, with no migration.
+
+### Complete change list
+
+1. Services check the coordinator result after each refresh, so failed updates reach the caller.
+2. Cache fallback is explicit, and manual refresh reports when fresh data was not retrieved.
+3. Cache restore validates payload shape and station ID, preventing cross-station or malformed data.
+4. `allow_stale=False` rejects an initialized but expired registry cache.
+5. API prices must be numeric, finite, and non-negative.
+6. API `isSelf` values must be booleans.
+7. Invalid dates return `None` instead of interrupting coordinator work.
+8. Naive dates use the Home Assistant time zone.
+9. `Retry-After` accepts both delay seconds and HTTP dates.
+10. Selected station IDs are deduplicated while preserving selection order.
+11. Registry freshness and next-refresh times use readable local dates.
+12. Coordinate fields use numeric selectors with geographic bounds.
+13. Home Assistant's configured coordinates receive the same bounds validation.
+14. Station ID errors are attached to the relevant config field.
+15. Multi-station selection identifies which station could not be verified.
+16. Rate-limit responses have a dedicated config-flow message.
+17. Service errors have translatable messages.
+18. Service field names and descriptions are translated.
+19. Static entity names use translation keys.
+20. Fuel abbreviations preserve their expected uppercase spelling.
+21. Fuel prices suggest three decimal places in Home Assistant.
+22. Registry search reports when the result limit truncates its results.
+23. Registry station types are suggested while still allowing custom text.
+24. Station devices link to the public MIMIT station page.
+25. Station comparisons include price delta, direction, age, and stale state.
+26. Redundant API exception handlers that only re-raised exceptions were removed.
+27. Required fuel fields are defined once for consistent validation.
+28. Coordinate validation is shared across setup paths.
+29. Station-name selection is shared across entities and flows.
+30. Fuel display labels and service modes are prepared in entity constructors.
+31. Payload contracts use explicit `TypedDict` models.
+32. Service handlers are separated from integration lifecycle code.
+33. Service registration and removal use the same service list.
+34. Integration setup uses the shared registry factory.
+35. An unused opening-hours helper was removed.
+36. Registry cache loading indentation was corrected.
+37. Periodic registry refresh returns its actual result to callers.
+38. Coordinator retry delays are defined in one tuple.
+39. Config-flow state is initialized explicitly.
+40. Reconfiguration rejects duplicate station IDs before making an API request.
+41. Available station IDs are collected once per validation.
+42. Discovery filters are normalized once per search.
+43. Previously registered entities are not reconstructed during discovery.
+44. Immutable registry snapshots are reused until registry data changes.
+45. Next opening-hours changes are computed on refresh and timer ticks, not property reads.
+46. Cache fallback avoids rewriting the same station payload.
+47. Registry cache JSON is compact while writes remain atomic.
+48. CI runs the unit suite once under coverage instead of running it twice.
+49. Python CI jobs cache pip downloads.
+50. `make` provides local commands for tests and development checks.
+
+### Benchmark and validation results
+
+- Compared with parent `96dbdd7`, unit tests increased from 389 to 481 passing (7 skipped in
+  both runs). Integration statement coverage remained at 100%, from 1,759 to 2,051 statements.
+- Real Home Assistant contract tests increased from 6 to 15 passing.
+- On 20,000 synthetic station records and 30 alternating samples, compact cache JSON used
+  4,155,632 bytes instead of 5,975,648 (30.5% less). Median serialization was 38.435 ms versus
+  40.779 ms. Both encodings decoded to the same data.
+- On 1,000 synthetic next-change property-read pairs and 30 alternating samples, cached reads
+  took a median 3.823 ms versus 103.258 ms when recomputing both properties (27.0x faster).
+- The live MIMIT payload contract passed. The Home Assistant Docker regression passed `fresh`,
+  `lived`, `upgrade`, `outage`, and `recovery`, including upgrade from `v2.6.0-beta.1`.
+- Ruff, mypy, and hassfest passed locally. Remote CI and HACS checks run against the pushed beta.
+
+The performance numbers are synthetic microbenchmarks, not end-to-end startup or MIMIT latency
+measurements. Full Italian notes for every item are in [docs/quick-wins.md](docs/quick-wins.md).
+
 ## [2.6.0] - 2026-10-03
 
 ### Added

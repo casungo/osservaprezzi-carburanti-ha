@@ -49,4 +49,3 @@ def price_metadata(
         ATTR_PRICE_AGE_MINUTES: age_minutes,
         ATTR_PRICE_IS_STALE: price_is_stale,
     }
-

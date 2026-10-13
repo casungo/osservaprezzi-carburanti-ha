@@ -147,7 +147,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             except aiohttp.ClientResponseError as err:
                 if err.status == 404:
                     self.station_not_found = True
-                    _LOGGER.error("Station with ID %s not found", station_id)
                     raise UpdateFailed(f"Station with ID {station_id} not found") from err
                 last_err = err
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
@@ -155,7 +154,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
 
             if attempt < len(RETRY_DELAYS):
                 delay = self._get_retry_delay(last_err, RETRY_DELAYS[attempt])
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Attempt %d/%d failed for station %s, retrying in %ds: %s",
                     attempt + 1,
                     len(RETRY_DELAYS) + 1,
@@ -174,12 +173,6 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             self.last_refresh_from_cache = True
             return self.data
 
-        _LOGGER.error(
-            "All %d attempts failed for station %s: %s",
-            len(RETRY_DELAYS) + 1,
-            station_id,
-            last_err,
-        )
         raise UpdateFailed(
             f"Error fetching station data after {len(RETRY_DELAYS) + 1} attempts: {last_err}"
         )

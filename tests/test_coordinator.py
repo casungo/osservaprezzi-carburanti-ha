@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -448,9 +449,12 @@ class TestCoordinatorUpdates:
     def test_async_fetch_station_data_404_sets_station_not_found_without_retry(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         coordinator = _make_coordinator()
-        fetch_mock = AsyncMock(side_effect=_make_response_error(404))
+        coordinator.data = {"last": "known"}
+        error = _make_response_error(404)
+        fetch_mock = AsyncMock(side_effect=error)
         sleep_mock = AsyncMock()
         monkeypatch.setattr(
             "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
@@ -461,12 +465,15 @@ class TestCoordinatorUpdates:
             sleep_mock,
         )
 
-        with pytest.raises(Exception, match="not found"):
+        with pytest.raises(coordinator_module.UpdateFailed, match="not found") as raised:
             asyncio.run(coordinator._async_fetch_station_data())
 
+        assert raised.value.__cause__ is error
         assert coordinator.station_not_found is True
+        assert coordinator.data == {"last": "known"}
         assert fetch_mock.await_count == 1
         sleep_mock.assert_not_awaited()
+        assert all(record.levelno < logging.WARNING for record in caplog.records)
 
     def test_station_not_found_resets_after_successful_fetch(
         self,
@@ -483,13 +490,18 @@ class TestCoordinatorUpdates:
         assert asyncio.run(coordinator._async_fetch_station_data()) == {"ok": True}
         assert coordinator.station_not_found is False
 
+    @pytest.mark.parametrize(
+        "error", [_make_response_error(500), InvalidStationPayloadError("invalid id")]
+    )
     def test_async_fetch_station_data_retries_response_error_then_succeeds(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        error: Exception,
     ) -> None:
         coordinator = _make_coordinator()
         coordinator._process_station_data = MagicMock(return_value={"ok": True})
-        fetch_mock = AsyncMock(side_effect=[_make_response_error(500), {"id": "123"}])
+        fetch_mock = AsyncMock(side_effect=[error, {"id": "123"}])
         sleep_mock = AsyncMock()
         monkeypatch.setattr(
             "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
@@ -500,13 +512,18 @@ class TestCoordinatorUpdates:
             sleep_mock,
         )
 
+        caplog.set_level(logging.DEBUG, logger=coordinator_module.__name__)
         assert asyncio.run(coordinator._async_fetch_station_data()) == {"ok": True}
         assert fetch_mock.await_count == 2
-        sleep_mock.assert_awaited_once()
+        sleep_mock.assert_awaited_once_with(30)
+        assert all(record.levelno < logging.WARNING for record in caplog.records)
+        assert "retrying in 30s" in caplog.text
+        assert str(error) in caplog.text
 
     def test_async_fetch_station_data_retries_then_keeps_last_data(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         coordinator = _make_coordinator()
         coordinator.data = {"last": "known"}
@@ -514,15 +531,22 @@ class TestCoordinatorUpdates:
             "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
             AsyncMock(side_effect=aiohttp.ClientError("temporary")),
         )
+        sleep_mock = AsyncMock()
         monkeypatch.setattr(
             "custom_components.osservaprezzi_carburanti.coordinator.asyncio.sleep",
-            AsyncMock(),
+            sleep_mock,
         )
 
         result = asyncio.run(coordinator._async_fetch_station_data())
 
         assert result == {"last": "known"}
+        assert result is coordinator.data
         assert coordinator.last_refresh_from_cache is True
+        assert [call.args[0] for call in sleep_mock.await_args_list] == [30, 60, 120]
+        warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert warnings[0].levelno == logging.WARNING
+        assert "Keeping last known data" in warnings[0].getMessage()
 
     def test_async_update_data_does_not_persist_identical_fallback(
         self, monkeypatch: pytest.MonkeyPatch
@@ -576,19 +600,24 @@ class TestCoordinatorUpdates:
     def test_async_fetch_station_data_exhausts_retries(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         coordinator = _make_coordinator()
         monkeypatch.setattr(
             "custom_components.osservaprezzi_carburanti.coordinator.fetch_station_data",
             AsyncMock(side_effect=asyncio.TimeoutError()),
         )
+        sleep_mock = AsyncMock()
         monkeypatch.setattr(
             "custom_components.osservaprezzi_carburanti.coordinator.asyncio.sleep",
-            AsyncMock(),
+            sleep_mock,
         )
 
-        with pytest.raises(Exception, match="Error fetching station data"):
+        caplog.set_level(logging.DEBUG, logger=coordinator_module.__name__)
+        with pytest.raises(coordinator_module.UpdateFailed, match="Error fetching station data"):
             asyncio.run(coordinator._async_fetch_station_data())
+        assert [call.args[0] for call in sleep_mock.await_args_list] == [30, 60, 120]
+        assert all(record.levelno < logging.WARNING for record in caplog.records)
 
     def test_retry_after_accepts_http_date(self) -> None:
         err = _make_response_error(429, {"Retry-After": "Sat, 01 Mar 2025 12:00:20 GMT"})

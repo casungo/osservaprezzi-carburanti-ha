@@ -245,7 +245,7 @@ def test_normalize_station_data_accepts_supported_service_forms(service: Any) ->
     assert result["services"] == [service]
 
 
-def test_fetch_station_data_warns_without_logging_bad_record(
+def test_fetch_station_data_debugs_rejection_without_warning_or_bad_record(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -253,10 +253,14 @@ def test_fetch_station_data_warns_without_logging_bad_record(
     session = _FakeSession(_FakeResponse(200, {"record": secret_record}))
     monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
 
-    with pytest.raises(InvalidStationPayloadError):
+    with caplog.at_level(logging.DEBUG, logger=api.__name__), pytest.raises(
+        InvalidStationPayloadError
+    ):
         asyncio.run(fetch_station_data(MagicMock(), "123"))
 
     assert "Invalid station API response structure" in caplog.text
+    assert "invalid id" in caplog.text
+    assert all(record.levelno < logging.WARNING for record in caplog.records)
     assert secret_record not in caplog.text
 
 

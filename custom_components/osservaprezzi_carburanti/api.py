@@ -138,7 +138,7 @@ async def fetch_station_data(
                 try:
                     return normalize_station_data(data, station_id)
                 except InvalidStationPayloadError as err:
-                    _LOGGER.warning("Invalid station API response structure: %s", err)
+                    _LOGGER.debug("Invalid station API response structure: %s", err)
                     raise
             if response.status == 404:
                 raise aiohttp.ClientResponseError(

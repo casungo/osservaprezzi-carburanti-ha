@@ -4,7 +4,7 @@ from __future__ import annotations
 import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from math import asin, cos, radians, sin, sqrt
+from math import asin, cos, isfinite, radians, sin, sqrt
 from typing import Any
 
 from .data_helpers import as_coordinate
@@ -135,6 +135,7 @@ def find_nearby_stations(
         or origin_longitude is None
         or isinstance(radius_km, bool)
         or not isinstance(radius_km, (int, float))
+        or (isinstance(radius_km, float) and not isfinite(radius_km))
         or radius_km <= 0
         or isinstance(limit, bool)
         or not isinstance(limit, int)

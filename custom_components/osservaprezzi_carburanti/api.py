@@ -59,6 +59,7 @@ def normalize_station_data(data: object, station_id: str) -> StationPayload:
         if (
             not isinstance(fuel, dict)
             or not REQUIRED_FUEL_FIELDS <= fuel.keys()
+            or not isinstance(fuel.get("name"), str)
             or not isinstance(fuel.get("isSelf"), bool)
             or not _is_valid_fuel_price(fuel.get("price"))
         ):

@@ -83,6 +83,11 @@ class TestRetryDelay:
         err = _make_response_error(429, {"Retry-After": "0"})
         assert CarburantiDataUpdateCoordinator._get_retry_delay(err, 30) == 30
 
+    def test_uses_default_when_retry_after_header_is_missing(self) -> None:
+        err = _make_response_error(429, {"X-RateLimit-Remaining": "0"})
+
+        assert CarburantiDataUpdateCoordinator._get_retry_delay(err, 30) == 30
+
 
 class TestTransientErrors:
     def test_timeout_is_transient(self) -> None:
@@ -623,6 +628,11 @@ class TestCoordinatorUpdates:
         err = _make_response_error(429, {"Retry-After": "Sat, 01 Mar 2025 12:00:20 GMT"})
 
         assert CarburantiDataUpdateCoordinator._get_retry_delay(err, 30) == 20
+
+    def test_uses_default_for_expired_retry_after_http_date(self) -> None:
+        err = _make_response_error(429, {"Retry-After": "Sat, 01 Mar 2025 11:59:59 GMT"})
+
+        assert CarburantiDataUpdateCoordinator._get_retry_delay(err, 30) == 30
 
     @pytest.mark.parametrize("retry_after", ["nan", "inf", "-inf", "1e309"])
     def test_retry_after_rejects_nonfinite_values(self, retry_after: str) -> None:

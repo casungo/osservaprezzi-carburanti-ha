@@ -4,7 +4,7 @@ PYTHON ?= .venv/bin/python
 HA_PYTHON ?= .venv-ha/bin/python
 
 test:
-	$(PYTHON) -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
+	$(PYTHON) -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
 	$(PYTHON) -m coverage report --fail-under=100
 
 test-ha:

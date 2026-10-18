@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import isfinite
 from typing import Any
 
 
@@ -12,8 +11,7 @@ def as_coordinate(value: Any, minimum: float, maximum: float) -> float | None:
         return None
     if not minimum <= value <= maximum:
         return None
-    coordinate = float(value)
-    return coordinate if isfinite(coordinate) else None
+    return float(value)
 
 
 def parse_coordinate(value: Any, minimum: float, maximum: float) -> float | None:

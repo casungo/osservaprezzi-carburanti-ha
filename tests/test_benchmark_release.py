@@ -43,17 +43,27 @@ def test_correctness_guardrails_do_not_accept_hidden_cache_success(benchmark):
               'fuel_availability_samples': {'refresh': {'fraction': 1}, 'idle': {'fraction': 1}},
               'csv_304_count': 2,
               'csv_conditional_bytes': 0, 'listeners_after_reloads': [12, 12],
+              'timers_after_reloads': [4, 4],
               'fuel_mismatches': [], 'identity_changes_after_reload': 0,
               'identity_changes_from_persisted': 0, 'tasks_after_unload': [],
               'timers_after_unload': 0, 'listeners_after_unload': 0}
-    assert benchmark.guardrails(result, 2, 4) == []
+    assert benchmark.guardrails(result, 2, 4, 1) == []
     result['refresh_successful_network_requests'] = 0
     result['fuel_mismatches'] = ['54233_Benzina_self']
     result['listeners_after_reloads'] = [12, 14]
-    failures = benchmark.guardrails(result, 2, 4)
+    failures = benchmark.guardrails(result, 2, 4, 1)
     assert 'fuel_mismatches' in failures
     assert 'listener_growth' in failures
     assert 'refresh_successful_network_requests' in failures
+
+
+@pytest.mark.parametrize('key', ['listeners_after_reloads', 'timers_after_reloads'])
+@pytest.mark.parametrize('samples', [None, [], [4], [4, 4, 4], [4, 5]])
+def test_reload_guardrails_require_observations_and_reject_growth(benchmark, key, samples):
+    result = {} if samples is None else {key: samples}
+    failure = (f'missing_{key}' if not samples or len(samples) != 2 else
+               'listener_growth' if key == 'listeners_after_reloads' else 'timer_growth')
+    assert failure in benchmark.guardrails(result, 2, 4, 1)
 
 
 def test_snapshot_reuse_verifies_actual_bytes(benchmark, tmp_path):

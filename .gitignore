@@ -31,5 +31,5 @@ dist/
 build/
 *.egg-info/
 
-# Local release KPI evidence and disposable HA profiles
-/artifacts/kpi/
+# Local validation output and disposable HA profiles
+/artifacts/

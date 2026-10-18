@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_platform, entity_registry as er
 from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_time_interval
 from homeassistant.helpers import issue_registry
 from homeassistant.util import dt as dt_util
@@ -185,6 +185,42 @@ async def _async_cancel_initial_refresh(task: asyncio.Task[None] | None) -> None
         pass
 
 
+async def _async_wait_for_task(task: asyncio.Task[None]) -> None:
+    """Drain a task without letting repeated caller cancellation cancel it."""
+    while True:
+        try:
+            await asyncio.shield(task)
+            return
+        except asyncio.CancelledError:
+            if task.done():
+                task.result()
+                return
+
+
+async def _async_cleanup_failed_entry_setup(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: CarburantiDataUpdateCoordinator,
+    platforms_loaded: list[Platform],
+) -> None:
+    """Release resources owned by an entry whose platform setup failed."""
+    try:
+        if platforms_loaded and not await hass.config_entries.async_unload_platforms(
+            entry, platforms_loaded
+        ):
+            _LOGGER.error("Failed to unload platforms after setup failure for %s", entry.title)
+    finally:
+        domain_data = hass.data.get(DOMAIN, {})
+        entry_data = domain_data.pop(entry.entry_id)
+        for key in ("listener", _REFRESH_RESULT_LISTENER):
+            listener = entry_data.get(key)
+            if listener is not None:
+                listener()
+
+        await coordinator.async_shutdown()
+        _async_remove_csv_owner_if_unused(hass)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Osservaprezzi Carburanti from a config entry."""
     _async_register_services(hass)
@@ -205,16 +241,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
-    await coordinator.async_restore()
-
     stop_event = asyncio.Event()
+    # Reserve shared registry ownership while storage is still loading.
     domain_data[entry.entry_id] = {
-        "coordinator": coordinator,
+        "coordinator": None,
         "listener": None,
         _INITIAL_REFRESH_TASK: None,
         _INITIAL_REFRESH_STOP_EVENT: stop_event,
         _REFRESH_RESULT_LISTENER: None,
     }
+
+    try:
+        await coordinator.async_restore()
+    except BaseException:
+        domain_data.pop(entry.entry_id)
+        await coordinator.async_shutdown()
+        _async_remove_csv_owner_if_unused(hass)
+        raise
+    domain_data[entry.entry_id]["coordinator"] = coordinator
 
     cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
     _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
@@ -270,7 +314,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_handle_refresh_result
     )
     _async_cleanup_legacy_entity_registry(hass, entry)
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    existing_platform_ids = {
+        id(platform) for platform in entity_platform.async_get_platforms(hass, DOMAIN)
+    }
+    setup_task = hass.async_create_task(
+        hass.config_entries.async_forward_entry_setups(entry, PLATFORMS),
+        f"{DOMAIN}_{entry.entry_id}_platform_setup",
+    )
+    try:
+        await asyncio.shield(setup_task)
+    except BaseException:
+        try:
+            await _async_wait_for_task(setup_task)
+        except BaseException:
+            pass
+
+        platforms_loaded = [
+            platform.domain
+            for platform in entity_platform.async_get_platforms(hass, DOMAIN)
+            if id(platform) not in existing_platform_ids and platform.config_entry is entry
+        ]
+        cleanup_task = hass.async_create_task(
+            _async_cleanup_failed_entry_setup(hass, entry, coordinator, platforms_loaded),
+            f"{DOMAIN}_{entry.entry_id}_setup_rollback",
+        )
+        try:
+            await _async_wait_for_task(cleanup_task)
+        except BaseException:
+            _LOGGER.exception("Failed to roll back setup for %s", entry.title)
+        raise
     domain_data[entry.entry_id][_INITIAL_REFRESH_TASK] = _async_start_initial_refresh(
         hass,
         coordinator,

@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, ".")
 
+from custom_components.osservaprezzi_carburanti import cron_helper  # noqa: E402
 from custom_components.osservaprezzi_carburanti.config_flow import (  # noqa: E402
     CannotConnect,
     CONF_LATITUDE,
@@ -46,6 +47,10 @@ from custom_components.osservaprezzi_carburanti.const import (  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def real_local_datetime(monkeypatch):
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow.dt_util.now",
+        lambda: datetime(2026, 10, 18, 12, tzinfo=timezone.utc),
+    )
     monkeypatch.setattr(
         "custom_components.osservaprezzi_carburanti.config_flow.dt_util.as_local",
         lambda value: value,
@@ -1045,7 +1050,8 @@ def test_options_flow_initial_form() -> None:
     assert result["type"] == "form"
     assert result["step_id"] == "init"
     assert result["errors"] == {}
-    assert "next_run" in result["description_placeholders"]
+    expected_next_run = "2026-10-19 06:00 UTC" if cron_helper.CronSim else "—"
+    assert result["description_placeholders"]["next_run"] == expected_next_run
 
 
 def test_options_flow_valid_cron(monkeypatch: pytest.MonkeyPatch) -> None:

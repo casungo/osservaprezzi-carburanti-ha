@@ -796,6 +796,9 @@ def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
     registry_callback = track_registry.call_args.args[1]
     asyncio.run(registry_callback(datetime(2026, 1, 1)))
     shared_manager.async_periodic_update.assert_awaited_once()
+    shared_manager.async_periodic_update.return_value = True
+    asyncio.run(registry_callback(datetime(2026, 1, 2)))
+    assert shared_manager.async_periodic_update.await_count == 2
 
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
     assert asyncio.run(init_module.async_unload_entry(hass, second)) is True
@@ -806,6 +809,253 @@ def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
     registry_listener.assert_called_once()
     assert init_module._CSV_MANAGER not in domain_data
     assert init_module._CSV_UPDATE_LISTENER not in domain_data
+
+
+@pytest.mark.parametrize(
+    "setup_error",
+    [RuntimeError("platform setup failed"), asyncio.CancelledError()],
+)
+@pytest.mark.parametrize("other_entry_loaded", [True, False])
+@pytest.mark.parametrize("platform_unload_raises", [False, True])
+def test_setup_entry_rolls_back_when_platform_forwarding_fails(
+    monkeypatch,
+    caplog,
+    setup_error: BaseException,
+    other_entry_loaded: bool,
+    platform_unload_raises: bool,
+) -> None:
+    created_coordinators = []
+
+    class TrackingCoordinator(FakeCoordinator):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created_coordinators.append(self)
+
+    shared_manager = FakeCSVManager()
+    registry_listeners = []
+    cron_listeners = []
+
+    def get_shared_manager(hass):
+        hass.data.setdefault(init_module.DOMAIN, {})[init_module._CSV_MANAGER] = shared_manager
+        return shared_manager
+
+    monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", TrackingCoordinator)
+    monkeypatch.setattr(services_module, "CarburantiDataUpdateCoordinator", TrackingCoordinator)
+    monkeypatch.setattr(init_module, "get_shared_csv_manager", get_shared_manager)
+    monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+
+    def track_registry(hass, callback, interval):
+        listener = MagicMock()
+        registry_listeners.append(listener)
+        return listener
+
+    monkeypatch.setattr(init_module, "async_track_time_interval", track_registry)
+
+    def track_cron(hass, callback, when):
+        listener = MagicMock()
+        cron_listeners.append(listener)
+        return listener
+
+    monkeypatch.setattr(init_module, "async_track_point_in_utc_time", track_cron)
+    monkeypatch.setattr(init_module.dt_util, "as_utc", lambda value: value)
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
+    if platform_unload_raises:
+        hass.config_entries.async_unload_platforms.side_effect = RuntimeError(
+            "platform unload failed"
+        )
+    created_platforms = []
+    monkeypatch.setattr(
+        init_module.entity_platform,
+        "async_get_platforms",
+        lambda hass, domain: created_platforms,
+    )
+    failed_entry_for_forward = None
+
+    async def forward_entry(entry, platforms):
+        if entry is failed_entry_for_forward:
+            created_platforms.append(
+                SimpleNamespace(domain=str(init_module.PLATFORMS[0]), config_entry=entry)
+            )
+            raise setup_error
+
+    hass.config_entries.async_forward_entry_setups.side_effect = forward_entry
+
+    def make_entry(entry_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            entry_id=entry_id,
+            title=entry_id,
+            unique_id=entry_id,
+            data={"station_id": entry_id},
+            options={},
+            async_on_unload=MagicMock(),
+            add_update_listener=MagicMock(return_value=lambda: None),
+        )
+
+    if other_entry_loaded:
+        first_entry = make_entry("entry_1")
+        assert asyncio.run(init_module.async_setup_entry(hass, first_entry)) is True
+        first_coordinator = hass.data[init_module.DOMAIN][first_entry.entry_id]["coordinator"]
+        first_cron_listener = cron_listeners[0]
+        failed_entry_id = "entry_2"
+        failed_listener_index = 1
+    else:
+        first_coordinator = None
+        first_cron_listener = None
+        failed_entry_id = "entry_1"
+        failed_listener_index = 0
+
+    failed_entry = make_entry(failed_entry_id)
+    failed_entry_for_forward = failed_entry
+
+    if isinstance(setup_error, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(init_module.async_setup_entry(hass, failed_entry))
+    else:
+        with pytest.raises(RuntimeError, match="platform setup failed"):
+            asyncio.run(init_module.async_setup_entry(hass, failed_entry))
+
+    domain_data = hass.data[init_module.DOMAIN]
+    assert failed_entry_id not in domain_data
+    failed_coordinator_index = 1 if other_entry_loaded else 0
+    failed_coordinator = created_coordinators[failed_coordinator_index]
+    assert failed_coordinator.shutdown_calls == 1
+    assert failed_coordinator._listeners == []
+    assert cron_listeners[failed_listener_index].call_count == 1
+    hass.config_entries.async_unload_platforms.assert_awaited_once_with(
+        failed_entry, [str(init_module.PLATFORMS[0])]
+    )
+    if platform_unload_raises:
+        assert "Failed to roll back setup" in caplog.text
+        assert "platform unload failed" in caplog.text
+    else:
+        assert "Failed to unload platforms after setup failure" in caplog.text
+    if other_entry_loaded:
+        assert domain_data["entry_1"]["coordinator"] is first_coordinator
+        assert domain_data[init_module._CSV_MANAGER] is shared_manager
+        assert domain_data[init_module._CSV_UPDATE_LISTENER] is registry_listeners[0]
+        assert first_coordinator.shutdown_calls == 0
+        first_cron_listener.assert_not_called()
+        registry_listeners[0].assert_not_called()
+    else:
+        assert init_module._CSV_MANAGER not in domain_data
+        assert init_module._CSV_UPDATE_LISTENER not in domain_data
+        registry_listeners[0].assert_called_once()
+
+    hass.config_entries.async_forward_entry_setups.side_effect = None
+    assert asyncio.run(
+        init_module.async_setup_entry(hass, make_entry(failed_entry_id))
+    ) is True
+    assert (
+        hass.data[init_module.DOMAIN][failed_entry_id]["coordinator"]
+        is created_coordinators[-1]
+    )
+    assert len(cron_listeners) == failed_listener_index + 2
+    cron_listeners[-1].assert_not_called()
+    if other_entry_loaded:
+        assert len(registry_listeners) == 1
+        registry_listeners[0].assert_not_called()
+    else:
+        assert len(registry_listeners) == 2
+        registry_listeners[0].assert_called_once()
+        registry_listeners[1].assert_not_called()
+
+
+def test_setup_entry_releases_csv_owner_when_restore_is_cancelled(monkeypatch) -> None:
+    created_coordinators = []
+
+    class CancelledRestoreCoordinator(FakeCoordinator):
+        async def async_restore(self) -> None:
+            raise asyncio.CancelledError
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created_coordinators.append(self)
+
+    shared_manager = FakeCSVManager()
+    registry_listener = MagicMock()
+
+    def get_shared_manager(hass):
+        hass.data.setdefault(init_module.DOMAIN, {})[init_module._CSV_MANAGER] = shared_manager
+        return shared_manager
+
+    monkeypatch.setattr(
+        init_module,
+        "CarburantiDataUpdateCoordinator",
+        CancelledRestoreCoordinator,
+    )
+    monkeypatch.setattr(init_module, "get_shared_csv_manager", get_shared_manager)
+    monkeypatch.setattr(
+        init_module,
+        "async_track_time_interval",
+        lambda *args: registry_listener,
+    )
+
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    entry = SimpleNamespace(entry_id="entry_1", title="entry_1", options={})
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(init_module.async_setup_entry(hass, entry))
+
+    assert created_coordinators[0].shutdown_calls == 1
+    registry_listener.assert_called_once()
+    assert hass.data[init_module.DOMAIN] == {}
+
+
+def test_cancelled_restore_preserves_shared_resources_for_another_restoring_entry(monkeypatch) -> None:
+    """Do not drop registry ownership while a concurrent entry restores storage."""
+    async def run_setup() -> None:
+        restore_started = asyncio.Event()
+        release_restore = asyncio.Event()
+
+        class BlockingCoordinator(FakeCoordinator):
+            async def async_restore(self) -> None:
+                if self.config_entry.entry_id == "pending":
+                    restore_started.set()
+                    await release_restore.wait()
+                else:
+                    raise asyncio.CancelledError
+
+        monkeypatch.setattr(init_module, "CarburantiDataUpdateCoordinator", BlockingCoordinator)
+        monkeypatch.setattr(init_module, "get_next_run_time", lambda cron: datetime(2026, 1, 1))
+        monkeypatch.setattr(init_module.dt_util, "as_utc", lambda value: value)
+        monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+        registry_listener = MagicMock()
+        monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: registry_listener)
+        monkeypatch.setattr(init_module, "async_track_point_in_utc_time", lambda *args: MagicMock())
+        hass, _ = _build_hass_with_services()
+        hass.data = {}
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+        def entry(entry_id: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                entry_id=entry_id, title=entry_id, unique_id=entry_id,
+                data={"station_id": entry_id}, options={},
+                async_on_unload=MagicMock(), add_update_listener=MagicMock(),
+            )
+
+        pending = entry("pending")
+        task = asyncio.create_task(init_module.async_setup_entry(hass, pending))
+        await restore_started.wait()
+        manager = hass.data[init_module.DOMAIN][init_module._CSV_MANAGER]
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await init_module.async_setup_entry(hass, entry("cancelled"))
+            assert hass.data[init_module.DOMAIN][init_module._CSV_MANAGER] is manager
+            registry_listener.assert_not_called()
+        finally:
+            release_restore.set()
+            await task
+            await init_module.async_unload_entry(hass, pending)
+        registry_listener.assert_called_once()
+
+    asyncio.run(run_setup())
 
 
 def test_setup_entry_adds_registry_timer_to_manager_created_by_config_flow(
@@ -1242,16 +1492,128 @@ def test_refresh_listener_creates_station_not_found_issue(monkeypatch) -> None:
 
     async def run_setup_and_unload() -> None:
         assert await init_module.async_setup_entry(hass, entry) is True
-        await asyncio.sleep(0)
         coordinator = hass.data[init_module.DOMAIN][entry.entry_id]["coordinator"]
         init_module.issue_registry.async_create_issue.reset_mock()
+        coordinator.station_not_found = False
+        coordinator.last_update_success = False
+        init_module.issue_registry.async_delete_issue.reset_mock()
+        coordinator._listeners[0]()
+        init_module.issue_registry.async_create_issue.assert_not_called()
+        init_module.issue_registry.async_delete_issue.assert_not_called()
+        assert not hass.data[init_module.DOMAIN][entry.entry_id][
+            init_module._INITIAL_REFRESH_STOP_EVENT
+        ].is_set()
+
         coordinator.station_not_found = True
         coordinator.last_update_success = False
         coordinator._listeners[0]()
         init_module.issue_registry.async_create_issue.assert_called_once()
+
+        coordinator.station_not_found = False
+        coordinator.last_update_success = True
+        coordinator._listeners[0]()
+        init_module.issue_registry.async_delete_issue.assert_called_once_with(
+            hass, init_module.DOMAIN, "station_not_found_entry_1"
+        )
+        assert hass.data[init_module.DOMAIN][entry.entry_id][
+            init_module._INITIAL_REFRESH_STOP_EVENT
+        ].is_set()
         assert await init_module.async_unload_entry(hass, entry) is True
 
     asyncio.run(run_setup_and_unload())
+
+
+
+def test_initial_refresh_returns_when_stopped_before_first_attempt() -> None:
+    coordinator = FakeCoordinator()
+    stop_event = asyncio.Event()
+    stop_event.set()
+
+    asyncio.run(
+        init_module._async_initial_refresh(
+            MagicMock(), coordinator, SimpleNamespace(title="Stopped"), stop_event
+        )
+    )
+
+    assert coordinator.refresh_calls == 0
+
+
+
+def test_wait_for_task_handles_cancellation_after_task_finishes(monkeypatch) -> None:
+    async def run_wait() -> None:
+        task = asyncio.create_task(asyncio.sleep(0))
+        await task
+
+        def cancel_completed_wait(task_arg):
+            assert task_arg is task and task_arg.done()
+            cancelled_wait = asyncio.get_running_loop().create_future()
+            cancelled_wait.cancel()
+            return cancelled_wait
+
+        monkeypatch.setattr(init_module.asyncio, "shield", cancel_completed_wait)
+        await init_module._async_wait_for_task(task)
+
+    asyncio.run(run_wait())
+
+
+
+def test_wait_for_task_survives_cancellation_while_task_is_running() -> None:
+    async def run_wait() -> None:
+        release_task = asyncio.Event()
+        task = asyncio.create_task(release_task.wait())
+        waiter = asyncio.create_task(init_module._async_wait_for_task(task))
+        await asyncio.sleep(0)
+
+        waiter.cancel()
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        assert not task.cancelled()
+
+        release_task.set()
+        await waiter
+        assert task.done()
+
+    asyncio.run(run_wait())
+
+
+def test_failed_setup_cleanup_handles_absent_resources() -> None:
+    async def run_cleanup() -> tuple[MagicMock, MagicMock, dict[str, object]]:
+        hass, _ = _build_hass_with_services()
+        manager = FakeCSVManager()
+        unsubscribe_refresh_result = MagicMock()
+        coordinator = FakeCoordinator()
+        entry = SimpleNamespace(entry_id="entry_1", title="Test station")
+        hass.data = {
+            init_module.DOMAIN: {
+                init_module._CSV_MANAGER: manager,
+                entry.entry_id: {
+                    "listener": None,
+                    init_module._REFRESH_RESULT_LISTENER: unsubscribe_refresh_result,
+                },
+            }
+        }
+
+        await init_module._async_cleanup_failed_entry_setup(
+            hass, entry, coordinator, []
+        )
+        return hass, unsubscribe_refresh_result, {"coordinator": coordinator, "manager": manager}
+
+    hass, unsubscribe_refresh_result, resources = asyncio.run(run_cleanup())
+    unsubscribe_refresh_result.assert_called_once()
+    assert resources["coordinator"].shutdown_calls == 1
+    assert hass.data[init_module.DOMAIN] == {}
+
+
+def test_unload_entry_without_setup_data_is_idempotent() -> None:
+    async def run_unload() -> None:
+        hass, _ = _build_hass_with_services()
+        hass.data = {init_module.DOMAIN: {}}
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        entry = SimpleNamespace(entry_id="missing")
+
+        assert await init_module.async_unload_entry(hass, entry) is True
+
+    asyncio.run(run_unload())
 
 
 def test_initial_refresh_retries_after_transient_failure(monkeypatch) -> None:
@@ -1497,6 +1859,27 @@ def test_unload_entry_returns_false_without_cleanup() -> None:
     assert "entry_1" in hass.data[init_module.DOMAIN]
     listener.assert_not_called()
     assert coordinator.shutdown_calls == 0
+
+
+
+def test_unload_entry_handles_absent_optional_listeners() -> None:
+    hass, _ = _build_hass_with_services()
+    coordinator = FakeCoordinator()
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {
+                "coordinator": coordinator,
+                "listener": None,
+                init_module._REFRESH_RESULT_LISTENER: None,
+            }
+        }
+    }
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    entry = SimpleNamespace(entry_id="entry_1")
+
+    assert asyncio.run(init_module.async_unload_entry(hass, entry)) is True
+    assert "entry_1" not in hass.data[init_module.DOMAIN]
+    assert coordinator.shutdown_calls == 1
 
 
 def test_failed_unload_restarts_running_initial_refresh(monkeypatch) -> None:

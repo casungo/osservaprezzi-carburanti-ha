@@ -135,6 +135,8 @@ def test_find_nearby_stations_rejects_invalid_inputs_and_rows() -> None:
         {"id": "", "latitude": 41.9, "longitude": 12.5},
         {"id": "bad-latitude", "latitude": 100, "longitude": 12.5},
         {"id": "boolean", "latitude": True, "longitude": 12.5},
+        {"id": "nan", "latitude": float("nan"), "longitude": 12.5},
+        {"id": "infinite", "latitude": 41.9, "longitude": float("inf")},
     ]
 
     assert (
@@ -200,6 +202,32 @@ def test_find_nearby_stations_keeps_coordinate_validation_numeric_only() -> None
         )
         == ()
     )
+
+
+@pytest.mark.parametrize("radius_km", [float("nan"), float("inf"), float("-inf")])
+def test_find_nearby_stations_rejects_non_finite_radius(radius_km: float) -> None:
+    assert (
+        find_nearby_stations(
+            [{"id": "1", "latitude": 41.9, "longitude": 12.5}],
+            latitude=41.9,
+            longitude=12.5,
+            radius_km=radius_km,
+            limit=20,
+        )
+        == ()
+    )
+
+
+def test_find_nearby_stations_accepts_large_finite_integer_radius() -> None:
+    candidates = find_nearby_stations(
+        [{"id": "1", "latitude": 41.9, "longitude": 12.5}],
+        latitude=41.9,
+        longitude=12.5,
+        radius_km=10**1000,
+        limit=20,
+    )
+
+    assert [candidate.station_id for candidate in candidates] == ["1"]
 
 
 def test_nearby_filters_are_case_and_accent_insensitive() -> None:

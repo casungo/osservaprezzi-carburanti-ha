@@ -150,6 +150,49 @@ class TestEntitySetupRegression:
         unload_callbacks[0]()
         assert listeners == []
 
+    def test_setup_ignores_non_mapping_fuel_payload(self):
+        data = _sample_station_data()
+        data["fuels"] = []
+        coordinator = SimpleNamespace(
+            data=data,
+            hass=SimpleNamespace(),
+            async_add_listener=lambda listener: lambda: None,
+        )
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
+        added_entities = []
+
+        asyncio.run(async_setup_entry(hass, entry, lambda entities, **kwargs: added_entities.extend(entities)))
+
+        assert not any(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities)
+        assert any(isinstance(entity, StationInfoSensor) for entity in added_entities)
+
+    def test_setup_ignores_non_mapping_station_info_payload(self):
+        data = _sample_station_data()
+        data["station_info"] = []
+        coordinator = SimpleNamespace(
+            data=data,
+            hass=SimpleNamespace(),
+            async_add_listener=lambda listener: lambda: None,
+        )
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
+        added_entities = []
+
+        asyncio.run(async_setup_entry(hass, entry, lambda entities, **kwargs: added_entities.extend(entities)))
+
+        assert any(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities)
+        assert not any(isinstance(entity, StationInfoSensor) for entity in added_entities)
+        assert any(isinstance(entity, StationLocationSensor) for entity in added_entities)
+
     def test_price_sensor_keeps_state_and_attributes_contract(self):
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
@@ -268,6 +311,16 @@ class TestEntitySetupRegression:
         asyncio.run(entity.async_will_remove_from_hass())
         assert entity._time_listener is None
         assert calls[-1] == "removed"
+
+    def test_schedule_entity_can_be_removed_before_timer_registration(self):
+        entity = StationNextChangeSensor(
+            SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace()),
+            SimpleNamespace(data={CONF_STATION_ID: "12345"}),
+        )
+
+        asyncio.run(entity.async_will_remove_from_hass())
+
+        assert entity._time_listener is None
 
 
 class TestParseTime:

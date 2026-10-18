@@ -329,7 +329,7 @@ def compare(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def guardrails(result: dict[str, Any], repeats: int, stations: int) -> list[str]:
+def guardrails(result: dict[str, Any], repeats: int, stations: int, reloads: int) -> list[str]:
     """Validate correctness independently from noisy performance observations."""
     failures = []
     for key in ('fuel_mismatches', 'identity_changes_after_reload',
@@ -351,10 +351,14 @@ def guardrails(result: dict[str, Any], repeats: int, stations: int) -> list[str]
     if result.get('csv_304_count') != repeats or result.get('csv_conditional_bytes') != 0:
         failures.append('conditional_csv_download')
     listeners = result.get('listeners_after_reloads', [])
-    if listeners and any(value != listeners[0] for value in listeners):
+    if len(listeners) != reloads + 1:
+        failures.append('missing_listeners_after_reloads')
+    elif any(value != listeners[0] for value in listeners):
         failures.append('listener_growth')
     timers = result.get('timers_after_reloads', [])
-    if timers and any(value != timers[0] for value in timers):
+    if len(timers) != reloads + 1:
+        failures.append('missing_timers_after_reloads')
+    elif any(value != timers[0] for value in timers):
         failures.append('timer_growth')
     return failures
 
@@ -449,13 +453,13 @@ def main() -> None:
             print(f'Measuring {name}', flush=True)
             result = measure(image['Id'], output / f'source-{role}', output / name, inputs, args, output)
             report['runs'].append({'role': role, 'round': round_index + 1, 'result': result})
-            report['guardrail_failures'][name] = guardrails(result, args.repeats, len(args.station_ids))
+            report['guardrail_failures'][name] = guardrails(result, args.repeats, len(args.station_ids), args.reloads)
             (output / 'partial-results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print('Measuring stable-to-candidate upgrade with preserved HA storage', flush=True)
     upgraded = measure(image['Id'], output / 'source-candidate', output / 'upgrade', inputs,
                        args, output, output / 'round-1-baseline')
     report['upgrade'] = upgraded
-    report['guardrail_failures']['upgrade'] = guardrails(upgraded, args.repeats, len(args.station_ids))
+    report['guardrail_failures']['upgrade'] = guardrails(upgraded, args.repeats, len(args.station_ids), args.reloads)
     baseline_identities = report['runs'][0]['result']['identities']
     report['cross_version_identity_changes'] = sum(
         upgraded['identities'].get(uid) != eid for uid, eid in baseline_identities.items())

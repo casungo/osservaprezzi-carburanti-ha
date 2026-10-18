@@ -87,7 +87,6 @@ def _mock_ha_modules():
         "homeassistant.components.sensor",
         "homeassistant.components.button",
         "homeassistant.components.binary_sensor",
-        "homeassistant.components.geo_location",
         "homeassistant.config_entries",
         "homeassistant.core",
         "homeassistant.helpers",
@@ -119,7 +118,6 @@ def _mock_ha_modules():
         MEASUREMENT="measurement"
     )
     sys.modules["homeassistant.components.binary_sensor"].BinarySensorEntity = _MockBinarySensorEntity
-    sys.modules["homeassistant.components.geo_location"].GeolocationEvent = _MockEntity
     sys.modules["homeassistant.components.diagnostics"].async_redact_data = (
         lambda data, keys: {
             key: "**REDACTED**" if key in keys else value
@@ -139,7 +137,6 @@ def _mock_ha_modules():
     sys.modules["homeassistant.const"].Platform = MagicMock(
         SENSOR="sensor", BUTTON="button",
         BINARY_SENSOR="binary_sensor",
-        GEO_LOCATION="geo_location",
     )
     sys.modules["homeassistant.exceptions"].HomeAssistantError = _SentinelHomeAssistantError
     sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = _SentinelConfigEntryNotReady

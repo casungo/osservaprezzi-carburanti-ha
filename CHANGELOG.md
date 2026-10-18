@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0-beta.2] - 2026-10-18
+
+### Fixed
+
+- Finish config-entry setup rollback through repeated cancellation, unloading only newly created
+  platforms for the affected entry and releasing its listeners and timers before retry.
+- Preserve the shared CSV manager and update timer when another station is still restoring storage.
+  Pending entries remain unavailable to services until restoration finishes.
+- Reject non-string fuel names and non-finite nearby-search radii.
+- Keep derived price metadata finite and representable while preserving rounded-delta direction.
+- Reduce duplicate retry and terminal station API warnings while retaining useful failure context.
+
+### Tests and validation
+
+- Enforce 100% statement and branch coverage locally and in CI; preserve all existing test functions.
+- Add real Home Assistant regressions for partial platform setup cancellation, repeated cancellation,
+  concurrent cache restoration and service calls during restoration.
+- Require the initial listener/timer sample and one sample after each configured reload in KPI checks.
+- Keep live cache/entity migrations and remove only the obsolete geo-location test stubs.
+- The isolated audit checkout passes 544 unit tests (7 optional-environment skips), 18 real Home
+  Assistant tests, Ruff and mypy; all 2,101 statements and 592 branches are covered. Cron/config-flow
+  checks also pass with the real Core-managed cronsim package.
+- Upgrade, fresh, lived, outage and recovery Docker profiles pass locally with a clean runner exit.
+- The final local replay against v2.6.0 has no correctness failures, all 23 performance metrics within
+  guardrails, and no identity changes on 49 common entities. Nearby median of run medians is
+  38.824 ms baseline versus 38.573 ms candidate (-0.65%). This measures short replay behavior,
+  not long-running memory or live upstream latency. The measured integration predates only this
+  release version change.
+- Remote unit, HA contract, static, Hassfest and HACS checks pass. Remote Docker/KPI checks are
+  blocked by TCP connection timeouts to MIMIT before TLS or HTTP, confirmed with curl from hosted
+  runners. The audit merge was explicitly approved with these failures recorded.
+
 ## [2.7.0-beta.1] - 2026-10-07
 
 This prerelease includes all 50 changes from the quality audit. It adds station-level refresh,

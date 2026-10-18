@@ -85,7 +85,15 @@ def test_fetch_station_data_success(
         "address": "Private Street 987",
         "latitude": 41.123456,
         "longitude": 12.654321,
-        "prices": [{"fuel": "PrivateFuel", "price": 9.876}],
+        "fuels": [
+            {
+                "name": "PrivateFuel",
+                "price": 1.876,
+                "fuelId": 1,
+                "isSelf": True,
+                "serviceAreaId": 2,
+            }
+        ],
     }
     session = _FakeSession(_FakeResponse(200, payload))
     monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
@@ -99,8 +107,15 @@ def test_fetch_station_data_success(
         "address": "Private Street 987",
         "latitude": 41.123456,
         "longitude": 12.654321,
-        "prices": [{"fuel": "PrivateFuel", "price": 9.876}],
-        "fuels": [],
+        "fuels": [
+            {
+                "name": "PrivateFuel",
+                "price": 1.876,
+                "fuelId": 1,
+                "isSelf": True,
+                "serviceAreaId": 2,
+            }
+        ],
         "services": [],
         "orariapertura": [],
     }
@@ -118,7 +133,7 @@ def test_fetch_station_data_success(
         "41.123456",
         "12.654321",
         "PrivateFuel",
-        "9.876",
+        "1.876",
     ):
         assert private_value not in caplog.text
 
@@ -224,6 +239,32 @@ def test_normalize_station_data_defaults_collections_and_preserves_unknowns() ->
                     "price": 1.8,
                     "fuelId": 1,
                     "isSelf": 1,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": 1,
+                    "price": 1.8,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": None,
+                    "price": 1.8,
+                    "fuelId": 1,
+                    "isSelf": True,
                     "serviceAreaId": 3,
                 }
             ],

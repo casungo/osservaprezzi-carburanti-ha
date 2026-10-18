@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 import voluptuous as vol
@@ -203,8 +203,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 )
                 if result is not None:
                     return result
-                if error is not None:
-                    errors["base"] = error
+                errors["base"] = cast(str, error)
 
         return self.async_show_form(
             step_id="home",
@@ -235,8 +234,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 )
                 if result is not None:
                     return result
-                if error is not None:
-                    errors["base"] = error
+                errors["base"] = cast(str, error)
             except (KeyError, TypeError, ValueError):
                 errors["base"] = "invalid_location"
 

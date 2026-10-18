@@ -58,9 +58,9 @@ jobs:
         run: python -m pip install -r requirements-test.txt
 
       - name: Run coverage
-        run: python -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
+        run: python -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
 
-      - name: Enforce 100% coverage
+      - name: Enforce 100% statement and branch coverage
         run: python -m coverage report --fail-under=100
 
   static:
@@ -128,6 +128,11 @@ jobs:
       - name: Run real Home Assistant Docker regression
         run: python scripts/ha_docker_regression.py
 
+      - name: Diagnose upstream connectivity after failure
+        if: failure()
+        timeout-minutes: 2
+        run: bash scripts/diagnose_upstream.sh
+
   live-api-contract:
     if: github.event.schedule == '17 2 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -168,6 +173,11 @@ jobs:
 
       - name: Compare release KPIs against preceding stable release
         run: python3 scripts/benchmark_release.py --output artifacts/kpi/ci
+
+      - name: Diagnose upstream connectivity after failure
+        if: failure()
+        timeout-minutes: 2
+        run: bash scripts/diagnose_upstream.sh
 
       - name: Add KPI comparison to the workflow summary
         if: always()

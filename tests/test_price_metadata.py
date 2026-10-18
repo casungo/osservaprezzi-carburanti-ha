@@ -17,6 +17,50 @@ def test_price_direction_and_missing_history(price, previous, delta, direction):
     assert result["price_is_stale"] is None
 
 
+@pytest.mark.parametrize(
+    "price,previous,direction",
+    [
+        (float("nan"), 1.7, None),
+        (float("inf"), 1.7, None),
+        (10**400, 1.7, None),
+        (1.8, float("nan"), "new"),
+        (1.8, float("inf"), "new"),
+        (1.8, 10**400, "new"),
+    ],
+)
+def test_invalid_numeric_prices_have_no_delta(price, previous, direction):
+    result = metadata_module.price_metadata(
+        price=price, previous_price=previous, last_update=None, stale_hours=24
+    )
+
+    assert result["price_delta"] is None
+    assert result["price_direction"] == direction
+
+
+def test_finite_prices_with_overflowing_delta_keep_direction():
+    result = metadata_module.price_metadata(
+        price=1.7e308,
+        previous_price=-1.7e308,
+        last_update=None,
+        stale_hours=24,
+    )
+
+    assert result["price_delta"] is None
+    assert result["price_direction"] == "up"
+
+
+def test_direction_uses_rounded_delta_for_small_changes():
+    result = metadata_module.price_metadata(
+        price=1.80001,
+        previous_price=1.8,
+        last_update=None,
+        stale_hours=24,
+    )
+
+    assert result["price_delta"] == 0
+    assert result["price_direction"] == "unchanged"
+
+
 @pytest.mark.parametrize("date,age,stale", [("2026-10-05T07:00:00+00:00", 60, False), ("2026-10-04T07:00:00+00:00", 1500, True), ("2026-10-06T08:00:00+00:00", 0, False), ("invalid", None, None), ("2026-10-05T07:00:00", None, None)])
 def test_price_freshness_and_invalid_timestamps(monkeypatch, date, age, stale):
     monkeypatch.setattr(metadata_module.dt_util, "now", lambda: datetime(2026, 10, 5, 8, tzinfo=timezone.utc))

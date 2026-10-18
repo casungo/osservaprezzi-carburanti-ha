@@ -508,6 +508,19 @@ class TestCSVParsing:
         assert asyncio.run(csv_manager.async_clear_cache()) is False
         assert all(not Path(path).exists() for path in csv_manager._legacy_csv_paths)
 
+    def test_clear_cache_removes_legacy_csv_when_json_cache_is_absent(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        (tmp_path / ".storage").mkdir()
+        csv_manager = CSVStationManager(hass)
+        legacy_csv = Path(csv_manager._legacy_csv_paths[0])
+        legacy_csv.write_text("legacy csv", encoding="utf-8")
+
+        assert not Path(csv_manager._cache_path).exists()
+        assert asyncio.run(csv_manager.async_clear_cache()) is True
+        assert not legacy_csv.exists()
+
     def test_migrate_legacy_files_moves_json_and_removes_all_raw_csv(self, tmp_path):
         hass = MagicMock()
 
@@ -536,6 +549,25 @@ class TestCSVParsing:
         assert not old_csv.exists()
         assert not released_raw.exists()
         assert (storage / "osservaprezzi_carburanti_cache.json").read_text(encoding="utf-8") == "cache"
+
+    def test_migrate_legacy_json_does_not_replace_existing_cache(self, tmp_path):
+        hass = MagicMock()
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+        hass.async_add_executor_job.side_effect = _run_in_executor
+        (tmp_path / ".storage").mkdir()
+        old_cache = tmp_path / "osservaprezzi_cache.json"
+        new_cache = tmp_path / ".storage" / "osservaprezzi_carburanti_cache.json"
+        old_cache.write_text("legacy", encoding="utf-8")
+        new_cache.write_text("current", encoding="utf-8")
+        legacy_csv = tmp_path / "osservaprezzi_stations.csv"
+        legacy_csv.write_text("legacy csv", encoding="utf-8")
+        csv_manager = CSVStationManager(hass)
+
+        asyncio.run(csv_manager._async_migrate_legacy_files())
+
+        assert new_cache.read_text(encoding="utf-8") == "current"
+        assert old_cache.read_text(encoding="utf-8") == "legacy"
+        assert not legacy_csv.exists()
 
     def test_legacy_raw_only_initialize_downloads_fresh(self, tmp_path, monkeypatch):
         hass = MagicMock()

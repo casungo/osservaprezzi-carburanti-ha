@@ -1,0 +1,391 @@
+{
+  "raw_report_sha256": "89d05416799a6adcd58bfb1c55ec911eb8c6256a4b021363e01c68edb9b5ec48",
+  "provenance": {
+    "created_utc": "2026-10-07T22:23:30.749984+00:00",
+    "image_id": "sha256:cd74b0e02cee84de9f53b0f8fc079c8979796b81a6b02e1ee0cd09f038703afd",
+    "image_digests": [
+      "ghcr.io/home-assistant/home-assistant@sha256:3e6710a7ab2a61311d9d899b719f6c3657791c63e8f4942cec4ebc42401d6b76"
+    ],
+    "inputs": {
+      "captured_at": "2026-10-07T01:24:02.092220+00:00",
+      "station_ids": [
+        "54233",
+        "54234",
+        "54404",
+        "54235"
+      ],
+      "sources": [
+        {
+          "url": "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv",
+          "status": 200,
+          "bytes": 3572970,
+          "etag": "\"3684ea-65d266c41f64f\"",
+          "last_modified": "Tue, 06 Oct 2026 06:51:06 GMT"
+        },
+        {
+          "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54233",
+          "status": 200,
+          "bytes": 3587,
+          "etag": null,
+          "last_modified": null
+        },
+        {
+          "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54234",
+          "status": 200,
+          "bytes": 3574,
+          "etag": null,
+          "last_modified": null
+        },
+        {
+          "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54404",
+          "status": 200,
+          "bytes": 3946,
+          "etag": null,
+          "last_modified": null
+        },
+        {
+          "url": "https://carburanti.mise.gov.it/ospzApi/registry/servicearea/54235",
+          "status": 200,
+          "bytes": 3671,
+          "etag": null,
+          "last_modified": null
+        }
+      ],
+      "sha256": {
+        "registry.csv": "755a4d8ee0bbdec8df581f348b89eed454328402e73b077d3251e1ed64fd27d4",
+        "stations.json": "505af55ee427327ad63135a2171e48068293ebaa8c78d2f40e6a29bfe27ed76d"
+      }
+    },
+    "host_cpu_count": 4,
+    "host_load_at_start": [
+      0.68994140625,
+      0.86669921875,
+      0.89306640625
+    ],
+    "settings": {
+      "baseline": "v2.6.0",
+      "candidate": "working-tree",
+      "image": "ghcr.io/home-assistant/home-assistant@sha256:3e6710a7ab2a61311d9d899b719f6c3657791c63e8f4942cec4ebc42401d6b76",
+      "inputs": "/home/casungo/code/osservaprezzi-carburanti-ha/artifacts/kpi/smoke-20261007/inputs",
+      "output": "/home/casungo/code/osservaprezzi-carburanti-ha/artifacts/kpi/soak-24h-20261008",
+      "duration": 86400,
+      "warmup": 600,
+      "sample_seconds": 60,
+      "reload_seconds": 7200,
+      "fault_first": 3600,
+      "fault_second": 43200,
+      "no_faults": false,
+      "cron": "*/5 * * * *",
+      "cpus": 1,
+      "memory": "1g"
+    },
+    "scripts_sha256": {
+      "soak_release.py": "4ccb892a0c9197d4ea7c4e08c92b13ba50287a08f02bf83f705319321040a863",
+      "ha_kpi_probe.py": "f16b69066002daf47c83d183a7d877149cdae46f9ad7ce1b617460372c4e5c1d",
+      "ha_soak_probe.py": "7dc33adbf69f26ff8d15ad6468f50ef2c76175c253d44c1c28def6eac44b8469",
+      "benchmark_release.py": "a7e8901a761da092349153b583151071ad57b3183fb9bb1d1fda4c2752aed495"
+    }
+  },
+  "status": "completed",
+  "shared_unique_ids": [
+    "54233_Benzina_self",
+    "54233_Gasolio_self",
+    "54233_brand",
+    "54233_company",
+    "54233_email",
+    "54233_id",
+    "54233_location",
+    "54233_name",
+    "54233_nomeImpianto",
+    "54233_phoneNumber",
+    "54233_website",
+    "54234_Benzina_self",
+    "54234_Gasolio_self",
+    "54234_brand",
+    "54234_company",
+    "54234_email",
+    "54234_id",
+    "54234_location",
+    "54234_name",
+    "54234_nomeImpianto",
+    "54234_phoneNumber",
+    "54234_website",
+    "54235_Benzina_self",
+    "54235_Gasolio_self",
+    "54235_brand",
+    "54235_company",
+    "54235_email",
+    "54235_id",
+    "54235_location",
+    "54235_name",
+    "54235_nomeImpianto",
+    "54235_phoneNumber",
+    "54235_service_10",
+    "54235_service_6",
+    "54235_service_8",
+    "54235_website",
+    "54404_Benzina_self",
+    "54404_Benzina_servito",
+    "54404_Gasolio_self",
+    "54404_Gasolio_servito",
+    "54404_brand",
+    "54404_company",
+    "54404_id",
+    "54404_location",
+    "54404_name",
+    "54404_next_change",
+    "54404_nomeImpianto",
+    "54404_open_closed",
+    "54404_service_6"
+  ],
+  "runs": [
+    {
+      "role": "baseline",
+      "source": {
+        "ref": "v2.6.0",
+        "commit": "119610b0f34cbafff382217c179286b2d17b99e8",
+        "source_sha256": "50144b63c498883afd75bb083feb266a171761b13beb89fcbfb24b82306613b3",
+        "version": "2.6.0"
+      },
+      "summary": {
+        "observed_hours": 24.00001293083032,
+        "status": "completed",
+        "failures": [],
+        "rss_mib_per_hour_after_first_hour": -5.246700877381864,
+        "scheduled_callbacks": 1152,
+        "missing_callbacks": 0,
+        "cron_lateness_p95_ms": 2.279996871948242,
+        "cron_lateness_max_ms": 3.629922866821289,
+        "rss_first_mib": 328.90234375,
+        "rss_last_mib": 86.3125,
+        "rss_sampled_peak_mib": 328.90234375,
+        "database_bytes_first": 4096,
+        "database_bytes_last": 3502080,
+        "wal_bytes_last": 4181832,
+        "availability": {
+          "steady": {
+            "observations": 856450,
+            "invalid": 0
+          },
+          "outage": {
+            "observations": 4300,
+            "invalid": 0
+          },
+          "recovery": {
+            "observations": 160,
+            "invalid": 0
+          },
+          "reload": {
+            "observations": 20,
+            "invalid": 0
+          }
+        },
+        "recorder_rows_common_entities": 4831
+      },
+      "start_local": "2026-10-08T00:34:01.416395+02:00",
+      "end_local": "2026-10-09T00:34:01.474655+02:00",
+      "sample_count": 1441,
+      "max_sample_gap_seconds": 60.01924141542986,
+      "recorder_growth_common_24h": 4597,
+      "new_entity_rows": [
+        0,
+        0,
+        0
+      ],
+      "recorder_final_total": 4831,
+      "database_after_stop_bytes": 3502080,
+      "reload_ms_median": 23.752139415591955,
+      "reload_ms_max": 2000.4071318544447,
+      "faults": [
+        {
+          "kind": "fault",
+          "elapsed_seconds": 3600.9901445368305,
+          "outage_seconds": 216.02621395001188,
+          "cached_stations": 4,
+          "recovery_seconds": 7.99698792072013,
+          "network_successes": 4
+        },
+        {
+          "kind": "fault",
+          "elapsed_seconds": 43200.537686205,
+          "outage_seconds": 216.01997532881796,
+          "cached_stations": 4,
+          "recovery_seconds": 8.004520153161138,
+          "network_successes": 4
+        }
+      ],
+      "after_unload": {
+        "tasks": [],
+        "listeners": 0,
+        "timers": 0
+      },
+      "shutdown": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-07T22:23:30.844321835Z",
+        "FinishedAt": "2026-10-08T22:34:19.09933176Z"
+      },
+      "rss_hourly_medians": [
+        317.5,
+        314.806640625,
+        295.97265625,
+        276.271484375,
+        266.251953125,
+        257.873046875,
+        243.7734375,
+        232.15234375,
+        219.56640625,
+        205.7890625,
+        190.59375,
+        177.6875,
+        162.275390625,
+        256.498046875,
+        256.91015625,
+        257.16015625,
+        257.388671875,
+        256.064453125,
+        254.384765625,
+        251.27734375,
+        250.8203125,
+        114.349609375,
+        85.701171875,
+        86.1015625
+      ]
+    },
+    {
+      "role": "candidate",
+      "source": {
+        "ref": "working-tree",
+        "commit": "7932f30d84f872e0b68f1ecfc390e2a0dba49684",
+        "source_sha256": "25cf47de4e9bfd8e922802748593051ac6bea581059693a20ee97e0b53de11b4",
+        "version": "2.7.0-beta.1"
+      },
+      "summary": {
+        "observed_hours": 24.000023675693406,
+        "status": "completed",
+        "failures": [],
+        "rss_mib_per_hour_after_first_hour": -3.6231341104027948,
+        "scheduled_callbacks": 1152,
+        "missing_callbacks": 0,
+        "cron_lateness_p95_ms": 2.4094581604003906,
+        "cron_lateness_max_ms": 9.880542755126953,
+        "rss_first_mib": 326.91796875,
+        "rss_last_mib": 119.7734375,
+        "rss_sampled_peak_mib": 328.2421875,
+        "database_bytes_first": 4096,
+        "database_bytes_last": 3522560,
+        "wal_bytes_last": 4181832,
+        "availability": {
+          "steady": {
+            "observations": 856420,
+            "invalid": 0
+          },
+          "outage": {
+            "observations": 4300,
+            "invalid": 0
+          },
+          "recovery": {
+            "observations": 160,
+            "invalid": 0
+          },
+          "reload": {
+            "observations": 20,
+            "invalid": 0
+          }
+        },
+        "recorder_rows_common_entities": 4832
+      },
+      "start_local": "2026-10-08T00:34:01.415620+02:00",
+      "end_local": "2026-10-09T00:34:01.501887+02:00",
+      "sample_count": 1441,
+      "max_sample_gap_seconds": 60.0145052629523,
+      "recorder_growth_common_24h": 4598,
+      "new_entity_rows": [
+        16,
+        38,
+        42
+      ],
+      "recorder_final_total": 4874,
+      "database_after_stop_bytes": 3522560,
+      "reload_ms_median": 24.65401077643037,
+      "reload_ms_max": 2001.0154559276998,
+      "faults": [
+        {
+          "kind": "fault",
+          "elapsed_seconds": 3600.975440789014,
+          "outage_seconds": 216.0099356630817,
+          "cached_stations": 4,
+          "recovery_seconds": 8.020314399618655,
+          "network_successes": 4
+        },
+        {
+          "kind": "fault",
+          "elapsed_seconds": 43200.250826594885,
+          "outage_seconds": 216.01635301718488,
+          "cached_stations": 4,
+          "recovery_seconds": 8.013378638308495,
+          "network_successes": 4
+        }
+      ],
+      "after_unload": {
+        "tasks": [],
+        "listeners": 0,
+        "timers": 0
+      },
+      "shutdown": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-07T22:23:31.052544673Z",
+        "FinishedAt": "2026-10-08T22:34:28.663900198Z"
+      },
+      "rss_hourly_medians": [
+        325.615234375,
+        325.375,
+        294.609375,
+        270.7109375,
+        261.587890625,
+        250.142578125,
+        236.822265625,
+        225.94921875,
+        213.783203125,
+        198.40625,
+        184.283203125,
+        171.5390625,
+        157.904296875,
+        256.88671875,
+        257.548828125,
+        257.810546875,
+        258.03515625,
+        257.42578125,
+        257.3203125,
+        257.65625,
+        257.8359375,
+        163.93359375,
+        128.0,
+        125.521484375
+      ]
+    }
+  ],
+  "validation": {
+    "duration_24h_both": true,
+    "input_and_script_hashes": true,
+    "exported_source_hashes": true,
+    "original_retry_delays_30_60_120": true,
+    "service_result": "success",
+    "scheduled_task_enabled": false
+  }
+}

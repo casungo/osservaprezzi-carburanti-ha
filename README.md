@@ -47,31 +47,36 @@ prices come from MIMIT; the prices shown are a snapshot, not a current price quo
 
 ## 🚀 Installation and Configuration
 
-### Installation via HACS
+### Installation with Marketplace, Home Assistant 2026.11 and newer
 
-1. **Install HACS** (if you don't have it already): [HACS Guide](https://hacs.xyz/docs/installation/installation/)
-2. **Install the integration**:
-   - Search for "Osservaprezzi Carburanti" in HACS.
-   - Click "Download".
-   - Restart Home Assistant.
+1. Open **Settings > Marketplace** and accept the warning if prompted.
+2. Search for "Osservaprezzi Carburanti" and select **Install**.
+3. Restart Home Assistant if prompted, then follow the configuration instructions below.
 
-### Testing Pre-releases
+Marketplace replaces HACS starting with Home Assistant 2026.11. Existing HACS installations
+migrate automatically, including installed repositories and update entities. See the
+[Marketplace documentation](https://www.home-assistant.io/integrations/marketplace/).
 
-New features and fixes are sometimes published as pre-releases before becoming stable. Available
-pre-releases are listed on the
-[Releases page](https://github.com/casungo/osservaprezzi-carburanti-ha/releases). To install one
-through HACS:
+### Installation with HACS, Home Assistant 2026.10 and older
 
-1. Go to **Settings > Devices & Services > HACS**
-2. Click on the HACS integration → **Entities**
-3. Search for Osservaprezzi Carburanti in the list — the entity is **disabled by default**, so enable "Show disabled entities"
-4. Enable the entity, then toggle the switch **ON**
+1. Install [HACS](https://hacs.xyz/docs/installation/installation/) if needed.
+2. Search for "Osservaprezzi Carburanti" in HACS and download it.
+3. Restart Home Assistant.
 
-The exact switch name is `switch.osservaprezzi_carburanti_pre_release`. With the switch enabled,
-HACS offers pre-release versions when you update or redownload the integration.
+### Testing pre-releases
 
-To go back to stable releases, toggle the switch **OFF** and update or redownload the integration
-again.
+Available pre-releases are listed on the
+[Releases page](https://github.com/casungo/osservaprezzi-carburanti-ha/releases).
+
+1. Go to **Settings > Devices & services > Marketplace** on Home Assistant 2026.11 or newer,
+   or **Settings > Devices & services > HACS** on older versions.
+2. Open the device page for the Osservaprezzi Carburanti repository.
+3. Show disabled entities and enable the **Pre-release** switch entity, then turn it on.
+4. Install the pre-release from the repository page or its update entity.
+
+The entity ID can vary; find the switch on the repository's device page.
+Turn it off to receive only stable releases in future. This does not downgrade an installed
+pre-release. To undo an update, restore a backup made before that update.
 
 ### Configuration
 

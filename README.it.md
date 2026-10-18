@@ -48,31 +48,38 @@ riferiscono alla cattura e non sono una quotazione attuale.
 
 ## 🚀 Installazione e configurazione
 
-### Installazione tramite HACS
+### Installazione con Marketplace, Home Assistant 2026.11 e successivi
 
-1.  **Installa HACS** (se non l'hai già fatto): [Guida HACS](https://hacs.xyz/docs/installation/installation/)
-2.  **Installa l'integrazione**:
-    - Cerca "Osservaprezzi Carburanti" in HACS.
-    - Clicca "Download".
-    - Riavvia Home Assistant.
+1. Apri **Impostazioni > Marketplace** e accetta l'avviso se richiesto.
+2. Cerca "Osservaprezzi Carburanti" e seleziona **Installa**.
+3. Riavvia Home Assistant se richiesto, poi segui le istruzioni di configurazione qui sotto.
+
+Marketplace sostituisce HACS a partire da Home Assistant 2026.11. Le installazioni HACS
+esistenti vengono migrate automaticamente, inclusi i repository installati e le entità di
+aggiornamento. Consulta la
+[documentazione di Marketplace](https://www.home-assistant.io/integrations/marketplace/).
+
+### Installazione con HACS, Home Assistant 2026.10 e precedenti
+
+1. Installa [HACS](https://hacs.xyz/docs/installation/installation/) se necessario.
+2. Cerca "Osservaprezzi Carburanti" in HACS e scarica l'integrazione.
+3. Riavvia Home Assistant.
 
 ### Testare le pre-release
 
-Nuove funzionalità e correzioni vengono a volte pubblicate come pre-release prima di diventare
-stabili. Le pre-release disponibili sono elencate nella
-[pagina delle release](https://github.com/casungo/osservaprezzi-carburanti-ha/releases). Per
-installarne una tramite HACS:
+Le pre-release disponibili sono elencate nella
+[pagina delle release](https://github.com/casungo/osservaprezzi-carburanti-ha/releases).
 
-1. Vai su **Impostazioni > Dispositivi e Servizi > HACS**
-2. Clicca sull'integrazione HACS → **Entità**
-3. Cerca Osservaprezzi Carburanti nell'elenco — l'entità è **disabilitata per impostazione predefinita**, quindi attiva "Mostra entità disabilitate"
-4. Abilita l'entità, poi accendi l'interruttore
+1. Vai su **Impostazioni > Dispositivi e servizi > Marketplace** su Home Assistant 2026.11
+   e successivi, oppure su **Impostazioni > Dispositivi e servizi > HACS** nelle versioni precedenti.
+2. Apri la pagina del dispositivo del repository Osservaprezzi Carburanti.
+3. Mostra le entità disabilitate e abilita l'entità interruttore **Pre-release**, poi accendila.
+4. Installa la pre-release dalla pagina del repository o dalla sua entità di aggiornamento.
 
-Il nome esatto dell'interruttore è `switch.osservaprezzi_carburanti_pre_release`. Con l'interruttore
-attivo, HACS propone le versioni pre-release quando aggiorni o reinstalli l'integrazione.
-
-Per tornare alle versioni stabili, spegni l'interruttore e aggiorna o reinstalla di nuovo
-l'integrazione.
+L'ID dell'entità può variare; cerca l'interruttore nella pagina del dispositivo del repository.
+Spegnilo per ricevere solo release stabili in futuro. Questo non sostituisce una pre-release
+già installata con una versione precedente. Per annullare un aggiornamento, ripristina un
+backup creato prima dell'aggiornamento.
 
 ### Configurazione
 

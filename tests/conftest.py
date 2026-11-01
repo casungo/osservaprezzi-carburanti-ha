@@ -156,7 +156,16 @@ def _mock_ha_modules():
     sys.modules["homeassistant"].const = sys.modules["homeassistant.const"]
     sys.modules["homeassistant"].util = sys.modules["homeassistant.util"]
     sys.modules["homeassistant.util"].dt = sys.modules["homeassistant.util.dt"]
+    # Explicit attributes let monkeypatch restore shared mocks between tests.
+    for name in ("now", "as_local", "as_utc", "parse_datetime", "get_default_time_zone"):
+        setattr(sys.modules["homeassistant.util.dt"], name, MagicMock())
+    sys.modules["homeassistant.helpers.entity_registry"].async_get = MagicMock()
+    sys.modules["homeassistant.helpers.entity_platform"].async_get_platforms = MagicMock()
+    sys.modules["voluptuous"].Required = MagicMock()
     sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
+    sys.modules["homeassistant.helpers"].entity_platform = sys.modules[
+        "homeassistant.helpers.entity_platform"
+    ]
     sys.modules["homeassistant.helpers"].entity_registry = sys.modules[
         "homeassistant.helpers.entity_registry"
     ]

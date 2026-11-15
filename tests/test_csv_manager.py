@@ -1109,3 +1109,40 @@ def test_station_lookup_cannot_modify_shared_registry(csv_manager):
     station = csv_manager.get_station_by_id("1")
     station["name"] = "Changed"
     assert csv_manager.get_station_by_id("1")["name"] == "Original"
+
+
+def test_update_logs_exception_type_for_empty_timeout_error(tmp_path, caplog):
+    hass = MagicMock()
+    hass.config.path.return_value = str(tmp_path / "unused")
+    csv_manager = CSVStationManager(hass)
+    csv_manager.session = FakeCSVSession(asyncio.TimeoutError())
+
+    with caplog.at_level("ERROR"):
+        assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
+
+    timeout = csv_manager.session.calls[0][1]["timeout"]
+    assert timeout.total == 60
+    assert timeout.connect == csv_module.CSV_CONNECT_TIMEOUT_SECONDS
+    assert "Error updating CSV data: TimeoutError" in caplog.text
+
+
+def test_failed_initialize_applies_cooldown_and_resets_on_clear_or_expiry(
+    csv_manager, monkeypatch
+):
+    now = 1000.0
+    monkeypatch.setattr(csv_module.time, "monotonic", lambda: now)
+    csv_manager._async_initialize = AsyncMock(return_value=False)
+
+    assert asyncio.run(csv_manager.async_initialize()) is False
+    assert asyncio.run(csv_manager.async_initialize()) is False
+    csv_manager._async_initialize.assert_awaited_once()
+
+    now += csv_module.CSV_INIT_RETRY_COOLDOWN_SECONDS
+    assert asyncio.run(csv_manager.async_initialize()) is False
+    assert csv_manager._async_initialize.await_count == 2
+
+    csv_manager._async_remove_legacy_csv_files = AsyncMock()
+    assert asyncio.run(csv_manager.async_clear_cache()) is True
+    csv_manager._async_initialize.return_value = True
+    assert asyncio.run(csv_manager.async_initialize()) is True
+    assert csv_manager._async_initialize.await_count == 3

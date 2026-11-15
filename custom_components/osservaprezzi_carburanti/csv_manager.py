@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -28,6 +29,8 @@ _LOGGER = logging.getLogger(__name__)
 
 CACHE_VERSION = "2.0"
 CSV_MANAGER_DATA_KEY = "csv_manager"
+CSV_INIT_RETRY_COOLDOWN_SECONDS = 300
+CSV_CONNECT_TIMEOUT_SECONDS = 15
 CSV_COLUMNS = {
     "idImpianto": "id",
     "Gestore": "operator",
@@ -114,6 +117,7 @@ class CSVStationManager:
         self._operation_lock = asyncio.Lock()
         self._cache_generation = 0
         self._initialized = False
+        self._last_failed_init_at: float | None = None
 
     async def _async_migrate_legacy_files(self) -> None:
         """Migrate the legacy JSON cache and remove obsolete raw CSV files."""
@@ -167,7 +171,10 @@ class CSVStationManager:
             async with self.session.get(
                 CSV_URL,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=60),
+                timeout=aiohttp.ClientTimeout(
+                    total=60,
+                    connect=CSV_CONNECT_TIMEOUT_SECONDS,
+                ),
             ) as response:
                 if response.status == 304:
                     if cache_generation != self._cache_generation:
@@ -184,6 +191,7 @@ class CSVStationManager:
                         _LOGGER.error("Failed to persist CSV 304 refresh metadata")
                         return False
                     self._last_update = now
+                    self._last_failed_init_at = None
                     _LOGGER.debug("CSV not modified, keeping cached station data")
                     return True
 
@@ -224,12 +232,13 @@ class CSVStationManager:
             self._snapshot_cache = None
             self._snapshot_source = None
             self._last_update = now
+            self._last_failed_init_at = None
 
             _LOGGER.info("Successfully updated CSV station data")
             return True
 
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as err:
-            _LOGGER.error("Error updating CSV data: %s", err)
+            _LOGGER.error("Error updating CSV data: %s", str(err) or type(err).__name__)
             return False
 
     def _build_csv_request_headers(self, force_update: bool) -> dict[str, str]:
@@ -537,7 +546,15 @@ class CSVStationManager:
         async with self._operation_lock:
             if self._initialized:
                 return True
+            if (
+                self._last_failed_init_at is not None
+                and time.monotonic() - self._last_failed_init_at
+                < CSV_INIT_RETRY_COOLDOWN_SECONDS
+            ):
+                _LOGGER.debug("Skipping CSV initialization during failure cooldown")
+                return False
             self._initialized = await self._async_initialize()
+            self._last_failed_init_at = None if self._initialized else time.monotonic()
             return self._initialized
 
     async def _async_initialize(self) -> bool:
@@ -581,6 +598,7 @@ class CSVStationManager:
         async with self._operation_lock:
             self._cache_generation += 1
             self._initialized = False
+            self._last_failed_init_at = None
             self._stations_cache = {}
             self._snapshot_cache = None
             self._snapshot_source = None

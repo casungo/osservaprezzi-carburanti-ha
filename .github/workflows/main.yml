@@ -115,8 +115,10 @@ jobs:
           category: integration
 
   home-assistant-docker:
-    if: github.event_name != 'schedule' || github.event.schedule == '13 3 1,15 * *'
-    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'schedule' || github.event.schedule == '13 3 1,15 * *')
+    runs-on: [self-hosted, linux, x64, casungo-server]
     timeout-minutes: 15
     steps:
       - name: Check out the repository
@@ -126,7 +128,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run real Home Assistant Docker regression
-        run: python scripts/ha_docker_regression.py
+        run: python3 scripts/ha_docker_regression.py
 
       - name: Diagnose upstream connectivity after failure
         if: failure()
@@ -158,8 +160,10 @@ jobs:
         run: python -m pytest tests/test_live_api_contract.py -q
 
   release-kpis:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, linux, x64, casungo-server]
     timeout-minutes: 35
     steps:
       - name: Check out code and release tags
@@ -170,6 +174,9 @@ jobs:
 
       - name: Pull Home Assistant measurement image
         run: docker pull ghcr.io/home-assistant/home-assistant:stable
+
+      - name: Prepare clean KPI output directory
+        run: rm -rf artifacts/kpi/ci
 
       - name: Compare release KPIs against preceding stable release
         run: python3 scripts/benchmark_release.py --output artifacts/kpi/ci
@@ -200,3 +207,11 @@ jobs:
             artifacts/kpi/ci/inputs/*.json
             artifacts/kpi/ci/inputs/*.csv
             artifacts/kpi/ci/scripts/*.py
+
+      - name: Clean up KPI workspace artifacts
+        if: always()
+        run: |
+          if [ -d artifacts/kpi/ci ]; then
+            docker run --rm --entrypoint chown -v "$PWD/artifacts:/artifacts" ghcr.io/home-assistant/home-assistant:stable -R "$(id -u):$(id -g)" /artifacts/kpi/ci || true
+            rm -rf artifacts/kpi/ci
+          fi

@@ -227,6 +227,7 @@ class TestStationProcessing:
             "service_area_id": None,
             "previous_price": 1.8,
             "price_changed_at": "2025-03-04T12:00:00+00:00",
+            "price_history": [{"date": f"2025-03-0{i}", "price": price} for i, price in enumerate((1.7, 1.8, 1.8, 1.9), 1)],
         }
 
     def test_price_changed_event(self) -> None:
@@ -770,3 +771,13 @@ def test_manual_refresh_fast_fails_without_retry_backoff(monkeypatch) -> None:
     assert fetch_mock.await_count == 1
     sleep_mock.assert_not_awaited()
     assert coordinator._fast_fail_next_refresh is False
+
+
+def test_invalid_price_history_entries(monkeypatch):
+    coordinator = _make_coordinator()
+    coordinator.csv_manager.get_station_by_id.return_value = None
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: datetime(2025, 3, 4, tzinfo=timezone.utc))
+    coordinator.data = coordinator._process_station_data({"id": 123, "fuels": [{"name": "Benzina", "isSelf": True, "price": 1.8}]})
+    coordinator.data["fuels"]["Benzina_self"]["price_history"] = [None, {"date": 4, "price": 1}, {"date": "2025-03-01", "price": None}, {"date": "2025-03-02", "price": 1.7}]
+    result = coordinator._process_station_data({"id": 123, "fuels": [{"name": "Benzina", "isSelf": True, "price": None}]})
+    assert result["fuels"]["Benzina_self"]["price_history"] == [{"date": "2025-03-02", "price": 1.7}]

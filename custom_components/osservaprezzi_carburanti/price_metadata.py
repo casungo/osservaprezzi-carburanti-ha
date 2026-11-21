@@ -69,3 +69,26 @@ def price_metadata(
         ATTR_PRICE_AGE_MINUTES: age_minutes,
         ATTR_PRICE_IS_STALE: price_is_stale,
     }
+
+
+def price_history_metadata(
+    price: float | None, history: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Return finite statistics for recorded prices."""
+    prices = [number for entry in (history if isinstance(history, list) else [])
+              if isinstance(entry, dict)
+              and (number := _finite_price(entry.get("price"))) is not None]
+    minimum = min(prices) if prices else None
+    maximum = max(prices) if prices else None
+    average = round(sum(value / len(prices) for value in prices), 3) if prices else None
+    current = _finite_price(price)
+    percentage = None
+    if average and current is not None:
+        difference = (current / average - 1) * 100
+        if math.isfinite(difference):
+            percentage = round(difference, 2)
+    return {
+        "min_30d": minimum, "max_30d": maximum, "avg_30d": average,
+        "vs_avg_30d_pct": percentage,
+        "is_30d_low": current <= minimum if current is not None and minimum is not None else None,
+    }

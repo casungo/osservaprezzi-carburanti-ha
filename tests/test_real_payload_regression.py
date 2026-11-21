@@ -107,6 +107,7 @@ def test_real_station_payload_snapshot_maps_expected_coordinator_output() -> Non
         "service_area_id": 54233,
         "previous_price": None,
         "price_changed_at": None,
+        "price_history": [{"date": "2026-06-07", "price": 1.798}],
     }
     assert processed["fuels"]["Gasolio_self"]["price"] == 1.898
     assert processed["opening_hours"][0]["flagChiusura"] is True

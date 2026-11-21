@@ -152,6 +152,7 @@ class ProcessedFuel(TypedDict):
     service_area_id: object
     previous_price: int | float | None
     price_changed_at: str | None
+    price_history: NotRequired[list[dict[str, Any]]]
 
 
 class ProcessedPayload(TypedDict):

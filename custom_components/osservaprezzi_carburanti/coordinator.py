@@ -23,6 +23,7 @@ from .const import (
 )
 from .csv_manager import CSVStationManager
 from .data_helpers import parse_coordinate
+from .price_metadata import _finite_price
 from .models import ProcessedFuel, ProcessedPayload, ProcessedStationInfo, StationPayload
 
 _LOGGER = logging.getLogger(__name__)
@@ -379,6 +380,19 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
                         },
                     )
 
+            old_history = existing_fuel.get("price_history") if existing_fuel else None
+            history_by_date: dict[str, float] = {}
+            for item in old_history if isinstance(old_history, list) else []:
+                if isinstance(item, dict) and isinstance(item.get("date"), str):
+                    recorded_price = _finite_price(item.get("price"))
+                    if recorded_price is not None:
+                        history_by_date[item["date"]] = recorded_price
+            finite_price = _finite_price(new_price)
+            if finite_price is not None:
+                history_by_date[now_iso[:10]] = finite_price
+            history = [{"date": date, "price": history_by_date[date]}
+                       for date in sorted(history_by_date)[-30:]]
+
             processed_fuel: ProcessedFuel = {
                 "price": new_price,
                 "last_update": self._parse_iso_datetime(fuel.get("insertDate")),
@@ -388,6 +402,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
                 "service_area_id": fuel.get("serviceAreaId"),
                 "previous_price": previous_price,
                 "price_changed_at": price_changed_at,
+                "price_history": history,
             }
             processed_data["fuels"][fuel_key] = processed_fuel
 

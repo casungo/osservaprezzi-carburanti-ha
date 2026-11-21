@@ -73,3 +73,10 @@ def test_price_freshness_and_invalid_timestamps(monkeypatch, date, age, stale):
     result = metadata_module.price_metadata(price=1.8, previous_price=1.7, last_update=date, stale_hours=24)
     assert result["price_age_minutes"] == age
     assert result["price_is_stale"] == stale
+
+
+def test_history_statistics_and_invalid_values():
+    result = metadata_module.price_history_metadata(1.5, [{"price": 1.5}, {"price": 2.5}, {"price": None}, None])
+    assert result == {"min_30d": 1.5, "max_30d": 2.5, "avg_30d": 2.0, "vs_avg_30d_pct": -25.0, "is_30d_low": True}
+    assert metadata_module.price_history_metadata(1.0, [{"price": 0}])["vs_avg_30d_pct"] is None
+    assert metadata_module.price_history_metadata(1.7e308, [{"price": 0.001}])["vs_avg_30d_pct"] is None

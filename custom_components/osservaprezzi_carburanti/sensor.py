@@ -32,7 +32,7 @@ from .const import (
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 from .data_helpers import fuel_display_name, station_display_name
-from .price_metadata import price_metadata as _price_metadata
+from .price_metadata import price_history_metadata, price_metadata as _price_metadata
 from .entity import (
     OsservaprezziBaseEntity,
     ScheduleAwareEntity,
@@ -120,7 +120,7 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
     """Representation of a single fuel price for a specific station."""
 
     _attr_has_entity_name = True
-    _unrecorded_attributes = frozenset({"price_age_minutes", ATTR_FUEL_TYPE_NAME, ATTR_IS_SELF, ATTR_STATION_NAME, ATTR_STATION_ADDRESS, ATTR_STATION_BRAND})
+    _unrecorded_attributes = frozenset({"min_30d", "max_30d", "avg_30d", "vs_avg_30d_pct", "is_30d_low", "price_age_minutes", ATTR_FUEL_TYPE_NAME, ATTR_IS_SELF, ATTR_STATION_NAME, ATTR_STATION_ADDRESS, ATTR_STATION_BRAND})
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "€/L"
 
@@ -223,6 +223,7 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
                 ),
             )
         )
+        attributes.update(price_history_metadata(fuel_info.get("price"), fuel_info.get("price_history")))
         return attributes
 
     @property

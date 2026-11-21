@@ -54,3 +54,17 @@ def test_compare_stations_skips_invalid_coordinator_entries(monkeypatch) -> None
             "fuels": {},
         }
     }
+
+
+def test_refresh_prices_with_blank_station_ids_raises_error() -> None:
+    import pytest
+
+    service_registry = _ServiceRegistry()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"coordinator": SimpleNamespace(config_entry=SimpleNamespace(data={"station_id": "123"}))}}},
+        services=service_registry,
+    )
+    services_module.async_register_services(hass)
+    handler = service_registry.handlers[(DOMAIN, services_module.SERVICE_REFRESH_PRICES)]
+    with pytest.raises(services_module.HomeAssistantError):
+        asyncio.run(handler(SimpleNamespace(data={"station_ids": ["  "]})))

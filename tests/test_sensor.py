@@ -284,14 +284,14 @@ class TestEntitySetupRegression:
         entity._next_change = ("no_schedule", None)
         entity._next_change_now = None
 
-        def _schedule_update_ha_state():
-            calls.append("scheduled")
+        def _async_write_ha_state():
+            calls.append("written")
 
-        entity.schedule_update_ha_state = _schedule_update_ha_state
+        entity.async_write_ha_state = _async_write_ha_state
 
         entity._handle_time_tick(datetime(2026, 6, 1, 12, 0))
 
-        assert calls == ["scheduled"]
+        assert calls == ["written"]
 
     def test_schedule_entity_registers_and_removes_timer(self, monkeypatch):
         listener = lambda: calls.append("removed")
@@ -302,6 +302,7 @@ class TestEntitySetupRegression:
             return listener
 
         monkeypatch.setattr(entity_module, "async_track_time_interval", fake_track_time_interval)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2026, 6, 1, 12, 0))
         coordinator = SimpleNamespace(data=_sample_station_data(), hass="hass")
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
         entity = StationNextChangeSensor(coordinator, entry)
@@ -780,7 +781,7 @@ class TestNextChangeSensor:
         assert sensor.extra_state_attributes["change_type"] == "closes_at"
         assert calls == 1
 
-        sensor.schedule_update_ha_state = lambda: None
+        sensor.async_write_ha_state = lambda: None
         sensor._handle_time_tick(now + timedelta(minutes=1))
         assert calls == 2
 
@@ -916,8 +917,40 @@ def test_schedule_tick_converts_utc_to_station_local_time(monkeypatch):
     monkeypatch.setattr(sensor_module.dt_util, "as_local", lambda value: value.astimezone(rome))
     coordinator = SimpleNamespace(data={"opening_hours": [{"giornoSettimanaId": 1, "oraAperturaMattina": "08:00", "oraChiusuraMattina": "12:00"}]}, hass=SimpleNamespace())
     entity = StationNextChangeSensor(coordinator, SimpleNamespace(data={CONF_STATION_ID: "1"}))
-    entity.schedule_update_ha_state = lambda: None
+    entity.async_write_ha_state = lambda: None
     entity._handle_time_tick(datetime(2026, 6, 1, 10, 30, tzinfo=timezone.utc))
     assert entity._next_change_now.hour == 12
     assert entity.native_value != "12:00"
     assert entity.extra_state_attributes["change_type"] == "opens_at"
+
+
+def test_parse_time_supports_24_00_single_digit_and_rejects_bad_colons():
+    assert _parse_time("8:00") == time(8, 0)
+    assert _parse_time("24:00") == time(0, 0)
+    assert _parse_time("24:00:00") == time(0, 0)
+    assert _parse_time("1:2:3:4") is None
+
+
+def test_next_change_reports_closing_on_day_plus_7():
+    sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+    sensor.coordinator = SimpleNamespace(
+        data={
+            "opening_hours": [
+                {"giornoSettimanaId": day, "flagH24": True}
+                for day in range(1, 8)
+            ]
+            + [
+                {
+                    "giornoSettimanaId": 8,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "00:00",
+                    "oraChiusuraOrarioContinuato": "12:00",
+                }
+            ]
+        }
+    )
+    # 2025-05-26 08:00 -> 2025-06-02 (day +7) is Republic Day (Italian holiday) closing at 12:00
+    now = datetime(2025, 5, 26, 8, 0)
+    change_type, change_time = sensor._compute_next_change(now)
+    assert change_type == "closes_at"
+    assert change_time == datetime(2025, 6, 2, 12, 0)

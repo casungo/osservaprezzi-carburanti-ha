@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0-beta.3] - 2026-11-21
+
+### Fixed
+
+- Avoid treating cached fallback refreshes as live refreshes in initial-refresh and listener
+  issue-clearing checks, clean up orphaned devices on station reconfigure, and remove persisted
+  entry storage when a config entry is deleted.
+- URL-encode station IDs in API requests and convert malformed JSON station responses into
+  `InvalidStationPayloadError`.
+- Mark the CSV manager initialized after a successful update and handle `UnicodeDecodeError` when
+  decoding downloaded CSV data.
+- Cap `Retry-After` delays in the coordinator at 300 seconds.
+- Accept integer station IDs in `refresh_prices` service calls and distinguish omitted
+  `station_ids` from explicitly empty or blank lists.
+- Support `"24:00"` and single-digit hours in opening-hours time parsing, and schedule
+  `ScheduleAwareEntity` updates with `@callback` and `async_write_ha_state()`.
+- Compute the 7-day next-change horizon against the end of day +7 so closings on day +7 are not
+  reported as always open.
+- Handle `None` optional search filters in the config flow, guard `OptionsFlowHandler._save_schedule()`
+  when `_stale_hours` is unset, handle non-string falsy names in discovery, and add missing
+  `invalid_station` abort translations.
+
 ## [2.7.0-beta.2] - 2026-10-18
 
 ### Fixed

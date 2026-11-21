@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -68,7 +69,15 @@ def _parse_time(time_str: str | None) -> time | None:
     try:
         time_str_clean = str(time_str).strip()
         if ":" in time_str_clean:
-            return time.fromisoformat(time_str_clean)
+            parts = time_str_clean.split(":")
+            if len(parts) not in (2, 3):
+                raise ValueError(f"Invalid time format: {time_str_clean}")
+            hour = int(parts[0])
+            minute = int(parts[1])
+            second = int(parts[2]) if len(parts) == 3 else 0
+            if hour == 24 and minute == 0 and second == 0:
+                return time(0, 0)
+            return time(hour, minute, second)
         if "." in time_str_clean:
             hour_str, minute_str = time_str_clean.split(".")
             hour = int(hour_str)
@@ -222,6 +231,7 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
             self._time_listener = None
         await super().async_will_remove_from_hass()
 
+    @callback
     def _handle_time_tick(self, _: datetime) -> None:
         """Refresh state as time passes even when prices do not change."""
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()

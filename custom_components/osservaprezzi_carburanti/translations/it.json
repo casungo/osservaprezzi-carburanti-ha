@@ -102,6 +102,7 @@
     },
     "abort": {
       "already_configured": "Questa configurazione è già stata impostata",
+      "invalid_station": "ID stazione non valido o stazione non trovata.",
       "reconfigure_successful": "La stazione monitorata è stata cambiata."
     }
   },

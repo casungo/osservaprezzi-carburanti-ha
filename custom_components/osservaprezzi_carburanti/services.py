@@ -36,7 +36,7 @@ _REFRESH_PRICES_SCHEMA = vol.Schema(
     {
         vol.Optional("station_ids"): vol.All(
             cv.ensure_list,
-            [str],
+            [cv.string],
         )
     }
 )
@@ -170,13 +170,14 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_refresh_prices(call: ServiceCall) -> ServiceResponse:
         """Refresh all active stations or a requested station subset."""
-        requested_ids = {
-            str(station_id).strip()
-            for station_id in call.data.get("station_ids", [])
-            if str(station_id).strip()
-        }
+        raw_station_ids = call.data.get("station_ids")
         coordinators = _iter_coordinators()
-        if requested_ids:
+        if raw_station_ids is not None:
+            requested_ids = {
+                str(station_id).strip()
+                for station_id in raw_station_ids
+                if str(station_id).strip()
+            }
             coordinators = [
                 (entry_id, coordinator)
                 for entry_id, coordinator in coordinators

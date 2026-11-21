@@ -375,3 +375,12 @@ def test_area_candidate_uses_id_as_missing_name_and_normalizes_empty_metadata() 
 
     assert candidates[0].name == "42"
     assert candidates[0].brand is None
+
+
+def test_candidate_preserves_falsy_non_none_name() -> None:
+    candidates = find_stations_by_area(
+        [{"id": 42, "name": 0, "municipality": "Roma"}],
+        municipality="Roma",
+        limit=20,
+    )
+    assert candidates[0].name == "0"

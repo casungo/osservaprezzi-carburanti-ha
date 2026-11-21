@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 class _MockEntity:
@@ -91,6 +91,7 @@ def _mock_ha_modules():
         "homeassistant.core",
         "homeassistant.helpers",
         "homeassistant.helpers.config_validation",
+        "homeassistant.helpers.device_registry",
         "homeassistant.helpers.entity",
         "homeassistant.helpers.entity_registry",
         "homeassistant.helpers.entity_platform",
@@ -128,7 +129,9 @@ def _mock_ha_modules():
     sys.modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = _SentinelUpdateFailed
     sys.modules["homeassistant.helpers.issue_registry"].IssueSeverity = MagicMock(ERROR="error")
-    sys.modules["homeassistant.helpers.storage"].Store = MagicMock()
+    store_cls = MagicMock()
+    store_cls.return_value.async_remove = AsyncMock()
+    sys.modules["homeassistant.helpers.storage"].Store = store_cls
     sys.modules["homeassistant.helpers.entity"].DeviceInfo = dict
     sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock(
         DIAGNOSTIC="diagnostic", CONFIG="config"
@@ -159,12 +162,17 @@ def _mock_ha_modules():
     # Explicit attributes let monkeypatch restore shared mocks between tests.
     for name in ("now", "as_local", "as_utc", "parse_datetime", "get_default_time_zone"):
         setattr(sys.modules["homeassistant.util.dt"], name, MagicMock())
+    sys.modules["homeassistant.helpers.device_registry"].async_get = MagicMock()
+    sys.modules["homeassistant.helpers.device_registry"].async_entries_for_config_entry = MagicMock(return_value=[])
     sys.modules["homeassistant.helpers.entity_registry"].async_get = MagicMock()
     sys.modules["homeassistant.helpers.entity_platform"].async_get_platforms = MagicMock()
     sys.modules["voluptuous"].Required = MagicMock()
     sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
     sys.modules["homeassistant.helpers"].entity_platform = sys.modules[
         "homeassistant.helpers.entity_platform"
+    ]
+    sys.modules["homeassistant.helpers"].device_registry = sys.modules[
+        "homeassistant.helpers.device_registry"
     ]
     sys.modules["homeassistant.helpers"].entity_registry = sys.modules[
         "homeassistant.helpers.entity_registry"

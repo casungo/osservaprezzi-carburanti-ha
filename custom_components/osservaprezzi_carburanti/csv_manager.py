@@ -233,11 +233,12 @@ class CSVStationManager:
             self._snapshot_source = None
             self._last_update = now
             self._last_failed_init_at = None
+            self._initialized = True
 
             _LOGGER.info("Successfully updated CSV station data")
             return True
 
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as err:
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, UnicodeDecodeError) as err:
             _LOGGER.error("Error updating CSV data: %s", str(err) or type(err).__name__)
             return False
 

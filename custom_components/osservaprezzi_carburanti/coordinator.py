@@ -27,6 +27,7 @@ from .models import ProcessedFuel, ProcessedPayload, ProcessedStationInfo, Stati
 _LOGGER = logging.getLogger(__name__)
 
 RETRY_DELAYS: tuple[int, ...] = (30, 60, 120)
+MAX_RETRY_AFTER_SECONDS = 300
 
 
 class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
@@ -190,7 +191,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                 if seconds is not None and isfinite(seconds):
                     parsed_delay = int(seconds)
                     if parsed_delay > 0:
-                        return parsed_delay
+                        return min(parsed_delay, MAX_RETRY_AFTER_SECONDS)
                 try:
                     retry_at = parsedate_to_datetime(retry_after)
                     if retry_at.tzinfo is None:
@@ -205,7 +206,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                 except (TypeError, ValueError, OverflowError, IndexError):
                     return default_delay
                 if isfinite(delay) and delay > 0:
-                    return ceil(delay)
+                    return min(ceil(delay), MAX_RETRY_AFTER_SECONDS)
         return default_delay
 
     @staticmethod

@@ -362,3 +362,36 @@ def test_wait_for_request_slot_sleeps_when_throttled(monkeypatch: pytest.MonkeyP
 
 def test_price_validator_rejects_overflowing_integer():
     assert api._is_valid_fuel_price(10 ** 1000) is False
+
+
+def test_fetch_station_data_encodes_id_and_rejects_invalid_json(monkeypatch):
+    import json
+
+    requested_urls: list[str] = []
+
+    class _BadJsonResponse:
+        status = 200
+
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Session:
+        def get(self, url, **_kwargs):
+            requested_urls.append(url)
+            return _BadJsonResponse()
+
+    monkeypatch.setattr(api, "async_get_clientsession", lambda _hass: _Session())
+    async def _noop(*_args, **_kwargs):
+        return None
+    monkeypatch.setattr(api, "_wait_for_request_slot", _noop)
+
+    with pytest.raises(api.InvalidStationPayloadError, match="Invalid JSON"):
+        asyncio.run(api.fetch_station_data(MagicMock(), "12/34"))
+
+    assert requested_urls[0].endswith("/12%2F34")

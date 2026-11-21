@@ -1972,3 +1972,54 @@ def test_refresh_service_reports_coordinator_failure_without_exception(monkeypat
         asyncio.run(registered[services_module.SERVICE_REFRESH_PRICES](SimpleNamespace(data={})))
     assert error.value.translation_key == "station_refresh_failed"
     assert successful.refresh_calls == 1
+
+
+def test_cleanup_legacy_entity_registry_removes_orphaned_devices(monkeypatch) -> None:
+    hass = MagicMock()
+    entry = SimpleNamespace(entry_id="entry_1", data={init_module.CONF_STATION_ID: "200"})
+    entity_registry = SimpleNamespace(
+        entities={},
+        async_remove=MagicMock(),
+        async_update_entity=MagicMock(),
+    )
+    device_registry = SimpleNamespace(async_update_device=MagicMock())
+    orphaned = SimpleNamespace(id="dev_old", identifiers={(init_module.DOMAIN, "100")})
+    current = SimpleNamespace(id="dev_new", identifiers={(init_module.DOMAIN, "200")})
+    other = SimpleNamespace(id="dev_other", identifiers={("other_domain", "100")})
+
+    monkeypatch.setattr(init_module.er, "async_get", lambda _hass: entity_registry)
+    monkeypatch.setattr(init_module.dr, "async_get", lambda _hass: device_registry)
+    monkeypatch.setattr(
+        init_module.dr,
+        "async_entries_for_config_entry",
+        lambda _reg, _entry_id: [orphaned, current, other],
+    )
+
+    init_module._async_cleanup_legacy_entity_registry(hass, entry)
+
+    device_registry.async_update_device.assert_called_once_with(
+        "dev_old", remove_config_entry_id="entry_1"
+    )
+
+
+def test_initial_refresh_continues_when_last_refresh_from_cache(monkeypatch) -> None:
+    hass = MagicMock()
+    entry = SimpleNamespace(entry_id="entry_1", title="Station 1", data={init_module.CONF_STATION_ID: "1"})
+    stop_event = asyncio.Event()
+    calls = 0
+
+    class CacheFallbackCoordinator:
+        station_not_found = False
+        last_update_success = True
+        last_refresh_from_cache = True
+
+        async def async_refresh(self) -> None:
+            nonlocal calls
+            calls += 1
+            if calls >= 2:
+                self.last_refresh_from_cache = False
+
+    monkeypatch.setattr(init_module, "INITIAL_REFRESH_RETRY_INTERVAL", init_module.timedelta(seconds=0))
+    asyncio.run(init_module._async_initial_refresh(hass, CacheFallbackCoordinator(), entry, stop_event))
+    assert calls == 2
+    assert stop_event.is_set()

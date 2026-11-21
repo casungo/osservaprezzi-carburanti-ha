@@ -1356,3 +1356,14 @@ def test_reconfigure_empty_id_stays_on_field_without_api(monkeypatch):
     result = asyncio.run(flow.async_step_reconfigure({CONF_STATION_ID: "  "}))
     assert result["errors"] == {CONF_STATION_ID: "invalid_station"}
     validate.assert_not_awaited()
+
+
+def test_options_save_schedule_without_stale_hours_attr():
+    from types import SimpleNamespace
+    from custom_components.osservaprezzi_carburanti.config_flow import OptionsFlowHandler
+
+    handler = OptionsFlowHandler(SimpleNamespace(options={}))
+    handler.async_create_entry = lambda **kwargs: {"type": "create_entry", **kwargs}
+    result = handler._save_schedule("0 8 * * *")
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CRON_EXPRESSION] == "0 8 * * *"

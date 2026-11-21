@@ -273,7 +273,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                         find_stations_by_area,
                         snapshot.stations,
                         municipality=str(user_input[CONF_MUNICIPALITY]),
-                        province=str(user_input.get(CONF_PROVINCE, "")),
+                        province=str(user_input.get(CONF_PROVINCE) or ""),
                         text_filter=text_filter,
                         station_type=station_type,
                         limit=limit + 1,
@@ -349,8 +349,8 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         limit = int(user_input.get(CONF_RESULT_LIMIT, DEFAULT_RESULT_LIMIT))
         if not 0 < limit <= MAX_RESULT_LIMIT:
             raise ValueError("Result limit is out of range")
-        text_filter = str(user_input.get(CONF_TEXT_FILTER, "")).strip() or None
-        station_type = str(user_input.get(CONF_STATION_TYPE, "")).strip() or None
+        text_filter = str(user_input.get(CONF_TEXT_FILTER) or "").strip() or None
+        station_type = str(user_input.get(CONF_STATION_TYPE) or "").strip() or None
         return limit, text_filter, station_type
 
     def _common_search_fields(self) -> dict[Any, Any]:
@@ -802,7 +802,11 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
             title="",
             data={
                 CONF_CRON_EXPRESSION: cron,
-                CONF_PRICE_STALE_HOURS: self._stale_hours,
+                CONF_PRICE_STALE_HOURS: getattr(
+                    self,
+                    "_stale_hours",
+                    self.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
+                ),
             },
         )
 

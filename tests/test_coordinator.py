@@ -670,3 +670,11 @@ def test_retry_after_without_explicit_time_zone(monkeypatch):
 def test_naive_date_uses_utc_when_timezone_is_unavailable(monkeypatch):
     monkeypatch.setattr(coordinator_module.dt_util, "get_default_time_zone", lambda: None)
     assert _make_coordinator()._parse_iso_datetime("2026-10-05T12:00:00") == "2026-10-05T12:00:00+00:00"
+
+
+def test_retry_after_is_capped_at_max_retry_after_seconds(monkeypatch):
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: datetime(2025, 3, 1, 12, 0, tzinfo=timezone.utc))
+    numeric_error = _make_response_error(429, {"Retry-After": "9999"})
+    date_error = _make_response_error(429, {"Retry-After": "Sun, 02 Mar 2025 12:00:00 GMT"})
+    assert CarburantiDataUpdateCoordinator._get_retry_delay(numeric_error, 30) == 300
+    assert CarburantiDataUpdateCoordinator._get_retry_delay(date_error, 30) == 300

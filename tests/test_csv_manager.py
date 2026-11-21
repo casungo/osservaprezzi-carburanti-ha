@@ -1146,3 +1146,29 @@ def test_failed_initialize_applies_cooldown_and_resets_on_clear_or_expiry(
     csv_manager._async_initialize.return_value = True
     assert asyncio.run(csv_manager.async_initialize()) is True
     assert csv_manager._async_initialize.await_count == 3
+
+
+def test_update_handles_unicode_decode_error_and_marks_initialized_on_success(
+    tmp_path, monkeypatch
+):
+    now = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
+    hass = MagicMock()
+    hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+    hass.async_add_executor_job.side_effect = _run_in_executor
+    (tmp_path / ".storage").mkdir()
+    csv_manager = CSVStationManager(hass)
+    monkeypatch.setattr(csv_module.dt_util, "now", lambda: now)
+
+    class _BadEncodingResponse(FakeCSVResponse):
+        async def text(self):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    csv_manager.session = FakeCSVSession(_BadEncodingResponse(status=200))
+    assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is False
+    assert csv_manager._initialized is False
+
+    csv_manager.session = FakeCSVSession(
+        FakeCSVResponse(status=200, text="\n".join(PIPE_CSV_LINES))
+    )
+    assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is True
+    assert csv_manager._initialized is True

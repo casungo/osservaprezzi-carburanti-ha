@@ -104,7 +104,7 @@ def _candidate_from_station(
         return None
 
     name_value = station.get("name")
-    name = str(name_value).strip() if name_value else station_id
+    name = (str(name_value).strip() if name_value is not None else "") or station_id
     return StationCandidate(
         station_id=station_id,
         name=name,

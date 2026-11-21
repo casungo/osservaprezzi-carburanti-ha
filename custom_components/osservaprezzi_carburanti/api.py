@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from math import isfinite
 from typing import cast
+from urllib.parse import quote
 
 import aiohttp
 
@@ -105,7 +107,8 @@ async def fetch_station_data(
         aiohttp.ClientError: If there's a connection error
     """
     session = async_get_clientsession(hass)
-    url = f"{BASE_URL}{STATION_ENDPOINT.format(station_id=station_id)}"
+    encoded_station_id = quote(str(station_id).strip(), safe="")
+    url = f"{BASE_URL}{STATION_ENDPOINT.format(station_id=encoded_station_id)}"
 
     _LOGGER.debug("Fetching station data from: %s", url)
 
@@ -121,7 +124,12 @@ async def fetch_station_data(
             )
 
             if response.status == 200:
-                data = await response.json()
+                try:
+                    data = await response.json()
+                except json.JSONDecodeError as err:
+                    raise InvalidStationPayloadError(
+                        f"Invalid JSON in station response: {err}"
+                    ) from err
                 values = data.values() if isinstance(data, dict) else (data,)
                 collection_counts = {
                     "lists": sum(isinstance(value, list) for value in values),

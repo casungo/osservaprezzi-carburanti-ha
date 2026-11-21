@@ -10,9 +10,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers import entity_platform, entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_platform, entity_registry as er
 from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_time_interval
 from homeassistant.helpers import issue_registry
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -162,7 +163,9 @@ async def _async_initial_refresh(
             _async_create_station_not_found_issue(hass, entry)
             stop_event.set()
             return
-        if getattr(coordinator, "last_update_success", False):
+        if getattr(coordinator, "last_update_success", False) and not getattr(
+            coordinator, "last_refresh_from_cache", False
+        ):
             _async_delete_station_not_found_issue(hass, entry)
             stop_event.set()
             return
@@ -306,7 +309,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if coordinator.station_not_found:
             _async_create_station_not_found_issue(hass, entry)
             stop_event.set()
-        elif coordinator.last_update_success:
+        elif coordinator.last_update_success and not getattr(
+            coordinator, "last_refresh_from_cache", False
+        ):
             _async_delete_station_not_found_issue(hass, entry)
             stop_event.set()
 
@@ -390,6 +395,23 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
         if isinstance(registry_name, str) and registry_name in _LEGACY_DEFAULT_ENTITY_NAMES:
             entity_registry.async_update_entity(entity_id, name=None)
 
+    device_registry = dr.async_get(hass)
+    expected_identifier = (DOMAIN, str(station_id))
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        identifiers: set[tuple[str, str]] = getattr(device, "identifiers", set())
+        if expected_identifier in identifiers:
+            continue
+        if any(
+            isinstance(item, tuple)
+            and len(item) == 2
+            and item[0] == DOMAIN
+            and item[1] != str(station_id)
+            for item in identifiers
+        ):
+            device_registry.async_update_device(
+                device.id, remove_config_entry_id=entry.entry_id
+            )
+
 
 def _async_remove_csv_owner_if_unused(hass: HomeAssistant) -> bool:
     """Remove registry-wide resources when no config entries remain."""
@@ -469,8 +491,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove repair issues owned by a deleted config entry."""
+    """Remove repair issues and persisted storage owned by a deleted config entry."""
     _async_delete_station_not_found_issue(hass, entry)
+    await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.data").async_remove()
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

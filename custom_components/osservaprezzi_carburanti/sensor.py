@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -318,9 +318,14 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
             else:
                 merged.append([opens_at, closes_at])
 
+        horizon_end = datetime.combine(
+            now.date() + timedelta(days=8),
+            time.min,
+            now.tzinfo,
+        )
         for opens_at, closes_at in merged:
             if opens_at <= now < closes_at:
-                if closes_at > now + timedelta(days=7):
+                if closes_at >= horizon_end:
                     return "always_open", None
                 return "closes_at", closes_at
             if opens_at > now:

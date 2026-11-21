@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -17,6 +18,14 @@ class _MockEntity:
         """Mock remove hook."""
 
 
+@dataclass
+class _MockSensorEntityDescription:
+    key: str
+    translation_key: str
+    icon: str
+    entity_category: str
+
+
 class _MockSensorEntity(_MockEntity):
     """Minimal sensor entity test double."""
 
@@ -27,6 +36,10 @@ class _MockBinarySensorEntity(_MockEntity):
 
 class _MockCoordinatorEntity(_MockEntity):
     """Minimal coordinator entity test double."""
+
+    @classmethod
+    def __class_getitem__(cls, item):
+        return cls
 
     def __init__(self, coordinator=None, *args, **kwargs):
         """Store coordinator and hass like Home Assistant's CoordinatorEntity."""
@@ -119,6 +132,7 @@ def _mock_ha_modules():
             sys.modules[mod_name] = MagicMock()
 
     sys.modules["homeassistant.components.button"].ButtonEntity = _MockEntity
+    sys.modules["homeassistant.components.sensor"].SensorEntityDescription = _MockSensorEntityDescription
     sys.modules["homeassistant.components.sensor"].SensorEntity = _MockSensorEntity
     sys.modules["homeassistant.components.sensor"].SensorStateClass = MagicMock(
         MEASUREMENT="measurement"

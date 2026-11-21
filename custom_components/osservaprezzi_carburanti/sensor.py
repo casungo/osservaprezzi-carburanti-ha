@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
@@ -37,15 +37,15 @@ from .entity import (
     _has_valid_opening_hours,
 )
 
-INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
-    ("name", "station_name", "mdi:gas-station"),
-    ("nomeImpianto", "station_display_name", "mdi:gas-station"),
-    ("id", "station_id", "mdi:identifier"),
-    ("brand", "station_brand", "mdi:tag"),
-    ("company", "station_company", "mdi:office-building"),
-    ("phoneNumber", "station_phone", "mdi:phone"),
-    ("email", "station_email", "mdi:email"),
-    ("website", "station_website", "mdi:web"),
+INFO_SENSOR_DESCRIPTORS: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(key="name", translation_key="station_name", icon="mdi:gas-station", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="nomeImpianto", translation_key="station_display_name", icon="mdi:gas-station", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="id", translation_key="station_id", icon="mdi:identifier", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="brand", translation_key="station_brand", icon="mdi:tag", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="company", translation_key="station_company", icon="mdi:office-building", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="phoneNumber", translation_key="station_phone", icon="mdi:phone", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="email", translation_key="station_email", icon="mdi:email", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(key="website", translation_key="station_website", icon="mdi:web", entity_category=EntityCategory.DIAGNOSTIC),
 )
 
 
@@ -89,13 +89,14 @@ async def async_setup_entry(
                 entities.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
         station_info = data.get("station_info", {})
         if isinstance(station_info, dict):
-            for info_key, translation_key, icon in INFO_SENSOR_DESCRIPTORS:
+            for description in INFO_SENSOR_DESCRIPTORS:
+                info_key = description.key
                 if (
                     station_info.get(info_key)
                     and f"{station_id}_{info_key}" not in known_unique_ids
                 ):
                     entities.append(
-                        StationInfoSensor(coordinator, entry, info_key, translation_key, icon)
+                        StationInfoSensor(coordinator, entry, description)
                     )
         if f"{station_id}_location" not in known_unique_ids:
             entities.append(StationLocationSensor(coordinator, entry))
@@ -198,16 +199,13 @@ class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
         self,
         coordinator: CarburantiDataUpdateCoordinator,
         entry: ConfigEntry,
-        info_key: str,
-        name: str,
-        icon: str,
+        description: SensorEntityDescription,
     ) -> None:
         """Initialize the info sensor."""
         super().__init__(coordinator, entry)
-        self._info_key = info_key
-        self._attr_translation_key = name
-        self._attr_unique_id = f"{self._station_id}_{info_key}"
-        self._attr_icon = icon
+        self.entity_description = description
+        self._info_key = description.key
+        self._attr_unique_id = f"{self._station_id}_{description.key}"
 
     @property
     def native_value(self) -> StateType:

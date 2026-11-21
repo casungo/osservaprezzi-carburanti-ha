@@ -27,6 +27,7 @@ from custom_components.osservaprezzi_carburanti.sensor import (
     OsservaprezziStationSensor,
     StationLocationSensor,
     StationInfoSensor,
+    INFO_SENSOR_DESCRIPTORS,
     StationNextChangeSensor,
     async_setup_entry,
 )
@@ -250,10 +251,10 @@ class TestEntitySetupRegression:
     def test_info_and_location_sensor_properties(self):
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
-        info = StationInfoSensor(coordinator, entry, "brand", "station_brand", "mdi:tag")
+        info = StationInfoSensor(coordinator, entry, next(d for d in INFO_SENSOR_DESCRIPTORS if d.key == "brand"))
         location = StationLocationSensor(coordinator, entry)
 
-        assert info._attr_translation_key == "station_brand"
+        assert info.entity_description.translation_key == "station_brand"
         assert info.native_value == "Brand X"
         assert location._attr_translation_key == "location"
         assert location.native_value == "Via Roma 1"

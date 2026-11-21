@@ -31,7 +31,7 @@ MAX_RETRY_AFTER_SECONDS = 300
 _UNSET = object()
 
 
-class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
+class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
     """Coordinate API and CSV enrichment updates for a single station."""
 
     _fast_fail_next_refresh: bool = False

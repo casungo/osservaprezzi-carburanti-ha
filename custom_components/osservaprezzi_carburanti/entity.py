@@ -165,7 +165,7 @@ def _schedule_intervals_for_date(
     return intervals
 
 
-class OsservaprezziBaseEntity(CoordinatorEntity):
+class OsservaprezziBaseEntity(CoordinatorEntity[CarburantiDataUpdateCoordinator]):
     """Shared entity helpers for this integration."""
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:

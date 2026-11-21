@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0-beta.1] - 2026-11-21
+
+### Added
+
+- **Interactive Map Picker & Zone Discovery:** Coordinate search now uses Home Assistant's built-in
+  `LocationSelector` map pin picker (coordinates stay strictly local and unpersisted), and a new
+  *Zone* setup flow option lets users search near any configured Home Assistant Zone.
+- **Price-Change Event Bus & Automation Blueprints:** Emit `osservaprezzi_carburanti_price_changed`
+  events whenever a station's fuel price increases or decreases, and ship two ready-to-use
+  automation blueprints (`fuel_price_drop_alert.yaml` and `cheapest_station_digest.yaml`) plus
+  native Lovelace dashboard card examples in the READMEs.
+- **Smart `compare_stations` Ranking & Cost Calculator:** Add optional filters (`fuel_type`,
+  `service_mode`, `exclude_stale`, `only_open`), origin distance sorting (`sort_by`, `zone`,
+  `latitude`/`longitude`), refuel cost/savings calculation (`liters`), and a sorted `ranking` list
+  alongside the existing `stations` response.
+- **Nearby `search_registry` & Target Selectors on `refresh_prices`:** Support radius queries
+  (`latitude`, `longitude`, `radius_km`, `zone`) in `search_registry`, `device_id`/`entity_id`
+  selectors in `refresh_prices`, and allow `force_csv_update`/`clear_cache` without active entries.
+- **Opening-Hours Service Flags & Real-Time Staleness Timer:** Expose `self_service_available`
+  (`flagSelf`), `served_available` (`flagServito`), and `today_schedule` on the open/closed binary
+  sensor, and schedule a one-shot timer on fuel sensors to flip `price_is_stale` in real time.
+- **Canonical `strings.json` & Translated `price_stale_hours` Selector:** Add `strings.json` and
+  replace the raw numeric staleness list with a translated dropdown selector.
+
+### Changed
+
+- **Lower Memory & Cleaner New Installs:** Store the ~23.8k-station registry as immutable slotted
+  `StationRecord` dataclasses (eliminating snapshot dict copies; -6.6% steady RSS, -5.1% peak RSS),
+  disable redundant static diagnostic sensors and service binary sensors by default on new setups
+  (-57.4% Recorder rows, -14.5% database size; existing installations keep enabled entities intact),
+  remove confirmed-404 candidates during multi-station selection, and adopt typed
+  `SensorEntityDescription` and generic coordinator/entity typing.
+
+### Tests and validation
+
+- 574 unit tests passed (7 optional-environment skips), 100% statement and branch coverage
+  (2,469 statements, 728 branches), 18 real Home Assistant tests passed, Ruff, mypy, and Hassfest
+  passed.
+- Full Home Assistant Docker regression (`upgrade`, `fresh`, `lived`, `outage`, `recovery`) passed
+  with exit code 0.
+- Local KPI replay against `v2.7.0` passed with 0 correctness failures, 22/23 metrics within
+  guardrails (`rss_steady_mib` -6.6%, `recorder_rows_total` -57.4%, `database_bytes` -14.5%,
+  `registry_conditional_update_ms` 0.844 ms, `nearby_search_ms` 25.302 ms), and 1 provisional
+  investigate flag on 24h CSV parse (`registry_parse_ms` 183.5 ms → 281.6 ms in executor thread).
+
 ## [2.7.0] - 2026-11-21
 
 Stable release consolidating all quality, performance, resilience, and Home Assistant compliance

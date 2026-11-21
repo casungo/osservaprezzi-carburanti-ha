@@ -137,3 +137,6 @@ SERVICE_CLEAR_CACHE = "clear_cache"
 SERVICE_COMPARE_STATIONS = "compare_stations"
 SERVICE_REFRESH_PRICES = "refresh_prices"
 SERVICE_SEARCH_REGISTRY = "search_registry"
+
+CONF_TRACKED_FUELS = "tracked_fuels"
+CONF_TRACKED_SERVICE_MODES = "tracked_service_modes"

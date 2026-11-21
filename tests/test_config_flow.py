@@ -1026,7 +1026,8 @@ def test_config_flow_reconfigure_errors(
 
 def _make_options_flow(options: dict[str, Any] | None = None) -> OptionsFlowHandler:
     handler = object.__new__(OptionsFlowHandler)
-    handler.config_entry = MagicMock(title="Station", options=options or {})
+    handler.config_entry = MagicMock(title="Station", options=options or {}, entry_id="entry")
+    handler.hass = MagicMock(data={})
     handler.async_create_entry = MagicMock(
         side_effect=lambda **kwargs: {"type": "create_entry", **kwargs}
     )
@@ -1068,6 +1069,8 @@ def test_options_flow_valid_cron(monkeypatch: pytest.MonkeyPatch) -> None:
         "title": "",
         "data": {
             CONF_CRON_EXPRESSION: "0 6 * * *",
+            "tracked_fuels": [],
+            "tracked_service_modes": [],
             CONF_PRICE_STALE_HOURS: DEFAULT_PRICE_STALE_HOURS,
         },
     }
@@ -1230,7 +1233,7 @@ def test_long_label_without_address_keeps_distance_and_id() -> None:
 def test_options_presets_keep_existing_storage_contract(schedule, cron) -> None:
     handler = _make_options_flow()
     result = asyncio.run(handler.async_step_init({"refresh_schedule": schedule, CONF_PRICE_STALE_HOURS: 48}))
-    assert result["data"] == {CONF_CRON_EXPRESSION: cron, CONF_PRICE_STALE_HOURS: 48}
+    assert result["data"] == {CONF_CRON_EXPRESSION: cron, CONF_PRICE_STALE_HOURS: 48, "tracked_fuels": [], "tracked_service_modes": []}
 
 
 def test_options_custom_keeps_existing_cron_and_retains_invalid_input(monkeypatch) -> None:
@@ -1247,7 +1250,7 @@ def test_options_custom_keeps_existing_cron_and_retains_invalid_input(monkeypatc
     assert result["errors"] == {CONF_CRON_EXPRESSION: "invalid_cron_expression"}
     assert handler.add_suggested_values_to_schema.call_args.args[1] == {CONF_CRON_EXPRESSION: "invalid"}
     result = asyncio.run(handler.async_step_custom({CONF_CRON_EXPRESSION: "0 5 * * *"}))
-    assert result["data"] == {CONF_CRON_EXPRESSION: "0 5 * * *", CONF_PRICE_STALE_HOURS: 72}
+    assert result["data"] == {CONF_CRON_EXPRESSION: "0 5 * * *", CONF_PRICE_STALE_HOURS: 72, "tracked_fuels": [], "tracked_service_modes": []}
 
 
 def test_options_invalid_preset_retains_inputs() -> None:
@@ -1381,3 +1384,17 @@ def test_zone_search_and_invalid_zone(monkeypatch: pytest.MonkeyPatch) -> None:
     flow._async_search_nearby = AsyncMock(return_value=(None, "no_stations_found"))
     assert asyncio.run(flow.async_step_zone({"zone": "zone.home", "radius_km": 5}))["errors"] == {"base": "no_stations_found"}
     assert asyncio.run(flow.async_step_zone())["step_id"] == "zone"
+
+
+def test_options_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    handler = _make_options_flow({"tracked_fuels": ["Diesel"], "tracked_service_modes": ["self"]})
+    handler.hass.data = {"osservaprezzi_carburanti": {"entry": {"coordinator": MagicMock(data={"fuels": {"Diesel_self": {}}})}}}
+    handler.add_suggested_values_to_schema = MagicMock(side_effect=lambda schema, values: schema)
+    optional = MagicMock(side_effect=lambda key, default: key)
+    monkeypatch.setattr("custom_components.osservaprezzi_carburanti.config_flow.vol.Optional", optional)
+    asyncio.run(handler.async_step_init())
+    assert optional.call_args_list[0].kwargs["default"] == ["Diesel"]
+    assert optional.call_args_list[1].kwargs["default"] == ["self"]
+    result = asyncio.run(handler.async_step_init({"refresh_schedule": "daily", "tracked_fuels": ["Diesel"], "tracked_service_modes": ["self"]}))
+    assert result["data"]["tracked_fuels"] == ["Diesel"]
+    assert result["data"]["tracked_service_modes"] == ["self"]

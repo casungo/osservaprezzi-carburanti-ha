@@ -240,14 +240,14 @@ async def test_options_presets_and_custom_cron(hass) -> None:
     assert _suggestions(result)[CONF_CRON_EXPRESSION] == "bad"
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_CRON_EXPRESSION: "0 6 * * *"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {CONF_CRON_EXPRESSION: "0 6 * * *", CONF_PRICE_STALE_HOURS: 72}
+    assert entry.options == {CONF_CRON_EXPRESSION: "0 6 * * *", CONF_PRICE_STALE_HOURS: 72, "tracked_fuels": [], "tracked_service_modes": []}
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"refresh_schedule": "every_six_hours", CONF_PRICE_STALE_HOURS: "24"}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {CONF_CRON_EXPRESSION: "0 */6 * * *", CONF_PRICE_STALE_HOURS: 24}
+    assert entry.options == {CONF_CRON_EXPRESSION: "0 */6 * * *", CONF_PRICE_STALE_HOURS: 24, "tracked_fuels": [], "tracked_service_modes": []}
 
 
 async def test_docker_probe_accepts_all_configured_search_results(hass, monkeypatch) -> None:

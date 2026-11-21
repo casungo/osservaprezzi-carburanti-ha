@@ -23,6 +23,7 @@ from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
+    SelectSelectorMode,
 )
 from homeassistant.util import dt as dt_util
 
@@ -32,6 +33,8 @@ from .const import (
     CONF_CRON_EXPRESSION,
     CONF_PRICE_STALE_HOURS,
     CONF_STATION_ID,
+    CONF_TRACKED_FUELS,
+    CONF_TRACKED_SERVICE_MODES,
     DEFAULT_CRON_EXPRESSION,
     DEFAULT_PRICE_STALE_HOURS,
     PRICE_STALE_HOUR_OPTIONS,
@@ -781,6 +784,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 errors[CONF_PRICE_STALE_HOURS] = "invalid_stale_hours"
             else:
                 self._stale_hours = stale_hours
+                self._tracked_fuels = list(user_input.get(CONF_TRACKED_FUELS) or [])
+                self._tracked_service_modes = list(user_input.get(CONF_TRACKED_SERVICE_MODES) or [])
                 schedule = user_input.get(CONF_REFRESH_SCHEDULE, "custom")
                 if schedule == "custom":
                     # Accept existing clients that submit cron directly.
@@ -791,8 +796,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     return self._save_schedule(REFRESH_SCHEDULES[schedule])
                 errors[CONF_REFRESH_SCHEDULE] = "invalid_schedule"
 
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        coordinator = entry_data.get("coordinator")
+        fuels = (coordinator.data or {}).get("fuels", {}) if coordinator else {}
+        available_fuels = sorted({key.rsplit("_", 1)[0] for key in fuels})
         schema = vol.Schema(
             {
+                vol.Optional(CONF_TRACKED_FUELS, default=self.config_entry.options.get(CONF_TRACKED_FUELS, [])): SelectSelector(
+                    SelectSelectorConfig(options=available_fuels, multiple=True, custom_value=True, mode=SelectSelectorMode.DROPDOWN)
+                ),
+                vol.Optional(CONF_TRACKED_SERVICE_MODES, default=self.config_entry.options.get(CONF_TRACKED_SERVICE_MODES, [])): SelectSelector(
+                    SelectSelectorConfig(options=["self", "servito"], multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                ),
                 vol.Required(CONF_REFRESH_SCHEDULE, default=current_schedule): SelectSelector(
                     SelectSelectorConfig(
                         options=[*REFRESH_SCHEDULES, "custom"],
@@ -838,6 +853,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             title="",
             data={
                 CONF_CRON_EXPRESSION: cron,
+                CONF_TRACKED_FUELS: getattr(self, "_tracked_fuels", []),
+                CONF_TRACKED_SERVICE_MODES: getattr(self, "_tracked_service_modes", []),
                 CONF_PRICE_STALE_HOURS: getattr(
                     self,
                     "_stale_hours",

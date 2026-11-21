@@ -72,7 +72,6 @@ class _FakeSession:
 @pytest.fixture(autouse=True)
 def reset_request_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Disable inter-test sleeps from the module-level API throttle."""
-    monkeypatch.setattr(api, "_NEXT_ALLOWED_REQUEST_AT", 0.0)
     monkeypatch.setattr(api, "API_REQUEST_INTERVAL_SECONDS", 0)
 
 
@@ -351,13 +350,15 @@ def test_wait_for_request_slot_sleeps_when_throttled(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(api, "time", SimpleNamespace(monotonic=fake_monotonic))
     monkeypatch.setattr(api.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(api, "_NEXT_ALLOWED_REQUEST_AT", 12.5)
+    hass = MagicMock()
+    limit = api._request_limit(hass)
+    limit.next_allowed = 12.5
     monkeypatch.setattr(api, "API_REQUEST_INTERVAL_SECONDS", 4)
 
-    asyncio.run(api._wait_for_request_slot("123"))
+    asyncio.run(api._wait_for_request_slot(hass, "123"))
 
     assert slept == [2.5]
-    assert api._NEXT_ALLOWED_REQUEST_AT == 24.0
+    assert limit.next_allowed == 24.0
 
 
 def test_price_validator_rejects_overflowing_integer():
@@ -395,3 +396,39 @@ def test_fetch_station_data_encodes_id_and_rejects_invalid_json(monkeypatch):
         asyncio.run(api.fetch_station_data(MagicMock(), "12/34"))
 
     assert requested_urls[0].endswith("/12%2F34")
+
+
+def test_request_limits_are_isolated():
+    first = SimpleNamespace(data={})
+    second = SimpleNamespace(data={})
+    assert api._request_limit(first) is api._request_limit(first)
+    assert api._request_limit(first) is not api._request_limit(second)
+    assert api._request_limit(SimpleNamespace()) is not None
+
+
+def test_http_io_does_not_hold_request_lock(monkeypatch):
+    async def exercise():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class SlowResponse(_FakeResponse):
+            async def json(self):
+                entered.set()
+                await release.wait()
+                return self._payload
+
+        session = _FakeSession(SlowResponse(200, {"id": "123", "name": "Station"}))
+        monkeypatch.setattr(api, "async_get_clientsession", lambda _: session)
+        hass = SimpleNamespace(data={})
+        first = asyncio.create_task(fetch_station_data(hass, "123"))
+        await entered.wait()
+        second = asyncio.create_task(fetch_station_data(hass, "123"))
+        for _ in range(10):
+            if len(session.get_calls) == 2:
+                break
+            await asyncio.sleep(0)
+        assert len(session.get_calls) == 2
+        release.set()
+        await asyncio.gather(first, second)
+
+    asyncio.run(exercise())

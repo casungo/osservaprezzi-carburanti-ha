@@ -18,13 +18,12 @@ from .const import (
     API_REQUEST_INTERVAL_SECONDS,
     BASE_URL,
     DEFAULT_HEADERS,
+    DOMAIN,
     STATION_ENDPOINT,
 )
 from .models import StationPayload
 
 _LOGGER = logging.getLogger(__name__)
-_REQUEST_LOCK = asyncio.Lock()
-_NEXT_ALLOWED_REQUEST_AT = 0.0
 REQUIRED_FUEL_FIELDS = frozenset(
     {"name", "price", "fuelId", "isSelf", "serviceAreaId"}
 )
@@ -112,79 +111,94 @@ async def fetch_station_data(
 
     _LOGGER.debug("Fetching station data from: %s", url)
 
-    async with _REQUEST_LOCK:
-        await _wait_for_request_slot(station_id)
-        async with session.get(
-            url,
-            headers=DEFAULT_HEADERS,
-            timeout=aiohttp.ClientTimeout(total=timeout),
-        ) as response:
-            _LOGGER.debug(
-                "Station API response for %s: status=%s", station_id, response.status
-            )
+    await _wait_for_request_slot(hass, station_id)
+    async with session.get(
+        url,
+        headers=DEFAULT_HEADERS,
+        timeout=aiohttp.ClientTimeout(total=timeout),
+    ) as response:
+        _LOGGER.debug(
+            "Station API response for %s: status=%s", station_id, response.status
+        )
 
-            if response.status == 200:
-                try:
-                    data = await response.json()
-                except json.JSONDecodeError as err:
-                    raise InvalidStationPayloadError(
-                        f"Invalid JSON in station response: {err}"
-                    ) from err
-                values = data.values() if isinstance(data, dict) else (data,)
-                collection_counts = {
-                    "lists": sum(isinstance(value, list) for value in values),
-                    "mappings": sum(isinstance(value, dict) for value in values),
-                }
-                _LOGGER.debug(
-                    "Station API response for %s: status=%s, payload_type=%s, "
-                    "field_count=%s, collection_counts=%s",
-                    station_id,
-                    response.status,
-                    type(data).__name__,
-                    len(data) if isinstance(data, dict) else "n/a",
-                    collection_counts,
-                )
-                try:
-                    return normalize_station_data(data, station_id)
-                except InvalidStationPayloadError as err:
-                    _LOGGER.debug("Invalid station API response structure: %s", err)
-                    raise
-            if response.status == 404:
-                raise aiohttp.ClientResponseError(
-                    request_info=response.request_info,
-                    history=response.history,
-                    status=response.status,
-                    message=f"Station with ID {station_id} not found",
-                    headers=response.headers,
-                )
-            if response.status == 429:
-                raise aiohttp.ClientResponseError(
-                    request_info=response.request_info,
-                    history=response.history,
-                    status=response.status,
-                    message="Rate limit exceeded. Please try again later.",
-                    headers=response.headers,
-                )
+        if response.status == 200:
+            try:
+                data = await response.json()
+            except json.JSONDecodeError as err:
+                raise InvalidStationPayloadError(
+                    f"Invalid JSON in station response: {err}"
+                ) from err
+            values = data.values() if isinstance(data, dict) else (data,)
+            collection_counts = {
+                "lists": sum(isinstance(value, list) for value in values),
+                "mappings": sum(isinstance(value, dict) for value in values),
+            }
+            _LOGGER.debug(
+                "Station API response for %s: status=%s, payload_type=%s, "
+                "field_count=%s, collection_counts=%s",
+                station_id,
+                response.status,
+                type(data).__name__,
+                len(data) if isinstance(data, dict) else "n/a",
+                collection_counts,
+            )
+            try:
+                return normalize_station_data(data, station_id)
+            except InvalidStationPayloadError as err:
+                _LOGGER.debug("Invalid station API response structure: %s", err)
+                raise
+        if response.status == 404:
             raise aiohttp.ClientResponseError(
                 request_info=response.request_info,
                 history=response.history,
                 status=response.status,
-                message=f"Service error: {response.status} - {response.reason}",
+                message=f"Station with ID {station_id} not found",
                 headers=response.headers,
             )
-
-
-async def _wait_for_request_slot(station_id: str) -> None:
-    """Serialize outbound station requests to avoid API bursts."""
-    global _NEXT_ALLOWED_REQUEST_AT
-
-    wait_time = _NEXT_ALLOWED_REQUEST_AT - time.monotonic()
-    if wait_time > 0:
-        _LOGGER.debug(
-            "Waiting %.2fs before requesting station %s to avoid API bursts",
-            wait_time,
-            station_id,
+        if response.status == 429:
+            raise aiohttp.ClientResponseError(
+                request_info=response.request_info,
+                history=response.history,
+                status=response.status,
+                message="Rate limit exceeded. Please try again later.",
+                headers=response.headers,
+            )
+        raise aiohttp.ClientResponseError(
+            request_info=response.request_info,
+            history=response.history,
+            status=response.status,
+            message=f"Service error: {response.status} - {response.reason}",
+            headers=response.headers,
         )
-        await asyncio.sleep(wait_time)
 
-    _NEXT_ALLOWED_REQUEST_AT = time.monotonic() + API_REQUEST_INTERVAL_SECONDS
+
+class _RequestLimit:
+    """Request timing shared by one Home Assistant instance."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.next_allowed = 0.0
+
+
+def _request_limit(hass: HomeAssistant) -> _RequestLimit:
+    data = getattr(hass, "data", None)
+    if not isinstance(data, dict):
+        data = {}
+        hass.data = data
+    domain_data = data.setdefault(DOMAIN, {})
+    return domain_data.setdefault("api_request_limit", _RequestLimit())
+
+
+async def _wait_for_request_slot(hass: HomeAssistant, station_id: str) -> None:
+    """Reserve an outbound request slot without holding the lock during I/O."""
+    limit = _request_limit(hass)
+    async with limit.lock:
+        wait_time = limit.next_allowed - time.monotonic()
+        if wait_time > 0:
+            _LOGGER.debug(
+                "Waiting %.2fs before requesting station %s to avoid API bursts",
+                wait_time,
+                station_id,
+            )
+            await asyncio.sleep(wait_time)
+        limit.next_allowed = time.monotonic() + API_REQUEST_INTERVAL_SECONDS

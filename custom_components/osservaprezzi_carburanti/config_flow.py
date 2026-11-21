@@ -108,6 +108,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     def __init__(self) -> None:
         """Keep search suggestions only for the lifetime of this flow."""
         super().__init__()
+        self._reconfigure_entry = None
         self._search_inputs: dict[str, dict[str, Any]] = {}
         self._nearby_candidates: tuple[StationCandidate, ...] = ()
         self._registry_is_stale = False
@@ -190,6 +191,8 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Set up a station from its Osservaprezzi ID."""
+        if self._reconfigure_entry is not None:
+            return await self._async_reconfigure_station(user_input, "station_id")
         return await self._handle_station_input(user_input, "station_id")
 
     async def async_step_home(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -482,6 +485,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         description_placeholders = self._selection_placeholders()
         configured_ids = {
             str(entry.data.get(CONF_STATION_ID, "")) for entry in self._async_current_entries()
+            if self._reconfigure_entry is None or entry.entry_id != self._reconfigure_entry.entry_id
         }
         candidate_ids = {candidate.station_id for candidate in candidates}
         available_candidates = tuple(
@@ -498,7 +502,8 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             try:
                 selected_value = user_input.get(CONF_STATION_ID, [])
                 selected_ids = self._deduplicate_station_ids(selected_value)
-                if not selected_ids or not set(selected_ids) <= candidate_ids:
+                if (not selected_ids or not set(selected_ids) <= candidate_ids
+                        or (self._reconfigure_entry is not None and len(selected_ids) != 1)):
                     raise InvalidStation("Station is not in the current nearby results")
 
                 new_selected_ids = [
@@ -550,6 +555,13 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                             )
                             break
                     else:
+                        if self._reconfigure_entry is not None:
+                            station_id = new_selected_ids[0]
+                            return self.async_update_reload_and_abort(
+                                self._reconfigure_entry, unique_id=f"station_{station_id}",
+                                title=station_info[station_id]["name"],
+                                data_updates={CONF_STATION_ID: station_id},
+                            )
                         for station_id in new_selected_ids[1:]:
                             await self.hass.config_entries.flow.async_init(
                                 DOMAIN,
@@ -603,16 +615,16 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 vol.Schema(
                     {
                         vol.Required(CONF_STATION_ID): SelectSelector(
-                            SelectSelectorConfig(options=options, multiple=True)
+                            SelectSelectorConfig(options=options, multiple=self._reconfigure_entry is None)
                         )
                     }
                 ),
                 {
-                    CONF_STATION_ID: [
+                    CONF_STATION_ID: ([
                         station_id
                         for station_id in selected_ids
                         if station_id in available_ids
-                    ]
+                    ] if self._reconfigure_entry is None else selected_ids[0] if selected_ids and selected_ids[0] in available_ids else None)
                 }
                 if user_input is not None
                 else None,
@@ -715,7 +727,19 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Allow an existing entry to point at another station."""
-        entry = self._get_reconfigure_entry()
+        self._reconfigure_entry = self._get_reconfigure_entry()
+        if user_input is None:
+            return self.async_show_menu(
+                step_id="reconfigure",
+                menu_options=["home", "coordinates", "zone", "area", "station_id"],
+            )
+        return await self._async_reconfigure_station(user_input, "reconfigure")
+
+    async def _async_reconfigure_station(
+        self, user_input: dict[str, Any] | None, step_id: str
+    ) -> ConfigFlowResult:
+        entry = self._reconfigure_entry
+        assert entry is not None
         errors: dict[str, str] = {}
         if user_input is not None:
             station_id = str(user_input.get(CONF_STATION_ID, "")).strip()
@@ -731,7 +755,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             else:
                 try:
                     station_info = await _validate_station(self.hass, station_id)
-                    return self.async_update_and_abort(
+                    return self.async_update_reload_and_abort(
                         entry,
                         unique_id=unique_id,
                         title=station_info["name"],
@@ -748,7 +772,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                     errors[CONF_STATION_ID] = "unknown"
 
         return self.async_show_form(
-            step_id="reconfigure",
+            step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(
                     {vol.Required(CONF_STATION_ID, default=entry.data[CONF_STATION_ID]): str}

@@ -148,9 +148,12 @@ async def test_reconfigure_changes_station_in_place(
             "entry_id": entry.entry_id,
         },
     )
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "reconfigure"
 
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "station_id"}
+    )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {CONF_STATION_ID: "456"},

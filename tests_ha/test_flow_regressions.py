@@ -73,6 +73,9 @@ async def test_reconfigure_duplicate_is_rejected_before_station_api(
         },
     )
     result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "station_id"}
+    )
+    result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {CONF_STATION_ID: "456"},
     )

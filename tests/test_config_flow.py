@@ -172,7 +172,7 @@ def _make_config_flow(monkeypatch: pytest.MonkeyPatch) -> OsservaprezziCarburant
     )
     flow._get_reconfigure_entry = MagicMock()
     flow._async_current_entries = MagicMock(return_value=[])
-    flow.async_update_and_abort = MagicMock(
+    flow.async_update_reload_and_abort = MagicMock(
         side_effect=lambda entry, **kwargs: {
             "type": "abort",
             "reason": "reconfigure_successful",
@@ -1398,3 +1398,21 @@ def test_options_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     result = asyncio.run(handler.async_step_init({"refresh_schedule": "daily", "tracked_fuels": ["Diesel"], "tracked_service_modes": ["self"]}))
     assert result["data"]["tracked_fuels"] == ["Diesel"]
     assert result["data"]["tracked_service_modes"] == ["self"]
+
+
+def test_reconfigure_manual_and_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    flow = _make_config_flow(monkeypatch)
+    entry = MagicMock(entry_id="entry-1", unique_id="station_123", data={CONF_STATION_ID: "123"})
+    flow._get_reconfigure_entry.return_value = entry
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        AsyncMock(return_value={"name": "New Station"}),
+    )
+    asyncio.run(flow.async_step_reconfigure())
+    form = asyncio.run(flow.async_step_station_id())
+    assert form["step_id"] == "station_id"
+    result = asyncio.run(flow.async_step_station_id({CONF_STATION_ID: "456"}))
+    assert result["unique_id"] == "station_456"
+    flow._nearby_candidates = (_candidate("456"),)
+    result = asyncio.run(flow.async_step_select_station({CONF_STATION_ID: ["456"]}))
+    assert result["unique_id"] == "station_456"

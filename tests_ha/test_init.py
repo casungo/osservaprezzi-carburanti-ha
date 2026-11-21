@@ -239,14 +239,23 @@ async def test_cancelled_restore_keeps_resources_owned_by_concurrent_setup(
     assert "csv_update_listener" not in hass.data[DOMAIN]
 
 
-async def test_cache_services_raise_without_active_entries(hass: HomeAssistant) -> None:
-    """Expose no-op cache actions as service failures through Home Assistant."""
+async def test_cache_services_work_without_active_entries(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    """Allow shared registry cache actions even when no config entries are loaded."""
+    update_mock = AsyncMock(return_value=True)
+    clear_mock = AsyncMock(return_value=True)
+    init_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(CSVStationManager, "async_update_csv_data", update_mock)
+    monkeypatch.setattr(CSVStationManager, "async_clear_cache", clear_mock)
+    monkeypatch.setattr(CSVStationManager, "async_initialize", init_mock)
     assert await async_setup(hass, {})
 
-    with pytest.raises(HomeAssistantError, match="No active"):
-        await hass.services.async_call(DOMAIN, SERVICE_FORCE_CSV_UPDATE, {}, blocking=True)
-    with pytest.raises(HomeAssistantError, match="No active"):
-        await hass.services.async_call(DOMAIN, SERVICE_CLEAR_CACHE, {}, blocking=True)
+    await hass.services.async_call(DOMAIN, SERVICE_FORCE_CSV_UPDATE, {}, blocking=True)
+    await hass.services.async_call(DOMAIN, SERVICE_CLEAR_CACHE, {}, blocking=True)
+    update_mock.assert_awaited_once_with(force_update=True)
+    clear_mock.assert_awaited_once()
+    init_mock.assert_awaited_once()
 
 
 def _station_payload(station_id: str = STATION_ID) -> dict[str, Any]:

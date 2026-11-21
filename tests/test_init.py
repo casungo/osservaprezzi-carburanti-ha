@@ -407,16 +407,21 @@ def test_register_services_is_idempotent() -> None:
     assert registered_services == {}
 
 
-def test_cache_services_raise_when_no_coordinators() -> None:
+def test_cache_services_raise_when_no_coordinators(monkeypatch) -> None:
     hass, registered_services = _build_hass_with_services()
     hass.data = {init_module.DOMAIN: {"other": object()}}
 
     init_module._async_register_services(hass)
 
-    with pytest.raises(services_module.HomeAssistantError, match="No active"):
-        asyncio.run(registered_services[services_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
-    with pytest.raises(services_module.HomeAssistantError, match="No active"):
-        asyncio.run(registered_services[services_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
+    manager = MagicMock()
+    manager.async_update_csv_data = AsyncMock(return_value=True)
+    manager.async_clear_cache = AsyncMock(return_value=True)
+    manager.async_initialize = AsyncMock(return_value=True)
+    monkeypatch.setattr(services_module, "get_shared_csv_manager", lambda hass: manager)
+    asyncio.run(registered_services[services_module.SERVICE_FORCE_CSV_UPDATE](SimpleNamespace()))
+    asyncio.run(registered_services[services_module.SERVICE_CLEAR_CACHE](SimpleNamespace()))
+    manager.async_update_csv_data.assert_awaited_once_with(force_update=True)
+    manager.async_clear_cache.assert_awaited_once()
     result = asyncio.run(registered_services[services_module.SERVICE_COMPARE_STATIONS](SimpleNamespace()))
 
     assert result == {"stations": {}}

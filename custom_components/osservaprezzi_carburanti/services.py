@@ -26,7 +26,7 @@ from .const import (
 from .coordinator import CarburantiDataUpdateCoordinator
 from .csv_manager import RegistryUnavailableError, get_shared_csv_manager
 from .data_helpers import station_display_name
-from .discovery import find_stations_by_area
+from .discovery import find_nearby_stations, find_stations_by_area
 from .price_metadata import price_metadata
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +42,10 @@ _REFRESH_PRICES_SCHEMA = vol.Schema(
 )
 _SEARCH_REGISTRY_SCHEMA = vol.Schema(
     {
+        vol.Optional("latitude"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
+        vol.Optional("longitude"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
+        vol.Optional("radius_km", default=5.0): vol.All(vol.Coerce(float), vol.Range(min=0, min_included=False)),
+        vol.Optional("zone"): cv.entity_id,
         vol.Optional("query", default=""): str,
         vol.Optional("municipality", default=""): str,
         vol.Optional("province", default=""): str,
@@ -97,12 +101,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _handle_force_csv_update(call: ServiceCall) -> None:
         _LOGGER.info("Service force_csv_update triggered")
         coordinators = _iter_coordinators()
-        if not coordinators:
-            raise HomeAssistantError("No active Osservaprezzi entries", translation_domain=DOMAIN, translation_key="no_active_entries")
-
-        entry_id, primary_coordinator = coordinators[0]
+        entry_id, primary_coordinator = coordinators[0] if coordinators else ("shared", None)
         try:
-            success = await primary_coordinator.async_force_csv_update()
+            success = await primary_coordinator.async_force_csv_update() if primary_coordinator else await get_shared_csv_manager(hass).async_update_csv_data(force_update=True)
         except Exception as err:
             _LOGGER.exception("CSV update failed for entry %s", entry_id)
             raise HomeAssistantError("Unable to update the station cache", translation_domain=DOMAIN, translation_key="cache_update_failed") from err
@@ -115,13 +116,10 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _handle_clear_cache(call: ServiceCall) -> None:
         _LOGGER.info("Service clear_cache triggered")
         coordinators = _iter_coordinators()
-        if not coordinators:
-            raise HomeAssistantError("No active Osservaprezzi entries", translation_domain=DOMAIN, translation_key="no_active_entries")
-
-        _, primary_coordinator = coordinators[0]
+        manager = coordinators[0][1].csv_manager if coordinators else get_shared_csv_manager(hass)
         try:
-            cleared = await primary_coordinator.csv_manager.async_clear_cache()
-            initialized = cleared and await primary_coordinator.csv_manager.async_initialize()
+            cleared = await manager.async_clear_cache()
+            initialized = cleared and await manager.async_initialize()
         except Exception as err:
             _LOGGER.exception("CSV cache reset failed")
             raise HomeAssistantError("Unable to reset the station cache", translation_domain=DOMAIN, translation_key="cache_reset_failed") from err
@@ -205,17 +203,36 @@ def async_register_services(hass: HomeAssistant) -> None:
         except RegistryUnavailableError as err:
             raise HomeAssistantError("The station registry is unavailable", translation_domain=DOMAIN, translation_key="registry_unavailable") from err
 
-        candidates = await hass.async_add_executor_job(
-            partial(
-                find_stations_by_area,
-                snapshot.stations,
+        latitude = call.data.get("latitude")
+        longitude = call.data.get("longitude")
+        zone = call.data.get("zone")
+        if zone:
+            state = hass.states.get(zone)
+            if state is None:
+                raise HomeAssistantError("Zone not found")
+            latitude = state.attributes.get("latitude")
+            longitude = state.attributes.get("longitude")
+        if zone or latitude is not None or longitude is not None:
+            if latitude is None or longitude is None:
+                raise HomeAssistantError("Both latitude and longitude are required")
+            search = partial(
+                find_nearby_stations, snapshot.stations,
+                latitude=latitude, longitude=longitude,
+                radius_km=call.data.get("radius_km", 5.0),
+                text_filter=str(call.data.get("query", "")),
+                station_type=str(call.data.get("station_type", "")),
+                limit=int(call.data.get("limit", 20)),
+            )
+        else:
+            search = partial(
+                find_stations_by_area, snapshot.stations,
                 municipality=str(call.data.get("municipality", "")),
                 province=str(call.data.get("province", "")),
                 text_filter=str(call.data.get("query", "")),
                 station_type=str(call.data.get("station_type", "")),
                 limit=int(call.data.get("limit", 20)),
             )
-        )
+        candidates = await hass.async_add_executor_job(search)
         configured_station_ids = {
             str(coordinator.config_entry.data.get(CONF_STATION_ID))
             for _, coordinator in _iter_coordinators()

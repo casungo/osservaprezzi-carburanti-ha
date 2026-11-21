@@ -68,3 +68,28 @@ def test_refresh_prices_with_blank_station_ids_raises_error() -> None:
     handler = service_registry.handlers[(DOMAIN, services_module.SERVICE_REFRESH_PRICES)]
     with pytest.raises(services_module.HomeAssistantError):
         asyncio.run(handler(SimpleNamespace(data={"station_ids": ["  "]})))
+
+
+def test_search_registry_nearby_and_invalid_origins(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    import pytest
+
+    registry = _ServiceRegistry()
+    snapshot = SimpleNamespace(stations=(), updated_at=None, is_stale=False)
+    manager = SimpleNamespace(async_ensure_registry=AsyncMock(return_value=snapshot))
+    monkeypatch.setattr(services_module, "get_shared_csv_manager", lambda hass: manager)
+    hass = SimpleNamespace(
+        data={}, services=registry,
+        states=SimpleNamespace(get=lambda zone: None if zone == "zone.missing" else SimpleNamespace(attributes={"latitude": 41.9, "longitude": 12.5})),
+        async_add_executor_job=AsyncMock(side_effect=lambda function: function()),
+    )
+    services_module.async_register_services(hass)
+    handler = registry.handlers[(DOMAIN, services_module.SERVICE_SEARCH_REGISTRY)]
+    for data in ({"latitude": 41.9, "longitude": 12.5}, {"zone": "zone.home"}):
+        assert asyncio.run(handler(SimpleNamespace(data=data)))["results"] == []
+    for data in ({"zone": "zone.missing"}, {"latitude": 41.9}, {"zone": "zone.empty"}):
+        if data.get("zone") == "zone.empty":
+            hass.states.get = lambda zone: SimpleNamespace(attributes={})
+        with pytest.raises(services_module.HomeAssistantError):
+            asyncio.run(handler(SimpleNamespace(data=data)))

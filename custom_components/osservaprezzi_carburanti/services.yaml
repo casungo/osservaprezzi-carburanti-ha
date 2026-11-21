@@ -59,3 +59,31 @@ search_registry:
           min: 1
           max: 50
           mode: box
+    latitude:
+      name: Latitude
+      selector:
+        number:
+          min: -90
+          max: 90
+          mode: box
+    longitude:
+      name: Longitude
+      selector:
+        number:
+          min: -180
+          max: 180
+          mode: box
+    radius_km:
+      name: Radius (km)
+      default: 5.0
+      selector:
+        number:
+          min: 0.1
+          max: 20000
+          mode: box
+    zone:
+      name: Zone
+      selector:
+        entity:
+          filter:
+            domain: zone

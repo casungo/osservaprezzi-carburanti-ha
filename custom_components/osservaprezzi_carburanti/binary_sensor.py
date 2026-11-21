@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -66,20 +66,22 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:storefront"
+    _open: bool | None = None
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the open/closed binary sensor."""
         super().__init__(coordinator, entry)
         self._attr_translation_key = "station_open_closed"
         self._attr_unique_id = f"{self._station_id}_open_closed"
+        self._open = self._is_currently_open()
 
-    def _is_currently_open(self) -> bool:
+    def _is_currently_open(self, now: datetime | None = None) -> bool:
         """Check if the station is currently open."""
         opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
         if not opening_hours:
             return False
 
-        now = dt_util.now()
+        now = now or dt_util.now()
         for day_offset in (-1, 0):
             local_date = now.date() + timedelta(days=day_offset)
             schedule = _find_schedule_for_day(
@@ -96,15 +98,27 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
                 return True
         return False
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._open = self._is_currently_open()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _handle_time_tick(self, now: Any) -> None:
+        self._open = self._is_currently_open(dt_util.as_local(now))
+        super()._handle_time_tick(now)
+
     @property
     def is_on(self) -> bool:
         """Return True if the station is currently open."""
-        return self._is_currently_open()
+        if self._open is None:
+            return self._is_currently_open()
+        return self._open
 
     @property
     def available(self) -> bool:
         """Return True if schedule data is available."""
-        return _has_valid_opening_hours(self.coordinator.data)
+        return bool(super().available and _has_valid_opening_hours(self.coordinator.data))
 
 
 class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):

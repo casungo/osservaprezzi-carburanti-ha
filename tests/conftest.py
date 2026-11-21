@@ -37,6 +37,11 @@ class _MockCoordinatorEntity(_MockEntity):
     def _handle_coordinator_update(self):
         """Mock the base coordinator entity state-write callback."""
 
+    @property
+    def available(self) -> bool:
+        """Mirror CoordinatorEntity.available using last_update_success."""
+        return bool(getattr(self.coordinator, "last_update_success", True))
+
     async def async_shutdown(self):
         """Mock shutdown hook."""
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -34,9 +34,7 @@ from .price_metadata import price_metadata as _price_metadata
 from .entity import (
     OsservaprezziBaseEntity,
     ScheduleAwareEntity,
-    _find_schedule_for_day,
     _has_valid_opening_hours,
-    _schedule_intervals_for_date,
 )
 
 INFO_SENSOR_DESCRIPTORS: tuple[tuple[str, str, str], ...] = (
@@ -119,6 +117,7 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
     """Representation of a single fuel price for a specific station."""
 
     _attr_has_entity_name = True
+    _unrecorded_attributes = frozenset({"price_age_minutes", ATTR_FUEL_TYPE_NAME, ATTR_IS_SELF, ATTR_STATION_NAME, ATTR_STATION_ADDRESS, ATTR_STATION_BRAND})
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "€/L"
 
@@ -182,6 +181,11 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
             )
         )
         return attributes
+
+    @property
+    def available(self) -> bool:
+        """Return whether this fuel is available from the coordinator."""
+        return bool(super().available and self.coordinator.data and self._fuel_key in self.coordinator.data.get("fuels", {}))
 
 
 class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
@@ -251,7 +255,8 @@ class StationLocationSensor(OsservaprezziBaseEntity, SensorEntity):
     def available(self) -> bool:
         """Return True if coordinates are available."""
         return (
-            self.station_info.get(ATTR_LATITUDE) is not None
+            super().available
+            and self.station_info.get(ATTR_LATITUDE) is not None
             and self.station_info.get(ATTR_LONGITUDE) is not None
         )
 
@@ -261,6 +266,7 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock-time-eight"
+    _unrecorded_attributes = frozenset({"minutes_until_change"})
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
         """Initialize the next-change sensor."""
@@ -272,8 +278,13 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Prime the cached schedule result after Home Assistant attaches the entity."""
-        await super().async_added_to_hass()
         self._refresh_next_change()
+        await super().async_added_to_hass()
+
+    @callback
+    def _next_transition_time(self, now: datetime | None = None) -> datetime | None:
+        """Reuse the cached next transition datetime instead of recomputing."""
+        return self._next_change[1]
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -291,46 +302,6 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
         """Cache the next schedule transition used by all entity properties."""
         self._next_change_now = now or dt_util.now()
         self._next_change = self._compute_next_change(self._next_change_now)
-
-    def _compute_next_change(self, now: datetime | None = None) -> tuple[str, datetime | None]:
-        """Compute the next opening or closing time and type."""
-        opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
-        if not opening_hours:
-            return "no_schedule", None
-
-        now = now or dt_util.now()
-        intervals: list[tuple[datetime, datetime]] = []
-        for day_offset in range(-1, 8):
-            local_date = now.date() + timedelta(days=day_offset)
-            schedule = _find_schedule_for_day(
-                opening_hours,
-                local_date.weekday() + 1,
-                local_date,
-            )
-            intervals.extend(
-                _schedule_intervals_for_date(schedule, local_date, now.tzinfo)
-            )
-
-        merged: list[list[datetime]] = []
-        for opens_at, closes_at in sorted(intervals):
-            if merged and opens_at <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], closes_at)
-            else:
-                merged.append([opens_at, closes_at])
-
-        horizon_end = datetime.combine(
-            now.date() + timedelta(days=8),
-            time.min,
-            now.tzinfo,
-        )
-        for opens_at, closes_at in merged:
-            if opens_at <= now < closes_at:
-                if closes_at >= horizon_end:
-                    return "always_open", None
-                return "closes_at", closes_at
-            if opens_at > now:
-                return "opens_at", opens_at
-        return "no_opening", None
 
     @property
     def native_value(self) -> StateType:
@@ -353,11 +324,11 @@ class StationNextChangeSensor(ScheduleAwareEntity, SensorEntity):
             "next_change_time": change_time.isoformat() if change_time else None,
         }
         if change_time:
-            now = self._next_change_now or dt_util.now()
+            now = dt_util.now()
             attributes["minutes_until_change"] = int((change_time - now).total_seconds() / 60)
         return attributes
 
     @property
     def available(self) -> bool:
         """Return True if schedule data is available."""
-        return _has_valid_opening_hours(self.coordinator.data)
+        return bool(super().available and _has_valid_opening_hours(self.coordinator.data))

@@ -8,8 +8,9 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_STATION_ID, DOMAIN
 from .coordinator import CarburantiDataUpdateCoordinator
@@ -18,24 +19,12 @@ from .data_helpers import station_display_name
 _LOGGER = logging.getLogger(__name__)
 
 HOLIDAY_SCHEDULE_ID = 8
-SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=1)
+FIXED_HOLIDAYS = frozenset({(1, 1), (1, 6), (4, 25), (5, 1), (6, 2), (8, 15), (11, 1), (12, 8), (12, 25), (12, 26)})
 
 
 def _is_italian_holiday(check_date: date) -> bool:
     """Check if a date is an Italian national public holiday."""
-    fixed_holidays = {
-        (1, 1),
-        (1, 6),
-        (4, 25),
-        (5, 1),
-        (6, 2),
-        (8, 15),
-        (11, 1),
-        (12, 8),
-        (12, 25),
-        (12, 26),
-    }
-    if (check_date.month, check_date.day) in fixed_holidays:
+    if (check_date.month, check_date.day) in FIXED_HOLIDAYS:
         return True
 
     easter = _compute_easter(check_date.year)
@@ -216,22 +205,85 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
         self._time_listener: Callable[[], None] | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Start a lightweight timer so schedule entities stay fresh."""
+        """Schedule the next opening-hours transition."""
         await super().async_added_to_hass()
-        self._time_listener = async_track_time_interval(
-            self.hass,
-            self._handle_time_tick,
-            SCHEDULE_REFRESH_INTERVAL,
-        )
+        self._schedule_transition()
+
+    @callback
+    def _next_transition_time(self, now: datetime | None = None) -> datetime | None:
+        """Return the next transition datetime used to arm the one-shot timer."""
+        _, change_time = self._compute_next_change(now)
+        return change_time
+
+    @callback
+    def _schedule_transition(self, now: datetime | None = None) -> None:
+        """Replace the timer with the next transition, if one exists."""
+        if self._time_listener:
+            self._time_listener()
+            self._time_listener = None
+        change_time = self._next_transition_time(now)
+        if change_time is not None:
+            self._time_listener = async_track_point_in_utc_time(
+                self.hass, self._handle_time_tick, dt_util.as_utc(change_time)
+            )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Clean up the periodic timer."""
+        """Cancel the transition timer."""
         if self._time_listener:
             self._time_listener()
             self._time_listener = None
         await super().async_will_remove_from_hass()
 
     @callback
-    def _handle_time_tick(self, _: datetime) -> None:
-        """Refresh state as time passes even when prices do not change."""
+    def _handle_coordinator_update(self) -> None:
+        """Reschedule when opening hours change."""
+        self._schedule_transition()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _handle_time_tick(self, now: datetime) -> None:
+        """Update the state and schedule the following transition."""
+        self._time_listener = None
+        self._schedule_transition(dt_util.as_local(now))
         self.async_write_ha_state()
+
+    def _compute_next_change(self, now: datetime | None = None) -> tuple[str, datetime | None]:
+        """Compute the next opening or closing time and type."""
+        opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
+        if not opening_hours:
+            return "no_schedule", None
+
+        now = now or dt_util.now()
+        intervals: list[tuple[datetime, datetime]] = []
+        for day_offset in range(-1, 8):
+            local_date = now.date() + timedelta(days=day_offset)
+            schedule = _find_schedule_for_day(
+                opening_hours,
+                local_date.weekday() + 1,
+                local_date,
+            )
+            intervals.extend(
+                _schedule_intervals_for_date(schedule, local_date, now.tzinfo)
+            )
+
+        merged: list[list[datetime]] = []
+        for opens_at, closes_at in sorted(intervals):
+            if merged and opens_at <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], closes_at)
+            else:
+                merged.append([opens_at, closes_at])
+
+        horizon_end = datetime.combine(
+            now.date() + timedelta(days=8),
+            time.min,
+            now.tzinfo,
+        )
+        for opens_at, closes_at in merged:
+            if opens_at <= now < closes_at:
+                if closes_at >= horizon_end:
+                    return "always_open", None
+                return "closes_at", closes_at
+            if opens_at > now:
+                return "opens_at", opens_at
+        return "no_opening", None
+

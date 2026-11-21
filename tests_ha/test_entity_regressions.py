@@ -68,12 +68,35 @@ async def test_entities_keep_translation_keys_and_device_configuration_url(
     next_id = entity_registry.async_get_entity_id("sensor", DOMAIN, f"{STATION_ID}_next_change")
     next_entity = hass.data[DATA_COMPONENT].get_entity(next_id)
     assert is_callback(next_entity._handle_time_tick)
+    assert next_entity._time_listener is None
     previous_tick = next_entity._next_change_now
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=1))
     await hass.async_block_till_done()
-    assert next_entity._next_change_now > previous_tick
-    assert next_entity._next_change_now.tzinfo == dt_util.get_default_time_zone()
+    assert next_entity._next_change_now == previous_tick
+
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator.async_set_updated_data(
+        {
+            **coordinator.data,
+            "opening_hours": [
+                {
+                    "giornoSettimanaId": day,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                    "oraChiusuraOrarioContinuato": "20:00",
+                }
+                for day in range(1, 8)
+            ],
+        }
+    )
+    assert next_entity._time_listener is not None
+    _, transition_time = next_entity._next_change
+    assert transition_time is not None
+    async_fire_time_changed(hass, dt_util.as_utc(transition_time))
+    await hass.async_block_till_done()
+    assert next_entity._next_change_now >= transition_time
+    assert next_entity._next_change_now.tzinfo == dt_util.get_default_time_zone()
+
     coordinator.async_set_updated_data({**coordinator.data, "opening_hours": []})
     assert hass.states.get(next_id).state == "unavailable"
 

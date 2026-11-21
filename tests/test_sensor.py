@@ -297,11 +297,12 @@ class TestEntitySetupRegression:
         listener = lambda: calls.append("removed")
         calls = []
 
-        def fake_track_time_interval(hass, callback, interval):
-            calls.append((hass, callback, interval))
+        def fake_track_point_in_utc_time(hass, callback, point_in_time):
+            calls.append((hass, callback, point_in_time))
             return listener
 
-        monkeypatch.setattr(entity_module, "async_track_time_interval", fake_track_time_interval)
+        monkeypatch.setattr(entity_module, "async_track_point_in_utc_time", fake_track_point_in_utc_time)
+        monkeypatch.setattr(entity_module.dt_util, "as_utc", lambda value: value)
         monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2026, 6, 1, 12, 0))
         coordinator = SimpleNamespace(data=_sample_station_data(), hass="hass")
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
@@ -309,6 +310,7 @@ class TestEntitySetupRegression:
 
         asyncio.run(entity.async_added_to_hass())
         assert entity._time_listener is listener
+        assert calls[0][2] == datetime(2026, 6, 1, 20, 0)
         asyncio.run(entity.async_will_remove_from_hass())
         assert entity._time_listener is None
         assert calls[-1] == "removed"
@@ -954,3 +956,26 @@ def test_next_change_reports_closing_on_day_plus_7():
     change_type, change_time = sensor._compute_next_change(now)
     assert change_type == "closes_at"
     assert change_time == datetime(2025, 6, 2, 12, 0)
+
+
+def test_fuel_sensor_availability_and_unrecorded_attributes():
+    coordinator = SimpleNamespace(
+        data=_sample_station_data(),
+        hass=SimpleNamespace(),
+        last_update_success=True,
+    )
+    entry = SimpleNamespace(data={CONF_STATION_ID: "12345"}, options={})
+    sensor = OsservaprezziStationSensor(coordinator, entry, "gasolio_self")
+
+    assert sensor.available is True
+    assert "price_age_minutes" in OsservaprezziStationSensor._unrecorded_attributes
+    assert "minutes_until_change" in StationNextChangeSensor._unrecorded_attributes
+
+    # Discontinued fuel becomes unavailable.
+    coordinator.data["fuels"].pop("gasolio_self")
+    assert sensor.available is False
+
+    # Failed coordinator marks sensor unavailable even if fuel returns.
+    coordinator.data["fuels"]["gasolio_self"] = {"price": 1.85}
+    coordinator.last_update_success = False
+    assert sensor.available is False

@@ -262,3 +262,45 @@ class TestServiceBinarySensor:
             "service_icon": "mdi:star",
             "service_image_url": "https://example.test",
         }
+
+
+def test_open_closed_sensor_caches_state_reschedules_and_checks_coordinator_availability(monkeypatch):
+    from custom_components.osservaprezzi_carburanti import entity as entity_module
+
+    unsubs = []
+    scheduled = []
+
+    def fake_track_point(hass, cb, point):
+        scheduled.append(point)
+        return lambda: unsubs.append(point)
+
+    monkeypatch.setattr(entity_module, "async_track_point_in_utc_time", fake_track_point)
+    monkeypatch.setattr(entity_module.dt_util, "as_utc", lambda value: value)
+    monkeypatch.setattr(entity_module.dt_util, "as_local", lambda value: value)
+    monkeypatch.setattr(binary_sensor_module.dt_util, "as_local", lambda value: value)
+    monkeypatch.setattr(entity_module.dt_util, "now", lambda: datetime(2026, 6, 1, 12, 0))
+    monkeypatch.setattr(binary_sensor_module.dt_util, "now", lambda: datetime(2026, 6, 1, 12, 0))
+
+    coordinator = SimpleNamespace(data=_sample_station_data(), hass="hass", last_update_success=True)
+    entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+    sensor = StationOpenClosedBinarySensor(coordinator, entry)
+    sensor.async_write_ha_state = lambda: None
+
+    assert sensor.is_on is True
+    assert sensor.available is True
+
+    asyncio.run(sensor.async_added_to_hass())
+    assert len(scheduled) == 1
+
+    # Coordinator update replaces existing timer and refreshes cached open state.
+    sensor._handle_coordinator_update()
+    assert len(unsubs) == 1
+    assert len(scheduled) == 2
+
+    # Transition tick at 20:00 flips cached state to False without re-reading now() on is_on.
+    sensor._handle_time_tick(datetime(2026, 6, 1, 20, 0))
+    assert sensor.is_on is False
+
+    # Failed coordinator marks entity unavailable even with valid schedule.
+    coordinator.last_update_success = False
+    assert sensor.available is False

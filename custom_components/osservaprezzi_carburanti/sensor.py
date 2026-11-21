@@ -26,6 +26,8 @@ from .const import (
     ATTR_STATION_NAME,
     ATTR_VALIDITY_DATE,
     CONF_STATION_ID,
+    CONF_TRACKED_FUELS,
+    CONF_TRACKED_SERVICE_MODES,
     CONF_PRICE_STALE_HOURS,
     DEFAULT_PRICE_STALE_HOURS,
     DOMAIN,
@@ -76,6 +78,8 @@ async def async_setup_entry(
     coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     station_id = entry.data[CONF_STATION_ID]
     known_unique_ids: set[str] = set()
+    tracked_fuels = {fuel.lower() for fuel in entry.options.get(CONF_TRACKED_FUELS, [])}
+    tracked_service_modes = {mode.lower() for mode in entry.options.get(CONF_TRACKED_SERVICE_MODES, [])}
 
     @callback
     def _async_discover_entities() -> None:
@@ -87,6 +91,11 @@ async def async_setup_entry(
                 if not isinstance(fuel_key, str) or "_" not in fuel_key:
                     continue
                 if f"{station_id}_{fuel_key}" in known_unique_ids:
+                    continue
+                fuel_name, service_mode = fuel_key.rsplit("_", 1)
+                if tracked_fuels and fuel_name.lower() not in tracked_fuels and fuel_display_name(fuel_name).lower() not in tracked_fuels:
+                    continue
+                if tracked_service_modes and service_mode.lower() not in tracked_service_modes:
                     continue
                 entities.append(OsservaprezziStationSensor(coordinator, entry, fuel_key))
         station_info = data.get("station_info", {})

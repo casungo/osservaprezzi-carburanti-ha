@@ -85,7 +85,7 @@ class TestEntitySetupRegression:
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace(),
                                       async_add_listener=lambda listener: listeners.append(listener) or listeners.pop)
         entry = SimpleNamespace(
-            entry_id="entry_1",
+            entry_id="entry_1", options={},
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
@@ -123,7 +123,7 @@ class TestEntitySetupRegression:
             async_add_listener=lambda listener: listeners.append(listener)
             or (lambda: listeners.remove(listener)),
         )
-        entry = SimpleNamespace(entry_id="entry_1", data={CONF_STATION_ID: "12345"},
+        entry = SimpleNamespace(entry_id="entry_1", options={}, data={CONF_STATION_ID: "12345"},
                                 async_on_unload=unload_callbacks.append)
         hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         batches = []
@@ -160,7 +160,7 @@ class TestEntitySetupRegression:
             async_add_listener=lambda listener: lambda: None,
         )
         entry = SimpleNamespace(
-            entry_id="entry_1",
+            entry_id="entry_1", options={},
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
@@ -181,7 +181,7 @@ class TestEntitySetupRegression:
             async_add_listener=lambda listener: lambda: None,
         )
         entry = SimpleNamespace(
-            entry_id="entry_1",
+            entry_id="entry_1", options={},
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
@@ -1037,3 +1037,21 @@ def test_fuel_sensor_stale_timer_lifecycle_and_info_disabled_default(monkeypatch
     assert sensor._stale_listener is None
     coordinator.data["fuels"]["gasolio_self"]["last_update"] = None
     assert sensor._stale_at() is None
+
+
+@pytest.mark.parametrize(("options", "expected"), [
+    ({}, {"gasolio_self", "benzina_servito", "GPL_E5_self"}),
+    ({"tracked_fuels": ["GASOLIO", "gpl e5"]}, {"gasolio_self", "GPL_E5_self"}),
+    ({"tracked_service_modes": ["SERVITO"]}, {"benzina_servito"}),
+    ({"tracked_fuels": ["benzina"], "tracked_service_modes": ["self"]}, set()),
+    ({"tracked_fuels": ["benzina"], "tracked_service_modes": ["servito"]}, {"benzina_servito"}),
+])
+def test_setup_filters_fuel_sensors(options, expected):
+    data = _sample_station_data()
+    data["fuels"]["GPL_E5_self"] = {"price": 1.0}
+    coordinator = SimpleNamespace(data=data, hass=SimpleNamespace(), async_add_listener=lambda listener: lambda: None)
+    entry = SimpleNamespace(entry_id="entry_1", data={CONF_STATION_ID: "12345"}, options=options, async_on_unload=lambda unsubscribe: None)
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
+    entities = []
+    asyncio.run(async_setup_entry(hass, entry, lambda added, **kwargs: entities.extend(added)))
+    assert {entity._fuel_key for entity in entities if isinstance(entity, OsservaprezziStationSensor)} == expected

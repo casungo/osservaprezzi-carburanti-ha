@@ -134,9 +134,12 @@ async def _ready(hass: HomeAssistant, station_count: int) -> None:
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         coordinators = _coordinators(hass)
-        identities = _identities(hass)
+        enabled_entity_ids = [
+            e.entity_id for e in er.async_get(hass).entities.values()
+            if e.platform == DOMAIN and e.disabled_by is None
+        ]
         if (len(coordinators) == station_count and all(c.data for c in coordinators)
-                and identities and all(hass.states.get(eid) for eid in identities.values())):
+                and enabled_entity_ids and all(hass.states.get(eid) for eid in enabled_entity_ids)):
             tasks = [d.get('initial_refresh_task') for d in hass.data.get(DOMAIN, {}).values()
                      if isinstance(d, dict)]
             pending = [task for task in tasks if isinstance(task, asyncio.Task) and not task.done()]

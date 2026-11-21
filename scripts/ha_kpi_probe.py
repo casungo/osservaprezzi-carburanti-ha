@@ -282,7 +282,7 @@ async def _measure(hass: HomeAssistant, settings: dict[str, Any], stations: dict
         registry_count = len(manager._stations_cache)
         registry_hash = await hass.async_add_executor_job(
             lambda: hashlib.sha256(json.dumps(manager._stations_cache, sort_keys=True,
-                                               ensure_ascii=False).encode()).hexdigest())
+                                               ensure_ascii=False, default=dict).encode()).hexdigest())
         setup_requests = list(requests)
         parse_times = []
         csv_content = (await hass.async_add_executor_job(_load_inputs))[0].decode('utf-8-sig')

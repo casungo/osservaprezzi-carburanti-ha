@@ -149,7 +149,6 @@
   "issues": {
     "station_not_found": {
       "title": "Stazione non trovata",
-      "description": "La stazione {station} (ID {station_id}) non è stata trovata dal MIMIT. Apri Impostazioni > Dispositivi e servizi > Osservaprezzi Carburanti e scegli Riconfigura nel menu della stazione per inserire un ID valido.",
       "fix_flow": {
         "step": {
           "init": {

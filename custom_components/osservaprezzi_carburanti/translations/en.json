@@ -149,7 +149,6 @@
   "issues": {
     "station_not_found": {
       "title": "Station not found",
-      "description": "MIMIT could not find station {station} (ID {station_id}). Open Settings > Devices & services > Osservaprezzi Carburanti and choose Reconfigure from the station menu to enter a valid ID.",
       "fix_flow": {
         "step": {
           "init": {

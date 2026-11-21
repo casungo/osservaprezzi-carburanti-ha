@@ -355,9 +355,8 @@ class TestCSVParsing:
         )
 
         assert asyncio.run(csv_manager.async_load_cached_data()) is True
-        assert hass.async_add_executor_job.call_args.args == (
-            csv_module._load_json_file_sync,
-            str(tmp_path / "cache.json"),
+        hass.async_add_executor_job.assert_any_call(
+            csv_module._load_json_file_sync, str(tmp_path / "cache.json")
         )
 
     def test_parse_cached_datetime_variants(self, csv_manager, monkeypatch):
@@ -425,7 +424,7 @@ class TestCSVParsing:
         assert saved["csv_etag"] == '"abc123"'
         assert saved["csv_last_modified"] == "Wed, 01 Jan 2025 00:00:00 GMT"
         assert hass.async_add_executor_job.call_args.args[0] is csv_module._write_json_file_atomic_sync
-        assert hass.async_add_executor_job.call_args.args[1] == str(tmp_path / "cache.json")
+        assert hass.async_add_executor_job.call_args.args[1] == csv_manager._metadata_path
 
     def test_save_cached_data_handles_write_error(self, tmp_path, monkeypatch):
         hass = MagicMock()
@@ -948,7 +947,9 @@ class TestCSVParsing:
         csv_manager._async_update_csv_data = AsyncMock(return_value=True)
 
         assert asyncio.run(csv_manager.async_initialize()) is True
-        csv_manager._async_update_csv_data.assert_awaited_once_with(force_update=True)
+        csv_manager._async_update_csv_data.assert_awaited_once_with(
+            force_update=not bool(csv_manager._stations_cache), bypass_ttl=True
+        )
 
     @pytest.mark.parametrize(
         ("cache_loaded", "last_update", "stations", "update_result"),
@@ -979,7 +980,9 @@ class TestCSVParsing:
         csv_manager._async_update_csv_data = AsyncMock(return_value=update_result)
 
         assert asyncio.run(csv_manager.async_initialize()) is update_result
-        csv_manager._async_update_csv_data.assert_awaited_once_with(force_update=True)
+        csv_manager._async_update_csv_data.assert_awaited_once_with(
+            force_update=not bool(csv_manager._stations_cache), bypass_ttl=True
+        )
 
     def test_periodic_update_propagates_update_result(self, csv_manager):
         csv_manager.async_update_csv_data = AsyncMock(return_value=True)
@@ -1172,3 +1175,21 @@ def test_update_handles_unicode_decode_error_and_marks_initialized_on_success(
     )
     assert asyncio.run(csv_manager.async_update_csv_data(force_update=True)) is True
     assert csv_manager._initialized is True
+
+
+def test_save_cache_data_returns_false_when_sidecar_write_fails(tmp_path):
+    hass = MagicMock()
+    hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+    hass.async_add_executor_job.side_effect = _run_in_executor
+    (tmp_path / ".storage").mkdir()
+    csv_manager = CSVStationManager(hass)
+    csv_manager._async_save_metadata = AsyncMock(return_value=False)
+
+    data = csv_manager._build_cache_data(
+        stations_cache={"1": {"id": "1"}},
+        last_update=datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc),
+        separator="|",
+        csv_etag='"etag-1"',
+        csv_last_modified=None,
+    )
+    assert asyncio.run(csv_manager._async_save_cache_data(data)) is False

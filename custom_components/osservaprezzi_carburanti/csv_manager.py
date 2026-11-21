@@ -109,6 +109,7 @@ class CSVStationManager:
         self._csv_etag: str | None = None
         self._csv_last_modified: str | None = None
         self._cache_path = hass.config.path(".storage", f"{DOMAIN}_cache.json")
+        self._metadata_path = hass.config.path(".storage", f"{DOMAIN}_cache_metadata.json")
         self._legacy_csv_paths = (
             hass.config.path("osservaprezzi_stations.csv"),
             hass.config.path(".storage", f"{DOMAIN}_stations.csv"),
@@ -153,12 +154,15 @@ class CSVStationManager:
         async with self._operation_lock:
             return await self._async_update_csv_data(force_update)
 
-    async def _async_update_csv_data(self, force_update: bool = False) -> bool:
+    async def _async_update_csv_data(
+        self, force_update: bool = False, *, bypass_ttl: bool = False
+    ) -> bool:
         """Update CSV data while the operation lock is held."""
         try:
             now = dt_util.now()
             if (
                 not force_update
+                and not bypass_ttl
                 and self._last_update
                 and now - self._last_update < timedelta(hours=CSV_UPDATE_INTERVAL)
             ):
@@ -187,7 +191,7 @@ class CSVStationManager:
                         csv_etag=self._csv_etag,
                         csv_last_modified=self._csv_last_modified,
                     )
-                    if not await self._async_save_cache_data(data):
+                    if not await self._async_save_metadata(data):
                         _LOGGER.error("Failed to persist CSV 304 refresh metadata")
                         return False
                     self._last_update = now
@@ -367,8 +371,14 @@ class CSVStationManager:
                 _load_json_file_sync, self._cache_path
             )
 
-            cache_version = data.get("version", "1.0")
             stations = data.get("stations", {})
+            try:
+                data = await self.hass.async_add_executor_job(
+                    _load_json_file_sync, self._metadata_path
+                )
+            except FileNotFoundError:
+                pass
+            cache_version = data.get("version", "1.0")
             last_update = data.get("last_update")
             separator = data.get("csv_separator", "|")
             csv_etag = data.get("csv_etag")
@@ -468,12 +478,26 @@ class CSVStationManager:
             "csv_last_modified": csv_last_modified,
         }
 
+    async def _async_save_metadata(self, data: dict[str, Any]) -> bool:
+        """Persist cache metadata atomically."""
+        try:
+            metadata = {key: value for key, value in data.items() if key != "stations"}
+            await self.hass.async_add_executor_job(
+                _write_json_file_atomic_sync, self._metadata_path, metadata
+            )
+            return True
+        except (OSError, TypeError, ValueError) as err:
+            _LOGGER.error("Error saving cache metadata: %s", err)
+            return False
+
     async def _async_save_cache_data(self, data: dict[str, Any]) -> bool:
         """Persist a prepared cache document without mutating manager state."""
         try:
             await self.hass.async_add_executor_job(
                 _write_json_file_atomic_sync, self._cache_path, data
             )
+            if not await self._async_save_metadata(data):
+                return False
             _LOGGER.debug(
                 "Saved station data to cache (version %s, separator: %s)",
                 CACHE_VERSION,
@@ -583,7 +607,9 @@ class CSVStationManager:
             _LOGGER.info("No cached data found, will download from CSV")
 
         _LOGGER.info("Forcing CSV data update")
-        success = await self._async_update_csv_data(force_update=True)
+        success = await self._async_update_csv_data(
+            force_update=not bool(self._stations_cache), bypass_ttl=True
+        )
         if success:
             _LOGGER.info("CSV update completed successfully")
         else:
@@ -609,10 +635,11 @@ class CSVStationManager:
 
             success = True
             try:
-                exists = await self.hass.async_add_executor_job(os.path.exists, self._cache_path)
-                if exists:
-                    await self.hass.async_add_executor_job(os.remove, self._cache_path)
-                    _LOGGER.info("Removed JSON station cache")
+                for path in (self._cache_path, self._metadata_path):
+                    exists = await self.hass.async_add_executor_job(os.path.exists, path)
+                    if exists:
+                        await self.hass.async_add_executor_job(os.remove, path)
+                        _LOGGER.info("Removed JSON station cache file")
             except OSError as err:
                 _LOGGER.error("Error clearing CSV cache: %s", err)
                 success = False

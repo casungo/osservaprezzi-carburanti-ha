@@ -102,6 +102,8 @@ class CSVStationManager:
         self.hass = hass
         self.session = async_get_clientsession(hass)
         self._stations_cache: dict[str, StationRecord] = {}
+        self._pinned_stations: dict[str, StationRecord] = {}
+        self._station_types: tuple[str, ...] = ()
         self._snapshot_cache: tuple[StationRecord, ...] | None = None
         self._snapshot_source: dict[str, StationRecord] | None = None
         self._last_update: datetime | None = None
@@ -232,6 +234,7 @@ class CSVStationManager:
             self._csv_last_modified = csv_last_modified
             self._detected_separator = separator
             self._stations_cache = stations_cache
+            self._update_station_types()
             self._snapshot_cache = None
             self._snapshot_source = None
             self._last_update = now
@@ -408,6 +411,7 @@ class CSVStationManager:
 
             parsed_last_update = self._parse_cached_datetime(last_update)
             self._stations_cache = {key: StationRecord.from_mapping(value) for key, value in stations.items()}
+            self._update_station_types()
             self._snapshot_cache = None
             self._snapshot_source = None
             self._last_update = parsed_last_update
@@ -510,12 +514,14 @@ class CSVStationManager:
 
     def get_station_by_id(self, station_id: str) -> dict[str, Any] | None:
         """Get station data by ID."""
-        station = self._stations_cache.get(station_id)
+        station = self._stations_cache.get(station_id) or self._pinned_stations.get(station_id)
+        if station is not None:
+            self._pinned_stations[station_id] = station
         return dict(station) if station is not None else None
 
     def is_data_available(self) -> bool:
         """Check if station data is available."""
-        return bool(self._stations_cache)
+        return bool(self._stations_cache or self._pinned_stations)
 
     def registry_status(self) -> dict[str, Any]:
         """Return a privacy-safe summary of the registry cache."""
@@ -538,6 +544,9 @@ class CSVStationManager:
         """Initialize the registry and return an immutable snapshot."""
         initialized = await self.async_initialize()
         async with self._operation_lock:
+            if self._initialized and not self._stations_cache:
+                if not await self._async_load_cached_data():
+                    raise RegistryUnavailableError("No station registry is available")
             if not initialized and (not allow_stale or not self._stations_cache):
                 raise RegistryUnavailableError("No station registry is available")
             last_update = self._last_update
@@ -561,7 +570,10 @@ class CSVStationManager:
 
     def registry_station_types(self) -> tuple[str, ...]:
         """Return station types already available in the local registry."""
-        return tuple(sorted({
+        return self._station_types
+
+    def _update_station_types(self) -> None:
+        self._station_types = tuple(sorted({
             value.strip() for station in self._stations_cache.values()
             if isinstance(value := station.get("station_type"), str) and value.strip()
         }, key=str.casefold))
@@ -620,6 +632,13 @@ class CSVStationManager:
         """Perform periodic update of CSV data."""
         return await self.async_update_csv_data()
 
+    async def async_evict_full_registry(self) -> None:
+        """Release the full registry while retaining pinned stations."""
+        async with self._operation_lock:
+            self._stations_cache = {}
+            self._snapshot_cache = None
+            self._snapshot_source = None
+
     async def async_clear_cache(self) -> bool:
         """Clear the CSV cache files and in-memory data."""
         async with self._operation_lock:
@@ -627,6 +646,8 @@ class CSVStationManager:
             self._initialized = False
             self._last_failed_init_at = None
             self._stations_cache = {}
+            self._pinned_stations.clear()
+            self._station_types = ()
             self._snapshot_cache = None
             self._snapshot_source = None
             self._last_update = None

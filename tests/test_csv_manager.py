@@ -1098,6 +1098,7 @@ def test_registry_snapshot_reuse_and_replacement(csv_manager, monkeypatch):
 
 def test_registry_station_type_suggestions(csv_manager):
     csv_manager._stations_cache = {"1": {"station_type": " Stradale "}, "2": {"station_type": "Autostradale"}, "3": {"station_type": None}, "4": {"station_type": "Stradale"}}
+    csv_manager._update_station_types()
     assert csv_manager.registry_station_types() == ("Autostradale", "Stradale")
 
 
@@ -1219,3 +1220,26 @@ def test_station_record_mapping_round_trip():
     with pytest.raises(FrozenInstanceError):
         record.name = "changed"
     assert StationRecord.from_mapping(json.loads(json.dumps(record.to_dict()))).to_dict() == source
+
+
+def test_eviction_preserves_pins_and_types_and_reloads(csv_manager):
+    csv_manager._stations_cache = {"1": StationRecord(id="1", station_type="Stradale")}
+    csv_manager._update_station_types()
+    csv_manager._initialized = True
+    assert csv_manager.get_station_by_id("1") is not None
+    asyncio.run(csv_manager.async_evict_full_registry())
+    assert csv_manager.is_data_available()
+    assert csv_manager.get_station_by_id("1") is not None
+    assert csv_manager.registry_station_types() == ("Stradale",)
+    async def reload():
+        csv_manager._stations_cache = {"1": StationRecord(id="1")}
+        return True
+    csv_manager._async_load_cached_data = reload
+    assert len(asyncio.run(csv_manager.async_ensure_registry()).stations) == 1
+
+
+def test_eviction_reload_failure(csv_manager):
+    csv_manager._initialized = True
+    csv_manager._async_load_cached_data = AsyncMock(return_value=False)
+    with pytest.raises(RegistryUnavailableError):
+        asyncio.run(csv_manager.async_ensure_registry())

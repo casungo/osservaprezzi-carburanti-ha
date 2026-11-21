@@ -5,7 +5,7 @@ from email.utils import parsedate_to_datetime
 import logging
 from datetime import datetime, timezone, tzinfo
 from math import ceil, isfinite
-from typing import cast
+from typing import Any, cast
 
 import aiohttp
 
@@ -28,10 +28,13 @@ _LOGGER = logging.getLogger(__name__)
 
 RETRY_DELAYS: tuple[int, ...] = (30, 60, 120)
 MAX_RETRY_AFTER_SECONDS = 300
+_UNSET = object()
 
 
 class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     """Coordinate API and CSV enrichment updates for a single station."""
+
+    _fast_fail_next_refresh: bool = False
 
     def __init__(
         self,
@@ -42,6 +45,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator."""
         self.station_not_found = False
         self.last_refresh_from_cache = False
+        self._fast_fail_next_refresh = False
         self._store: Store[ProcessedPayload] = Store(
             hass,
             1,
@@ -110,6 +114,27 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             and isinstance(data.get("last_update"), str)
         )
 
+    async def async_request_manual_refresh(self) -> None:
+        """Request an interactive single-attempt refresh without multi-minute retry backoff."""
+        self._fast_fail_next_refresh = True
+        try:
+            await self.async_request_refresh()
+        finally:
+            self._fast_fail_next_refresh = False
+
+    @staticmethod
+    def _has_persisted_payload_changed(
+        previous: ProcessedPayload | None,
+        current: ProcessedPayload,
+    ) -> bool:
+        """Return True when meaningful station fields changed (ignoring volatile last_update)."""
+        if previous is None:
+            return True
+        return any(
+            previous.get(key) != current.get(key)
+            for key in ("station_info", "fuels", "opening_hours", "services")
+        )
+
     async def _async_update_data(self) -> ProcessedPayload:
         """Fetch and enrich the latest station payload."""
         self.station_not_found = False
@@ -121,7 +146,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
                 )
 
         data = await self._async_fetch_station_data()
-        if data is not self.data:
+        if data is not self.data and self._has_persisted_payload_changed(self.data, data):
             try:
                 await self._store.async_save(data)
             except Exception as err:
@@ -138,8 +163,9 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
         last_err: Exception | None = None
         self.station_not_found = False
         self.last_refresh_from_cache = False
+        retry_delays = () if self._fast_fail_next_refresh else RETRY_DELAYS
 
-        for attempt in range(len(RETRY_DELAYS) + 1):
+        for attempt in range(len(retry_delays) + 1):
             try:
                 data = await fetch_station_data(self.hass, station_id)
                 processed_data = self._process_station_data(data)
@@ -153,12 +179,12 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 last_err = err
 
-            if attempt < len(RETRY_DELAYS):
-                delay = self._get_retry_delay(last_err, RETRY_DELAYS[attempt])
+            if attempt < len(retry_delays):
+                delay = self._get_retry_delay(last_err, retry_delays[attempt])
                 _LOGGER.debug(
                     "Attempt %d/%d failed for station %s, retrying in %ds: %s",
                     attempt + 1,
-                    len(RETRY_DELAYS) + 1,
+                    len(retry_delays) + 1,
                     station_id,
                     delay,
                     last_err,
@@ -175,7 +201,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             return self.data
 
         raise UpdateFailed(
-            f"Error fetching station data after {len(RETRY_DELAYS) + 1} attempts: {last_err}"
+            f"Error fetching station data after {len(retry_delays) + 1} attempts: {last_err}"
         )
 
     @staticmethod
@@ -218,19 +244,28 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
             return err.status != 404
         return isinstance(err, aiohttp.ClientError)
 
-    def _get_station_coordinates(self, station_id: str | None) -> dict[str, float | str] | None:
+    def _get_station_coordinates(
+        self,
+        station_id: str | None,
+        *,
+        csv_station: dict[str, Any] | None | object = _UNSET,
+    ) -> dict[str, float | str] | None:
         """Get station coordinates using CSV data only."""
         if not station_id:
             _LOGGER.warning("No station ID provided for coordinate lookup")
             return None
 
-        csv_station = self.csv_manager.get_station_by_id(str(station_id))
-        if not csv_station:
+        resolved_station = (
+            self.csv_manager.get_station_by_id(str(station_id))
+            if csv_station is _UNSET
+            else cast(dict[str, Any] | None, csv_station)
+        )
+        if not resolved_station:
             _LOGGER.warning("Station %s not found in CSV data", station_id)
             return None
 
-        latitude = csv_station.get("latitude")
-        longitude = csv_station.get("longitude")
+        latitude = resolved_station.get("latitude")
+        longitude = resolved_station.get("longitude")
         if latitude is None or longitude is None:
             _LOGGER.warning("Station %s found in CSV but missing coordinates", station_id)
             return None
@@ -276,8 +311,13 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator):
     def _process_station_data(self, data: StationPayload) -> ProcessedPayload:
         """Process the raw data from a single station API call."""
         station_id = data.get("id")
-        coordinates = self._get_station_coordinates(str(station_id) if station_id is not None else None)
-        csv_station = self.csv_manager.get_station_by_id(str(station_id)) if station_id is not None else None
+        station_id_str = str(station_id) if station_id is not None else None
+        csv_station = (
+            self.csv_manager.get_station_by_id(station_id_str)
+            if station_id_str is not None
+            else None
+        )
+        coordinates = self._get_station_coordinates(station_id_str, csv_station=csv_station)
         now_iso = dt_util.now().replace(microsecond=0).isoformat()
 
         station_info: ProcessedStationInfo = {

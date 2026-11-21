@@ -137,6 +137,10 @@ class FakeCoordinator:
         for listener in self._listeners:
             listener()
 
+    async def async_request_manual_refresh(self) -> None:
+        """Delegate interactive manual refresh to the tracked refresh method."""
+        await self.async_request_refresh()
+
 
 class FakeEntityRegistry:
     """Small entity registry fake for migration tests."""

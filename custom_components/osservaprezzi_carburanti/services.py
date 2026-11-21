@@ -75,7 +75,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         failed_entry_ids: list[str] = []
         for entry_id, coordinator in coordinators:
             try:
-                await coordinator.async_request_refresh()
+                await coordinator.async_request_manual_refresh()
             except Exception:  # noqa: BLE001 - service must attempt every configured station
                 failed_entry_ids.append(entry_id)
                 _LOGGER.exception("Station refresh failed for entry %s after %s", entry_id, action)

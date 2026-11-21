@@ -678,3 +678,67 @@ def test_retry_after_is_capped_at_max_retry_after_seconds(monkeypatch):
     date_error = _make_response_error(429, {"Retry-After": "Sun, 02 Mar 2025 12:00:00 GMT"})
     assert CarburantiDataUpdateCoordinator._get_retry_delay(numeric_error, 30) == 300
     assert CarburantiDataUpdateCoordinator._get_retry_delay(date_error, 30) == 300
+
+
+def test_update_data_skips_store_save_when_payload_is_unchanged(monkeypatch) -> None:
+    csv_manager = MagicMock()
+    csv_manager.is_data_available.return_value = True
+    csv_manager.get_station_by_id.return_value = {
+        "latitude": 41.9,
+        "longitude": 12.5,
+        "operator": "Op",
+        "municipality": "Roma",
+        "province": "RM",
+        "station_type": "Stradale",
+    }
+    entry = MagicMock(entry_id="entry_1", unique_id="12345", data={"station_id": "12345"})
+    coordinator = CarburantiDataUpdateCoordinator(MagicMock(), entry, csv_manager)
+    coordinator._store = MagicMock(async_save=AsyncMock())
+
+    raw_payload = {
+        "id": 12345,
+        "name": "Station",
+        "fuels": [{"name": "Benzina", "price": 1.8, "isSelf": True}],
+        "orariapertura": [],
+        "services": [],
+    }
+    monkeypatch.setattr(
+        coordinator_module, "fetch_station_data", AsyncMock(return_value=raw_payload)
+    )
+    times = iter([
+        datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc),
+        datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc),
+    ])
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: next(times))
+
+    first = asyncio.run(coordinator._async_update_data())
+    coordinator.data = first
+    coordinator._store.async_save.assert_awaited_once()
+    # Confirm _process_station_data performed only a single CSV lookup.
+    assert csv_manager.get_station_by_id.call_count == 1
+
+    second = asyncio.run(coordinator._async_update_data())
+    assert second["last_update"] != first["last_update"]
+    coordinator._store.async_save.assert_awaited_once()
+
+
+def test_manual_refresh_fast_fails_without_retry_backoff(monkeypatch) -> None:
+    csv_manager = MagicMock()
+    csv_manager.is_data_available.return_value = True
+    entry = MagicMock(entry_id="entry_1", unique_id="12345", data={"station_id": "12345"})
+    coordinator = CarburantiDataUpdateCoordinator(MagicMock(), entry, csv_manager)
+    fetch_mock = AsyncMock(side_effect=asyncio.TimeoutError("timeout"))
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(coordinator_module, "fetch_station_data", fetch_mock)
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", sleep_mock)
+
+    async def fake_request_refresh() -> None:
+        with pytest.raises(coordinator_module.UpdateFailed, match="after 1 attempts"):
+            await coordinator._async_fetch_station_data()
+
+    coordinator.async_request_refresh = fake_request_refresh
+    asyncio.run(coordinator.async_request_manual_refresh())
+
+    assert fetch_mock.await_count == 1
+    sleep_mock.assert_not_awaited()
+    assert coordinator._fast_fail_next_refresh is False

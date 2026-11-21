@@ -40,7 +40,7 @@ class StationRefreshButton(OsservaprezziBaseEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Request a station refresh and report an unsuccessful update."""
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_manual_refresh()
         if (
             not self.coordinator.last_update_success
             or self.coordinator.last_refresh_from_cache

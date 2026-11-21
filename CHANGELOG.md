@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-21
+
+Stable release consolidating all quality, performance, resilience, and Home Assistant compliance
+improvements validated across `v2.7.0-beta.1` through `v2.7.0-beta.4`. Existing entity IDs and
+config-entry data remain compatible with no breaking changes.
+
+### Highlights
+
+- **Per-station refresh & fast-fail manual refresh:** Dedicated *Refresh prices* button entity per
+  station, schedule presets, and single-attempt fast-fail for interactive manual refreshes while
+  retaining retry backoff for scheduled updates.
+- **Drastically lower disk & Recorder overhead:** Exact one-shot `async_track_point_in_utc_time`
+  opening-hours scheduling (replacing 1-minute polling), `_unrecorded_attributes` for volatile and
+  static metadata, sidecar CSV metadata JSON for HTTP `304 Not Modified` (-99.8% conditional update
+  time), and skipped per-station `Store` writes when payloads are unchanged (-100% writes on
+  unchanged refreshes).
+- **Faster discovery & better concurrency:** Latitude/longitude bounding-box pre-filter in
+  `find_nearby_stations` (-48.7% median search time), per-Home-Assistant-instance API rate-limiter
+  releasing its lock before HTTP I/O, and eliminated duplicate CSV lookups.
+- **Stronger validation & reliability:** Explicit cache fallback reporting, strict payload/price/date
+  validation, `Retry-After` capping, safe setup cancellation rollback, consistent `super().available`
+  and discontinued-fuel checks, modernized `OptionsFlow`, and enriched privacy-safe diagnostics.
+
 ## [2.7.0-beta.4] - 2026-11-21
 
 ### Changed

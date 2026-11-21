@@ -345,3 +345,49 @@ Se ti viene chiesto di provare una correzione, segui
 ## 📄 Licenza
 
 Questo progetto è rilasciato sotto licenza MIT.
+
+## Esempi di dashboard Lovelace con schede integrate
+
+Sostituisci gli ID di esempio con quelli dei sensori delle tue stazioni. Potrebbe essere necessario abilitare il sensore di posizione nel registro delle entità.
+
+```yaml
+type: map
+entities:
+  - entity: sensor.station_location
+```
+
+Una scheda Markdown confronta i sensori di prezzo configurati:
+
+```yaml
+type: markdown
+content: >-
+  | Stazione | Gasolio (€/L) |
+  |:--|--:|
+  {% set ns = namespace(prices=[]) %}
+  {% for price in [states.sensor.station_one_diesel, states.sensor.station_two_diesel] if price is defined and is_number(price.state) %}
+  {% set ns.prices = ns.prices + [(price.state | float, price.attributes.station_name)] %}
+  {% endfor %}
+  {% for price, station in ns.prices | sort %}
+  | {{ station }} | {{ price }} |
+  {% endfor %}
+```
+
+Una scheda entità mostra prezzo e attributi (sostituisci gli ID):
+
+```yaml
+type: entities
+entities:
+  - entity: sensor.station_one_diesel
+  - type: attribute
+    entity: sensor.station_one_diesel
+    attribute: price_direction
+    name: Direzione del prezzo
+  - type: attribute
+    entity: sensor.station_one_diesel
+    attribute: price_is_stale
+    name: Prezzo non aggiornato
+```
+
+## Blueprint per automazioni
+
+I blueprint in `blueprints/automation/osservaprezzi_carburanti/` consentono di ricevere un avviso per un calo di prezzo e un riepilogo programmato delle stazioni più economiche. Copiali nella corrispondente cartella `blueprints/automation` della configurazione Home Assistant e crea le automazioni dai blueprint. Nell'azione di notifica usa `{{ message }}` come messaggio. Richiedono l'evento di variazione prezzo e la classifica del servizio previsti nella fase 1; non funzionano con l'attuale risposta di confronto che contiene solo `stations`.

@@ -1,0 +1,64 @@
+blueprint:
+  name: Fuel price drop alert
+  description: Notify when a fuel price drops below a target or by a minimum amount. Requires the price changed event from Phase 1.
+  domain: automation
+  input:
+    notify_action:
+      name: Notification action
+      selector:
+        action: {}
+    target_price:
+      name: Target price (€/L)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.001
+          mode: box
+    minimum_drop:
+      name: Minimum drop (€/L, positive value)
+      default: 0.02
+      selector:
+        number:
+          min: 0.001
+          max: 10
+          step: 0.001
+          mode: box
+    fuel:
+      name: Fuel name (empty for all)
+      default: ''
+      selector:
+        text: {}
+    service_mode:
+      name: Service mode
+      default: any
+      selector:
+        select:
+          options: [any, self, served]
+variables:
+  target_price: !input target_price
+  minimum_drop: !input minimum_drop
+  fuel: !input fuel
+  service_mode: !input service_mode
+trigger:
+  - platform: event
+    event_type: osservaprezzi_carburanti_price_changed
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.event.data.direction == 'down'
+         and (fuel | trim == '' or trigger.event.data.fuel | lower == fuel | trim | lower)
+         and (service_mode == 'any' or (trigger.event.data.is_self and service_mode == 'self')
+              or (not trigger.event.data.is_self and service_mode == 'served'))
+         and ((target_price | float(0) > 0 and trigger.event.data.new_price | float(0) < target_price | float(0))
+              or trigger.event.data.delta | float(0) <= -(minimum_drop | float(0))) }}
+action:
+  - variables:
+      message: >-
+        {{ trigger.event.data.station_name }}: {{ trigger.event.data.fuel }}
+        {{ trigger.event.data.old_price }} → {{ trigger.event.data.new_price }} €/L
+        ({{ trigger.event.data.delta }} €/L).
+  - choose: []
+    default: !input notify_action
+mode: queued

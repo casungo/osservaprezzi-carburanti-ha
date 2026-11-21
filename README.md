@@ -339,3 +339,49 @@ If you are asked to test a fix, follow [Testing Pre-releases](#testing-pre-relea
 ## 📄 License
 
 This project is released under the MIT License.
+
+## Built-in Lovelace Dashboard Examples
+
+Replace the example entity IDs with your station sensors. The location sensor may need to be enabled in the entity registry.
+
+```yaml
+type: map
+entities:
+  - entity: sensor.station_location
+```
+
+A Markdown card can compare configured price sensors without an additional card:
+
+```yaml
+type: markdown
+content: >-
+  | Station | Diesel (€/L) |
+  |:--|--:|
+  {% set ns = namespace(prices=[]) %}
+  {% for price in [states.sensor.station_one_diesel, states.sensor.station_two_diesel] if price is defined and is_number(price.state) %}
+  {% set ns.prices = ns.prices + [(price.state | float, price.attributes.station_name)] %}
+  {% endfor %}
+  {% for price, station in ns.prices | sort %}
+  | {{ station }} | {{ price }} |
+  {% endfor %}
+```
+
+Use an entities card to show price and metadata (replace the IDs):
+
+```yaml
+type: entities
+entities:
+  - entity: sensor.station_one_diesel
+  - type: attribute
+    entity: sensor.station_one_diesel
+    attribute: price_direction
+    name: Price direction
+  - type: attribute
+    entity: sensor.station_one_diesel
+    attribute: price_is_stale
+    name: Price is stale
+```
+
+## Automation blueprints
+
+The blueprints in `blueprints/automation/osservaprezzi_carburanti/` provide a price-drop alert and a scheduled cheapest-station digest. Copy them into the matching `blueprints/automation` directory in your Home Assistant configuration, then create automations from the blueprints. Configure the notification action using `{{ message }}` for its message. These blueprints require the Phase 1 price-change event and comparison ranking contract; they do not work with the current `stations`-only comparison response.

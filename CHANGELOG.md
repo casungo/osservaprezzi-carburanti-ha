@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0-beta.2] - 2026-11-21
+
+Consolidates all planned `v2.9` features into `v2.8.0-beta.2` ahead of the `v2.8.0` GA release.
+
+### Added
+
+- **30-Day Rolling Price History & Trend Indicators:** Persist up to 30 daily prices per fuel
+  inside each station's `Store` and expose derived attributes (`min_30d`, `max_30d`, `avg_30d`,
+  `vs_avg_30d_pct`, `is_30d_low`, excluded from Recorder) on fuel price sensors.
+- **Fixable `RepairsFlow` & Stale CSV Warning:** Station-not-found (`404`) repair issues are now
+  fixable directly from the Home Assistant Repair card (replace station ID with validation or
+  remove the defunct entry). Added a `WARNING` repair issue (`csv_registry_stale`) when periodic
+  CSV updates fail and the cached registry is older than 7 days, cleared automatically on recovery.
+- **Reconfigure Flow with Discovery Menu:** Reconfiguring an existing station now offers the full
+  discovery menu (Home, Map Coordinates, Zone, Area, or Station ID) in single-select mode.
+- **Fuel-Type & Service-Mode Filtering in Options:** Added translated `tracked_fuels` and
+  `tracked_service_modes` options so users can limit which fuel sensors are created per station
+  (empty = all fuels tracked, preserving existing behavior).
+- **Idle Full-Registry RAM Eviction:** Added `CSVStationManager.async_evict_full_registry()` with
+  pinned station caching, cached station-type metadata, and transparent disk reload on
+  `async_ensure_registry()`.
+
+### Changed
+
+- Construct `StationRecord` instances directly in `_parse_csv_content_to_cache` without building
+  intermediate per-row dictionaries (reducing CSV parse time from 281.6 ms to 223.7 ms).
+
+### Tests and validation
+
+- 586 unit tests passed (7 optional-environment skips), 100% statement and branch coverage
+  (2,591 statements, 766 branches across 18 modules), 18 real Home Assistant tests passed, Ruff,
+  mypy, and Hassfest passed (`Invalid integrations: 0`).
+- Full Home Assistant Docker regression (`upgrade`, `fresh`, `lived`, `outage`, `recovery`) passed
+  with exit code 0.
+- Local KPI replay against `v2.7.0` passed with 0 correctness failures, 22/23 metrics within
+  guardrails (`process_lifetime_peak_mib` -12.5%, `rss_steady_mib` -11.1%, `rss_reload_growth_mib`
+  -50.4%, `recorder_rows_total` -57.5%, `database_bytes` -13.3%, `refresh_cpu_ms` -8.3%), and 1
+  provisional investigate flag on 24h CSV parse (`registry_parse_ms` 176.7 ms → 223.7 ms).
+
 ## [2.8.0-beta.1] - 2026-11-21
 
 ### Added

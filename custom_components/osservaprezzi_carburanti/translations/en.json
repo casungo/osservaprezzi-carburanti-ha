@@ -123,7 +123,13 @@
         "description": "Choose the refresh schedule and price freshness threshold. Choose Custom to enter a cron expression. Next refresh for the current configuration: {next_run}.",
         "data": {
           "price_stale_hours": "Mark prices stale after (hours)",
-          "refresh_schedule": "Refresh schedule"
+          "refresh_schedule": "Refresh schedule",
+          "tracked_fuels": "Tracked fuels",
+          "tracked_service_modes": "Service modes"
+        },
+        "data_description": {
+          "tracked_fuels": "Leave empty to track all fuels reported by the station.",
+          "tracked_service_modes": "Leave empty to track both Self and Servito prices."
         }
       },
       "custom": {

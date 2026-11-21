@@ -123,7 +123,13 @@
         "description": "Scegli la frequenza di aggiornamento e la soglia di freschezza dei prezzi. Per inserire una cron, scegli Personalizzata. Prossimo aggiornamento della configurazione attuale: {next_run}.",
         "data": {
           "price_stale_hours": "Considera i prezzi obsoleti dopo (ore)",
-          "refresh_schedule": "Frequenza di aggiornamento"
+          "refresh_schedule": "Frequenza di aggiornamento",
+          "tracked_fuels": "Carburanti monitorati",
+          "tracked_service_modes": "Modalità di servizio"
+        },
+        "data_description": {
+          "tracked_fuels": "Lascia vuoto per monitorare tutti i carburanti della stazione.",
+          "tracked_service_modes": "Lascia vuoto per monitorare sia Self che Servito."
         }
       },
       "custom": {

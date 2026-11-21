@@ -160,9 +160,6 @@
       "station_id": {
         "name": "ID Osservaprezzi"
       },
-      "station_address": {
-        "name": "Indirizzo"
-      },
       "station_brand": {
         "name": "Marchio"
       },

@@ -116,7 +116,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> OptionsFlowHandler:
-        return OptionsFlowHandler(config_entry)
+        return OptionsFlowHandler()
 
     async def _async_create_station_entry(
         self,
@@ -723,12 +723,12 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         )
 
 
-class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
+class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle an options flow for Osservaprezzi Carburanti."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Choose a preset schedule or a custom cron expression."""
-        current_cron = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+        current_cron = self.config_entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
         current_schedule = next(
             (key for key, cron in REFRESH_SCHEDULES.items() if cron == current_cron),
             "custom",
@@ -739,7 +739,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
                 stale_hours = int(
                     user_input.get(
                         CONF_PRICE_STALE_HOURS,
-                        self.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
+                        self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
                     )
                 )
             except (TypeError, ValueError):
@@ -768,7 +768,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
                 ),
                 vol.Required(
                     CONF_PRICE_STALE_HOURS,
-                    default=self.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
+                    default=self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
                 ): vol.In(PRICE_STALE_HOUR_OPTIONS),
             }
         )
@@ -787,7 +787,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
             if validate_cron_expression(cron):
                 return self._save_schedule(cron)
             errors[CONF_CRON_EXPRESSION] = "invalid_cron_expression"
-        current_cron = self.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+        current_cron = self.config_entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
         schema = vol.Schema({vol.Required(CONF_CRON_EXPRESSION, default=current_cron): str})
         return self.async_show_form(
             step_id="custom",
@@ -805,7 +805,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
                 CONF_PRICE_STALE_HOURS: getattr(
                     self,
                     "_stale_hours",
-                    self.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
+                    self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
                 ),
             },
         )

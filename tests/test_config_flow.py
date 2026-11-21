@@ -1025,8 +1025,7 @@ def test_config_flow_reconfigure_errors(
 
 def _make_options_flow(options: dict[str, Any] | None = None) -> OptionsFlowHandler:
     handler = object.__new__(OptionsFlowHandler)
-    handler.config_entry = MagicMock(title="Station")
-    handler.options = options or {}
+    handler.config_entry = MagicMock(title="Station", options=options or {})
     handler.async_create_entry = MagicMock(
         side_effect=lambda **kwargs: {"type": "create_entry", **kwargs}
     )
@@ -1362,7 +1361,8 @@ def test_options_save_schedule_without_stale_hours_attr():
     from types import SimpleNamespace
     from custom_components.osservaprezzi_carburanti.config_flow import OptionsFlowHandler
 
-    handler = OptionsFlowHandler(SimpleNamespace(options={}))
+    handler = OptionsFlowHandler()
+    handler.config_entry = SimpleNamespace(options={})
     handler.async_create_entry = lambda **kwargs: {"type": "create_entry", **kwargs}
     result = handler._save_schedule("0 8 * * *")
     assert result["type"] == "create_entry"

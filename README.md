@@ -121,7 +121,6 @@ The button also lets you retry after a connection error.
 
 - **Station Name**: The name of the fuel station
 - **Station ID**: The Osservaprezzi identifier
-- **Address**: Full street address
 - **Brand**: Fuel station brand (e.g., Eni, Shell, TotalEnergies)
 - **Company**: Operating company name
 - **Phone**: Contact phone number (if available)

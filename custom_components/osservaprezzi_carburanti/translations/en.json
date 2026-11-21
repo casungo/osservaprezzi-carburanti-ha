@@ -160,9 +160,6 @@
       "station_id": {
         "name": "Osservaprezzi ID"
       },
-      "station_address": {
-        "name": "Address"
-      },
       "station_brand": {
         "name": "Brand"
       },

@@ -146,7 +146,7 @@ def _mock_ha_modules():
     sys.modules["homeassistant.data_entry_flow"].FlowResult = dict
     sys.modules["homeassistant.config_entries"].ConfigFlow = _MockConfigFlow
     sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict
-    sys.modules["homeassistant.config_entries"].OptionsFlowWithConfigEntry = _MockOptionsFlow
+    sys.modules["homeassistant.config_entries"].OptionsFlow = _MockOptionsFlow
     sys.modules["homeassistant.config_entries"].SOURCE_IMPORT = "import"
     sys.modules["homeassistant.core"].callback = lambda f: f
     sys.modules["homeassistant.helpers.selector"].SelectOptionDict = dict

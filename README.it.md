@@ -124,7 +124,6 @@ Il pulsante permette di riprovare anche dopo un errore di connessione.
 
 - **Nome Stazione**: Il nome dell'impianto di carburante
 - **ID Stazione**: L'identificatore Osservaprezzi
-- **Indirizzo**: Indirizzo stradale completo
 - **Marchio**: Marchio della stazione di carburante (es. Eni, Shell, TotalEnergies)
 - **Società**: Nome della società operativa
 - **Telefono**: Numero di telefono di contatto (se disponibile)

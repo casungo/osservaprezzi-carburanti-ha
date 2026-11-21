@@ -4,7 +4,7 @@ from __future__ import annotations
 import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from math import asin, cos, isfinite, radians, sin, sqrt
+from math import asin, cos, degrees, isfinite, pi, radians, sin, sqrt
 from typing import Any
 
 from .data_helpers import as_coordinate
@@ -145,6 +145,13 @@ def find_nearby_stations(
 
     normalized_text_filter = _normalize_text(text_filter).strip() or None
     normalized_station_type = _normalize_text(station_type).strip() or None
+    # Expand slightly to avoid excluding points on the boundary due to rounding.
+    angular_radius = min(radius_km, pi * EARTH_RADIUS_KM) / EARTH_RADIUS_KM
+    latitude_span = degrees(angular_radius) + 1e-9
+    if abs(origin_latitude) + latitude_span >= 90:
+        longitude_span = 180.0
+    else:
+        longitude_span = degrees(asin(sin(angular_radius) / cos(radians(origin_latitude)))) + 1e-9
     candidates: list[StationCandidate] = []
     for station in stations:
         if not _station_matches_filters(
@@ -156,6 +163,12 @@ def find_nearby_stations(
         station_latitude = as_coordinate(station.get("latitude"), -90, 90)
         station_longitude = as_coordinate(station.get("longitude"), -180, 180)
         if station_latitude is None or station_longitude is None:
+            continue
+
+        if abs(station_latitude - origin_latitude) > latitude_span:
+            continue
+        longitude_delta = abs((station_longitude - origin_longitude + 180) % 360 - 180)
+        if longitude_delta > longitude_span:
             continue
 
         distance_km = _haversine_distance_km(

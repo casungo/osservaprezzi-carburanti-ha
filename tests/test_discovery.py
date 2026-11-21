@@ -384,3 +384,31 @@ def test_candidate_preserves_falsy_non_none_name() -> None:
         limit=20,
     )
     assert candidates[0].name == "0"
+
+
+def test_bounding_box_wraps_longitude_and_retains_polar_points(monkeypatch: pytest.MonkeyPatch) -> None:
+    from custom_components.osservaprezzi_carburanti import discovery
+
+    original = discovery._haversine_distance_km
+    calls = []
+
+    def distance(*args: float) -> float:
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr(discovery, "_haversine_distance_km", distance)
+    stations = [
+        {"id": "near", "latitude": 0, "longitude": -179.9},
+        {"id": "diagonal", "latitude": 0.2, "longitude": 179.7},
+        {"id": "far_lon", "latitude": 0, "longitude": 170},
+        {"id": "far_lat", "latitude": 10, "longitude": 179.9},
+    ]
+    result = find_nearby_stations(stations, latitude=0, longitude=179.9, radius_km=30, limit=10)
+    assert [station.station_id for station in result] == ["near"]
+    assert len(calls) == 2
+
+    result = find_nearby_stations(
+        [{"id": "pole", "latitude": 89.99, "longitude": 180}],
+        latitude=89.99, longitude=0, radius_km=5, limit=10,
+    )
+    assert [station.station_id for station in result] == ["pole"]

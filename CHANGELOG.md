@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0-beta.3] - 2026-11-21
+
+### Fixed
+
+- Prune `price_history` entries older than 30 calendar days relative to the current date (instead
+  of retaining up to 30 arbitrary historical entries when updates are sporadic) and safely ignore
+  malformed date entries.
+
+### Tests and validation
+
+- 587 unit tests passed (7 optional-environment skips), 100% statement and branch coverage, 18
+  real Home Assistant tests passed, Ruff, mypy, and Hassfest passed (`Invalid integrations: 0`).
+
 ## [2.8.0-beta.2] - 2026-11-21
 
 Consolidates all planned `v2.9` features into `v2.8.0-beta.2` ahead of the `v2.8.0` GA release.

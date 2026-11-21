@@ -1,6 +1,8 @@
 """Tests for CSV manager parsing logic."""
 from __future__ import annotations
 
+from custom_components.osservaprezzi_carburanti.models import StationRecord
+
 import asyncio
 import json
 import sys
@@ -407,7 +409,7 @@ class TestCSVParsing:
 
         csv_manager = CSVStationManager(hass)
         csv_manager._cache_path = str(tmp_path / "cache.json")
-        csv_manager._stations_cache = {"12345": {"id": "12345", "name": "Station Alpha"}}
+        csv_manager._stations_cache = {"12345": StationRecord(id="12345", name="Station Alpha")}
         csv_manager._last_update = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
         csv_manager._detected_separator = ";"
         csv_manager._csv_etag = '"abc123"'
@@ -847,7 +849,7 @@ class TestCSVParsing:
     ):
         now = datetime(2026, 7, 28, 8, 0, tzinfo=timezone.utc)
         csv_manager._stations_cache = {
-            "123": {"id": "123", "name": "Station", "latitude": 41.9, "longitude": 12.5}
+            "123": StationRecord(id="123", name="Station", latitude=41.9, longitude=12.5)
         }
         csv_manager._last_update = now - timedelta(hours=1)
         csv_manager.async_initialize = AsyncMock(return_value=True)
@@ -1186,10 +1188,28 @@ def test_save_cache_data_returns_false_when_sidecar_write_fails(tmp_path):
     csv_manager._async_save_metadata = AsyncMock(return_value=False)
 
     data = csv_manager._build_cache_data(
-        stations_cache={"1": {"id": "1"}},
+        stations_cache={"1": StationRecord(id="1")},
         last_update=datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc),
         separator="|",
         csv_etag='"etag-1"',
         csv_last_modified=None,
     )
     assert asyncio.run(csv_manager._async_save_cache_data(data)) is False
+
+
+def test_station_record_mapping_round_trip():
+    from dataclasses import FrozenInstanceError
+
+    source = {"id": "1", "name": None, "legacy": [1, 2]}
+    record = StationRecord.from_mapping(source)
+    assert record.to_dict() == source
+    assert dict(record) == source
+    assert len(record) == 3
+    assert record["name"] is None
+    assert record["legacy"] == [1, 2]
+    assert "brand" not in record
+    with pytest.raises(KeyError):
+        _ = record["brand"]
+    with pytest.raises(FrozenInstanceError):
+        record.name = "changed"
+    assert StationRecord.from_mapping(json.loads(json.dumps(record.to_dict()))).to_dict() == source

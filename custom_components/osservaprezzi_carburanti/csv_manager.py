@@ -10,10 +10,8 @@ import logging
 import os
 import tempfile
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from types import MappingProxyType
 from typing import Any
 
 import aiohttp
@@ -24,6 +22,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CSV_UPDATE_INTERVAL, CSV_URL, DEFAULT_HEADERS, DOMAIN
 from .data_helpers import parse_coordinate
+from .models import StationRecord
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ class RegistryUnavailableError(Exception):
 class RegistrySnapshot:
     """Read-only view of the shared station registry."""
 
-    stations: tuple[Mapping[str, Any], ...]
+    stations: tuple[StationRecord, ...]
     updated_at: datetime | None
     is_stale: bool
 
@@ -90,9 +89,9 @@ def _write_json_file_atomic_sync(path: str, data: dict[str, Any]) -> None:
                 os.remove(temp_path)
 
 
-def _build_registry_snapshot(stations: dict[str, dict[str, Any]]) -> tuple[Mapping[str, Any], ...]:
+def _build_registry_snapshot(stations: dict[str, StationRecord]) -> tuple[StationRecord, ...]:
     """Copy one registry version into immutable station mappings."""
-    return tuple(MappingProxyType(dict(station)) for station in stations.values())
+    return tuple(stations.values())
 
 
 class CSVStationManager:
@@ -102,9 +101,9 @@ class CSVStationManager:
         """Initialize the CSV manager."""
         self.hass = hass
         self.session = async_get_clientsession(hass)
-        self._stations_cache: dict[str, dict[str, Any]] = {}
-        self._snapshot_cache: tuple[Mapping[str, Any], ...] | None = None
-        self._snapshot_source: dict[str, dict[str, Any]] | None = None
+        self._stations_cache: dict[str, StationRecord] = {}
+        self._snapshot_cache: tuple[StationRecord, ...] | None = None
+        self._snapshot_source: dict[str, StationRecord] | None = None
         self._last_update: datetime | None = None
         self._csv_etag: str | None = None
         self._csv_last_modified: str | None = None
@@ -303,7 +302,7 @@ class CSVStationManager:
     def _parse_csv_content_to_cache(
         self,
         content: str,
-    ) -> tuple[bool, str, dict[str, dict[str, Any]]]:
+    ) -> tuple[bool, str, dict[str, StationRecord]]:
         """Parse CSV text into a station cache without mutating manager state."""
         text_stream = io.StringIO(content)
         first_line = text_stream.readline()
@@ -321,7 +320,7 @@ class CSVStationManager:
         if missing_required:
             _LOGGER.error("CSV is missing required columns: %s", ", ".join(missing_required))
             return False, separator, {}
-        stations_cache: dict[str, dict[str, Any]] = {}
+        stations_cache: dict[str, StationRecord] = {}
 
         reader = csv.reader(text_stream, delimiter=separator)
         for line_num, values in enumerate(reader, start=3):
@@ -330,7 +329,7 @@ class CSVStationManager:
                 if parsed_station is None:
                     continue
                 station_id, station_data = parsed_station
-                stations_cache[station_id] = station_data
+                stations_cache[station_id] = StationRecord.from_mapping(station_data)
             except (IndexError, TypeError, ValueError) as err:
                 _LOGGER.warning("Error parsing CSV line %d: %s", line_num, err)
 
@@ -407,7 +406,7 @@ class CSVStationManager:
                 return False
 
             parsed_last_update = self._parse_cached_datetime(last_update)
-            self._stations_cache = stations
+            self._stations_cache = {key: StationRecord.from_mapping(value) for key, value in stations.items()}
             self._snapshot_cache = None
             self._snapshot_source = None
             self._last_update = parsed_last_update
@@ -462,7 +461,7 @@ class CSVStationManager:
     def _build_cache_data(
         self,
         *,
-        stations_cache: dict[str, dict[str, Any]],
+        stations_cache: dict[str, StationRecord],
         last_update: datetime | None,
         separator: str,
         csv_etag: str | None,
@@ -470,7 +469,7 @@ class CSVStationManager:
     ) -> dict[str, Any]:
         """Build a complete cache document from staged values."""
         return {
-            "stations": stations_cache,
+            "stations": {key: station.to_dict() for key, station in stations_cache.items()},
             "last_update": last_update.isoformat() if last_update else None,
             "version": CACHE_VERSION,
             "csv_separator": separator,

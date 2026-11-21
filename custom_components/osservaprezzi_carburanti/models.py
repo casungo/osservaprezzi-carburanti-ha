@@ -1,7 +1,60 @@
 """Typed payload models used by the Osservaprezzi integration."""
 from __future__ import annotations
 
-from typing import NotRequired, Required, TypedDict
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, fields
+from typing import Any, NotRequired, Required, TypedDict
+
+
+_MISSING: Any = object()
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class StationRecord(Mapping[str, Any]):
+    """Immutable station registry record."""
+
+    id: Any = _MISSING
+    operator: Any = _MISSING
+    brand: Any = _MISSING
+    station_type: Any = _MISSING
+    name: Any = _MISSING
+    address: Any = _MISSING
+    municipality: Any = _MISSING
+    province: Any = _MISSING
+    latitude: Any = _MISSING
+    longitude: Any = _MISSING
+    _extra: tuple[tuple[str, Any], ...] = ()
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> StationRecord:
+        """Create a record preserving unknown fields."""
+        names = {field.name for field in fields(cls) if field.name != "_extra"}
+        return cls(**{key: value for key, value in mapping.items() if key in names},
+                   _extra=tuple((key, value) for key, value in mapping.items() if key not in names))
+
+    def __getitem__(self, key: str) -> Any:
+        for name, value in self._items():
+            if name == key:
+                return value
+        raise KeyError(key)
+
+    def _items(self) -> Iterator[tuple[str, Any]]:
+        for field in fields(self):
+            if field.name != "_extra":
+                value = getattr(self, field.name)
+                if value is not _MISSING:
+                    yield field.name, value
+        yield from self._extra
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _ in self._items())
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self._items())
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the fields present in this record."""
+        return dict(self._items())
 
 
 class FuelPayload(TypedDict):

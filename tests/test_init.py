@@ -424,7 +424,7 @@ def test_cache_services_raise_when_no_coordinators(monkeypatch) -> None:
     manager.async_clear_cache.assert_awaited_once()
     result = asyncio.run(registered_services[services_module.SERVICE_COMPARE_STATIONS](SimpleNamespace()))
 
-    assert result == {"stations": {}}
+    assert result == {"stations": {}, "ranking": []}
     with pytest.raises(services_module.HomeAssistantError, match="No matching"):
         asyncio.run(
             registered_services[services_module.SERVICE_REFRESH_PRICES](
@@ -535,29 +535,41 @@ def test_compare_stations_service_returns_station_payload(monkeypatch) -> None:
     init_module._async_register_services(hass)
     result = asyncio.run(registered_services[services_module.SERVICE_COMPARE_STATIONS](SimpleNamespace()))
 
-    assert result == {
-        "stations": {
-            "entry_1": {
-                "station_name": "Station Display",
-                "station_id": "123",
-                "brand": "Brand",
-                "address": "Street",
-                "fuels": {
-                    "benzina_self": {
-                        "price": 1.8,
-                        "previous_price": 1.7,
-                        "price_changed_at": "2026-06-01T08:00:00+02:00",
-                        "is_self": True,
-                        "last_update": "2026-06-01T08:00:00+02:00",
-                        "price_delta": 0.1,
-                        "price_direction": "up",
-                        "price_age_minutes": 120,
-                        "price_is_stale": False,
-                    }
-                },
-            }
+    assert result["stations"] == {
+        "entry_1": {
+            "station_name": "Station Display",
+            "station_id": "123",
+            "brand": "Brand",
+            "address": "Street",
+            "fuels": {
+                "benzina_self": {
+                    "price": 1.8,
+                    "previous_price": 1.7,
+                    "price_changed_at": "2026-06-01T08:00:00+02:00",
+                    "is_self": True,
+                    "last_update": "2026-06-01T08:00:00+02:00",
+                    "price_delta": 0.1,
+                    "price_direction": "up",
+                    "price_age_minutes": 120,
+                    "price_is_stale": False,
+                }
+            },
         }
     }
+    assert result["ranking"] == [
+        {
+            "entry_id": "entry_1",
+            "station_id": "123",
+            "station_name": "Station Display",
+            "brand": "Brand",
+            "address": "Street",
+            "fuel_key": "benzina_self",
+            "fuel_name": "Benzina",
+            "is_self": True,
+            "price": 1.8,
+            "price_is_stale": False,
+        }
+    ]
 
 
 def test_refresh_prices_service_supports_all_and_station_subset(monkeypatch) -> None:

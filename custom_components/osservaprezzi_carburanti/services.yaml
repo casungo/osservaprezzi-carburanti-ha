@@ -6,10 +6,87 @@ clear_cache:
   description: Clears the cached CSV station data and re-downloads a fresh copy.
 compare_stations:
   name: Compare station prices
-  description: Returns a comparison of fuel prices across all configured stations.
+  description: Returns a comparison and sorted ranking of fuel prices across configured stations.
+  fields:
+    fuel_type:
+      name: Fuel type
+      description: Optional fuel name or key filter (case-insensitive).
+      required: false
+      selector:
+        text:
+    service_mode:
+      name: Service mode
+      description: Filter by self-service or served prices.
+      required: false
+      default: any
+      selector:
+        select:
+          options:
+            - any
+            - self
+            - served
+    exclude_stale:
+      name: Exclude stale prices
+      required: false
+      default: false
+      selector:
+        boolean:
+    only_open:
+      name: Only open stations
+      required: false
+      default: false
+      selector:
+        boolean:
+    liters:
+      name: Liters
+      description: Optional refuel volume to calculate estimated total cost and savings.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+    sort_by:
+      name: Sort by
+      required: false
+      default: price
+      selector:
+        select:
+          options:
+            - price
+            - distance
+    latitude:
+      name: Latitude
+      required: false
+      selector:
+        number:
+          min: -90
+          max: 90
+          mode: box
+    longitude:
+      name: Longitude
+      required: false
+      selector:
+        number:
+          min: -180
+          max: 180
+          mode: box
+    zone:
+      name: Zone
+      required: false
+      selector:
+        entity:
+          filter:
+            domain: zone
 refresh_prices:
   name: Refresh fuel prices
-  description: Refreshes all active stations, or only the requested station IDs.
+  description: Refreshes all active stations, or only the requested stations, devices, or entities.
+  target:
+    device:
+      integration: osservaprezzi_carburanti
+    entity:
+      integration: osservaprezzi_carburanti
   fields:
     station_ids:
       name: Station IDs

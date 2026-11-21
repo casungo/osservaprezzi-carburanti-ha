@@ -93,3 +93,152 @@ def test_search_registry_nearby_and_invalid_origins(monkeypatch) -> None:
             hass.states.get = lambda zone: SimpleNamespace(attributes={})
         with pytest.raises(services_module.HomeAssistantError):
             asyncio.run(handler(SimpleNamespace(data=data)))
+
+
+def test_compare_stations_ranking_filters_open_distance_and_liters(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from custom_components.osservaprezzi_carburanti import price_metadata as price_module
+
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(services_module.dt_util, "now", lambda: now)
+    monkeypatch.setattr(price_module.dt_util, "now", lambda: now)
+    monkeypatch.setattr(price_module.dt_util, "parse_datetime", datetime.fromisoformat)
+
+    class _FakeCoord:
+        def __init__(self, data):
+            self.data = data
+            self.config_entry = SimpleNamespace(options={"price_stale_hours": 24})
+
+    coord_open = _FakeCoord(
+        {
+            "station_info": {
+                "id": "1",
+                "name": "Near Open",
+                "brand": "Brand A",
+                "address": "Via 1",
+                "latitude": 41.90,
+                "longitude": 12.50,
+            },
+            "opening_hours": [
+                {
+                    "giornoSettimanaId": 1,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                    "oraChiusuraOrarioContinuato": "20:00",
+                }
+            ],
+            "fuels": {
+                "Benzina_self": {"price": 1.80, "is_self": True, "last_update": "2026-06-01T10:00:00+00:00"},
+                "Benzina_servito": {"price": 2.00, "is_self": False, "last_update": "2026-06-01T10:00:00+00:00"},
+                "Gasolio_self": {"price": 1.65, "is_self": True, "last_update": "2026-05-01T10:00:00+00:00"},
+                "Bad_self": {"price": None, "is_self": True},
+            },
+        }
+    )
+    coord_closed = _FakeCoord(
+        {
+            "station_info": {"id": "2", "name": "Far Closed", "brand": "Brand B", "address": "Via 2"},
+            "opening_hours": [{"giornoSettimanaId": 1, "flagChiusura": True}],
+            "fuels": {
+                "Benzina_self": {"price": 1.70, "is_self": True, "last_update": "2026-06-01T11:00:00+00:00"},
+            },
+        }
+    )
+    coord_no_hours = _FakeCoord(
+        {
+            "station_info": {"id": "3", "name": "No Hours"},
+            "opening_hours": [],
+            "fuels": {},
+        }
+    )
+
+    monkeypatch.setattr(services_module, "CarburantiDataUpdateCoordinator", _FakeCoord)
+    registry = _ServiceRegistry()
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "e1": {"coordinator": coord_open},
+                "e2": {"coordinator": coord_closed},
+                "e3": {"coordinator": coord_no_hours},
+            }
+        },
+        services=registry,
+        states=SimpleNamespace(get=lambda _z: None),
+    )
+    services_module.async_register_services(hass)
+    handler = registry.handlers[(DOMAIN, SERVICE_COMPARE_STATIONS)]
+
+    # Default ranking sorted by price + liters cost/savings
+    res = asyncio.run(handler(SimpleNamespace(data={"fuel_type": "benzina", "service_mode": "self", "liters": 50})))
+    assert [item["station_id"] for item in res["ranking"]] == ["2", "1"]
+    assert res["ranking"][0]["estimated_total_eur"] == 85.0
+    assert res["ranking"][0]["savings_eur"] == 5.0
+
+    # Served filter + only_open + exclude_stale
+    res_served = asyncio.run(
+        handler(SimpleNamespace(data={"service_mode": "served", "only_open": True, "exclude_stale": True}))
+    )
+    assert [item["fuel_key"] for item in res_served["ranking"]] == ["Benzina_servito"]
+
+    # Exclude stale removes old Gasolio_self
+    res_fresh = asyncio.run(
+        handler(SimpleNamespace(data={"service_mode": "self", "exclude_stale": True, "only_open": True}))
+    )
+    assert [item["fuel_key"] for item in res_fresh["ranking"]] == ["Benzina_self"]
+
+    # Sort by distance with origin coordinates (station without coords sorts last)
+    res_dist = asyncio.run(
+        handler(
+            SimpleNamespace(
+                data={"fuel_type": "benzina", "service_mode": "self", "sort_by": "distance", "latitude": 41.9, "longitude": 12.5}
+            )
+        )
+    )
+    assert [item["station_id"] for item in res_dist["ranking"]] == ["1", "2"]
+    assert res_dist["ranking"][0]["distance_km"] == 0.0
+    assert "distance_km" not in res_dist["ranking"][1]
+
+
+def test_refresh_prices_supports_device_and_entity_targets(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    class _RefreshCoord:
+        def __init__(self, station_id: str) -> None:
+            self.config_entry = SimpleNamespace(data={"station_id": station_id})
+            self.last_update_success = True
+            self.last_refresh_from_cache = False
+            self.async_request_manual_refresh = AsyncMock()
+
+    c1 = _RefreshCoord("101")
+    c2 = _RefreshCoord("202")
+    monkeypatch.setattr(services_module, "CarburantiDataUpdateCoordinator", _RefreshCoord)
+    monkeypatch.setattr(
+        services_module.dr,
+        "async_get",
+        lambda _hass: SimpleNamespace(
+            async_get=lambda dev_id: SimpleNamespace(config_entries={"e1"}) if dev_id == "dev1" else None
+        ),
+    )
+    monkeypatch.setattr(
+        services_module.er,
+        "async_get",
+        lambda _hass: SimpleNamespace(
+            async_get=lambda ent_id: SimpleNamespace(config_entry_id="e2") if ent_id == "sensor.s2" else None
+        ),
+    )
+
+    registry = _ServiceRegistry()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"e1": {"coordinator": c1}, "e2": {"coordinator": c2}}},
+        services=registry,
+    )
+    services_module.async_register_services(hass)
+    handler = registry.handlers[(DOMAIN, services_module.SERVICE_REFRESH_PRICES)]
+
+    result = asyncio.run(
+        handler(SimpleNamespace(data={"device_id": ["dev1", "missing_dev"], "entity_id": ["sensor.s2", "sensor.missing"]}))
+    )
+    assert set(result["refreshed_station_ids"]) == {"101", "202"}
+    c1.async_request_manual_refresh.assert_awaited_once()
+    c2.async_request_manual_refresh.assert_awaited_once()

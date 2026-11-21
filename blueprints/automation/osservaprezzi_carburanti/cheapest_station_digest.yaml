@@ -1,6 +1,6 @@
 blueprint:
   name: Cheapest station digest
-  description: Send a scheduled ranking. Requires the Phase 1 comparison ranking service contract.
+  description: Send a scheduled digest of the cheapest configured fuel stations.
   domain: automation
   input:
     notify_action:

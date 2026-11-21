@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0-beta.4] - 2026-11-21
+
+### Changed
+
+- Replace the 1-minute `ScheduleAwareEntity` polling timer with exact one-shot
+  `async_track_point_in_utc_time` scheduling at the next opening-hours transition, and exclude
+  volatile/static attributes (`minutes_until_change`, `price_age_minutes`, static station metadata)
+  from Home Assistant Recorder writes.
+- Split CSV registry cache metadata into a small sidecar JSON file so HTTP `304 Not Modified`
+  updates avoid rewriting the ~6.6 MB stations JSON (-99.8% conditional update time), and keep
+  conditional headers active on stale cache initialization.
+- Skip redundant per-station `Store` writes when the meaningful station payload (excluding
+  `last_update`) has not changed (-100% cache writes on unchanged refreshes).
+- Add a latitude/longitude bounding-box pre-filter to `find_nearby_stations` (-48.7% median nearby
+  search time).
+- Add a fast-fail single-attempt refresh path for interactive manual refreshes (refresh button and
+  `refresh_prices` service) while preserving full retry backoff for scheduled refreshes.
+- Scope the API request rate-limiter to each Home Assistant instance (`hass.data`) and release the
+  lock before awaiting HTTP I/O.
+- Migrate `OptionsFlowHandler` from deprecated `OptionsFlowWithConfigEntry` to `OptionsFlow`.
+- Enrich privacy-safe diagnostics with `last_refresh_from_cache`, `station_not_found`,
+  `data_last_update`, `stale_fuel_count`, and `next_scheduled_refresh`.
+
+### Fixed
+
+- Check `super().available` on location, opening-hours, and next-change entities, and mark fuel
+  sensors unavailable if a discontinued fuel disappears from coordinator data.
+- Cache `StationOpenClosedBinarySensor.is_on` on coordinator updates and scheduled transitions
+  instead of recomputing on every property read.
+- Remove the duplicate back-to-back `csv_manager.get_station_by_id()` lookup during station payload
+  processing, move fixed Italian holidays to a module-level `frozenset`, and prune the obsolete
+  `station_address` translation key and README entry.
+
+### Tests and validation
+
+- 566 unit tests passed (7 optional-environment skips), 100% statement and branch coverage
+  (2,239 statements, 624 branches), 18 real Home Assistant tests passed, Ruff, mypy, and Hassfest
+  passed.
+- Full Home Assistant Docker regression (`upgrade`, `fresh`, `lived`, `outage`, `recovery`) passed
+  with exit code 0.
+- Local KPI replay against `v2.6.0` passed with 0 correctness failures, 23/23 performance metrics
+  within guardrails, and 49/49 shared entity IDs preserved (`registry_conditional_update_ms`
+  515.505 ms → 0.864 ms, `station_cache_writes` 40 → 0, `nearby_search_ms` 46.151 ms → 23.660 ms).
+
 ## [2.7.0-beta.3] - 2026-11-21
 
 ### Fixed

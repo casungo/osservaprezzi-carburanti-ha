@@ -82,12 +82,23 @@ compare_stations:
 refresh_prices:
   name: Refresh fuel prices
   description: Refreshes all active stations, or only the requested stations, devices, or entities.
-  target:
-    device:
-      integration: osservaprezzi_carburanti
-    entity:
-      integration: osservaprezzi_carburanti
   fields:
+    device_id:
+      name: Stations (devices)
+      description: Optional station devices to refresh.
+      required: false
+      selector:
+        device:
+          integration: osservaprezzi_carburanti
+          multiple: true
+    entity_id:
+      name: Station entities
+      description: Optional station entities whose stations should be refreshed.
+      required: false
+      selector:
+        entity:
+          integration: osservaprezzi_carburanti
+          multiple: true
     station_ids:
       name: Station IDs
       description: Optional list of configured Osservaprezzi station IDs to refresh.

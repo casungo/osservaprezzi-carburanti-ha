@@ -2,11 +2,24 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, NotRequired, Required, TypedDict
 
 
 _MISSING: Any = object()
+_STATION_FIELD_NAMES: tuple[str, ...] = (
+    "id",
+    "operator",
+    "brand",
+    "station_type",
+    "name",
+    "address",
+    "municipality",
+    "province",
+    "latitude",
+    "longitude",
+)
+_STATION_FIELDS: frozenset[str] = frozenset(_STATION_FIELD_NAMES)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -28,22 +41,43 @@ class StationRecord(Mapping[str, Any]):
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> StationRecord:
         """Create a record preserving unknown fields."""
-        names = {field.name for field in fields(cls) if field.name != "_extra"}
-        return cls(**{key: value for key, value in mapping.items() if key in names},
-                   _extra=tuple((key, value) for key, value in mapping.items() if key not in names))
+        if mapping.keys() <= _STATION_FIELDS:
+            return cls(**mapping)
+        known: dict[str, Any] = {}
+        extra: list[tuple[str, Any]] = []
+        for key, value in mapping.items():
+            if key in _STATION_FIELDS:
+                known[key] = value
+            else:
+                extra.append((key, value))
+        return cls(**known, _extra=tuple(extra))
 
     def __getitem__(self, key: str) -> Any:
-        for name, value in self._items():
+        if key in _STATION_FIELDS:
+            value = getattr(self, key)
+            if value is not _MISSING:
+                return value
+            raise KeyError(key)
+        for name, value in self._extra:
             if name == key:
                 return value
         raise KeyError(key)
 
+    def get(self, key: str, default: Any = None) -> Any:
+        """Fast O(1) lookup for known station slots."""
+        if key in _STATION_FIELDS:
+            value = getattr(self, key)
+            return default if value is _MISSING else value
+        for name, value in self._extra:
+            if name == key:
+                return value
+        return default
+
     def _items(self) -> Iterator[tuple[str, Any]]:
-        for field in fields(self):
-            if field.name != "_extra":
-                value = getattr(self, field.name)
-                if value is not _MISSING:
-                    yield field.name, value
+        for field_name in _STATION_FIELD_NAMES:
+            value = getattr(self, field_name)
+            if value is not _MISSING:
+                yield field_name, value
         yield from self._extra
 
     def __iter__(self) -> Iterator[str]:

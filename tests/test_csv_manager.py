@@ -1207,9 +1207,15 @@ def test_station_record_mapping_round_trip():
     assert len(record) == 3
     assert record["name"] is None
     assert record["legacy"] == [1, 2]
+    assert record.get("name", "fallback") is None
+    assert record.get("brand", "fallback") == "fallback"
+    assert record.get("legacy") == [1, 2]
+    assert record.get("unknown", "fallback") == "fallback"
     assert "brand" not in record
     with pytest.raises(KeyError):
         _ = record["brand"]
+    with pytest.raises(KeyError):
+        _ = record["unknown"]
     with pytest.raises(FrozenInstanceError):
         record.name = "changed"
     assert StationRecord.from_mapping(json.loads(json.dumps(record.to_dict()))).to_dict() == source

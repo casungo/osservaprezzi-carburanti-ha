@@ -183,14 +183,14 @@ class CSVStationManager:
                     if cache_generation != self._cache_generation:
                         _LOGGER.info("Ignoring CSV 304 response after cache was cleared")
                         return False
-                    data = self._build_cache_data(
-                        stations_cache=self._stations_cache,
-                        last_update=now,
-                        separator=self._detected_separator,
-                        csv_etag=self._csv_etag,
-                        csv_last_modified=self._csv_last_modified,
-                    )
-                    if not await self._async_save_metadata(data):
+                    metadata = {
+                        "last_update": now.isoformat(),
+                        "version": CACHE_VERSION,
+                        "csv_separator": self._detected_separator,
+                        "csv_etag": self._csv_etag,
+                        "csv_last_modified": self._csv_last_modified,
+                    }
+                    if not await self._async_save_metadata(metadata):
                         _LOGGER.error("Failed to persist CSV 304 refresh metadata")
                         return False
                     self._last_update = now

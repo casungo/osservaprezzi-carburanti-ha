@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from email.utils import parsedate_to_datetime
 import logging
-from datetime import datetime, timezone, tzinfo
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from math import ceil, isfinite
 from typing import Any, cast
 
@@ -320,7 +320,9 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             else None
         )
         coordinates = self._get_station_coordinates(station_id_str, csv_station=csv_station)
-        now_iso = dt_util.now().replace(microsecond=0).isoformat()
+        now = dt_util.now().replace(microsecond=0)
+        now_iso = now.isoformat()
+        history_cutoff = (now.date() - timedelta(days=29)).isoformat()
 
         station_info: ProcessedStationInfo = {
             "id": station_id,
@@ -384,6 +386,12 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             history_by_date: dict[str, float] = {}
             for item in old_history if isinstance(old_history, list) else []:
                 if isinstance(item, dict) and isinstance(item.get("date"), str):
+                    try:
+                        recorded_date = date.fromisoformat(item["date"])
+                    except ValueError:
+                        continue
+                    if recorded_date.isoformat() != item["date"] or item["date"] < history_cutoff:
+                        continue
                     recorded_price = _finite_price(item.get("price"))
                     if recorded_price is not None:
                         history_by_date[item["date"]] = recorded_price
@@ -391,7 +399,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             if finite_price is not None:
                 history_by_date[now_iso[:10]] = finite_price
             history = [{"date": date, "price": history_by_date[date]}
-                       for date in sorted(history_by_date)[-30:]]
+                       for date in sorted(history_by_date)]
 
             processed_fuel: ProcessedFuel = {
                 "price": new_price,

@@ -781,3 +781,25 @@ def test_invalid_price_history_entries(monkeypatch):
     coordinator.data["fuels"]["Benzina_self"]["price_history"] = [None, {"date": 4, "price": 1}, {"date": "2025-03-01", "price": None}, {"date": "2025-03-02", "price": 1.7}]
     result = coordinator._process_station_data({"id": 123, "fuels": [{"name": "Benzina", "isSelf": True, "price": None}]})
     assert result["fuels"]["Benzina_self"]["price_history"] == [{"date": "2025-03-02", "price": 1.7}]
+
+
+def test_price_history_calendar_window(monkeypatch):
+    coordinator = _make_coordinator()
+    coordinator.csv_manager.get_station_by_id.return_value = None
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: datetime(2025, 3, 31, tzinfo=timezone.utc))
+    payload = {"id": 123, "fuels": [{"name": "Benzina", "isSelf": True, "price": 1.8}]}
+    coordinator.data = coordinator._process_station_data(payload)
+    coordinator.data["fuels"]["Benzina_self"]["price_history"] = [
+        {"date": "2025-03-01", "price": 1.5},
+        {"date": "2025-03-02", "price": 1.6},
+        {"date": "2025-03-15", "price": 1.7},
+        {"date": "2025-02-30", "price": 1.1},
+        {"date": "20250303", "price": 1.2},
+        {"date": "invalid", "price": 1.3},
+    ]
+    result = coordinator._process_station_data(payload)
+    assert result["fuels"]["Benzina_self"]["price_history"] == [
+        {"date": "2025-03-02", "price": 1.6},
+        {"date": "2025-03-15", "price": 1.7},
+        {"date": "2025-03-31", "price": 1.8},
+    ]

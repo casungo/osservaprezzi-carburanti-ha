@@ -13,6 +13,10 @@ from homeassistant.config_entries import SOURCE_IMPORT, ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    LocationSelector,
+    LocationSelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -176,7 +180,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             return await self._handle_station_input(user_input, "station_id")
         return self.async_show_menu(
             step_id="user",
-            menu_options=["home", "coordinates", "area", "station_id"],
+            menu_options=["home", "coordinates", "zone", "area", "station_id"],
         )
 
     async def async_step_station_id(
@@ -222,8 +226,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         if user_input is not None:
             self._search_inputs["coordinates"] = dict(user_input)
             try:
-                latitude = parse_coordinate(user_input[CONF_LATITUDE], -90, 90)
-                longitude = parse_coordinate(user_input[CONF_LONGITUDE], -180, 180)
+                location = user_input.get("location", user_input)
+                latitude = parse_coordinate(location[CONF_LATITUDE], -90, 90)
+                longitude = parse_coordinate(location[CONF_LONGITUDE], -180, 180)
                 if latitude is None or longitude is None:
                     raise ValueError("Coordinates are out of range")
                 result, error = await self._async_search_nearby(
@@ -243,17 +248,41 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             data_schema=self.add_suggested_values_to_schema(
                 self._nearby_search_schema(
                     {
-                        vol.Required(CONF_LATITUDE): self._coordinate_selector(
-                            minimum=-90,
-                            maximum=90,
-                        ),
-                        vol.Required(CONF_LONGITUDE): self._coordinate_selector(
-                            minimum=-180,
-                            maximum=180,
+                        vol.Required("location"): LocationSelector(
+                            LocationSelectorConfig(radius=False)
                         ),
                     }
                 ),
                 self._search_inputs.get("coordinates"),
+            ),
+            errors=errors,
+        )
+
+    async def async_step_zone(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Find stations near a Home Assistant zone."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._search_inputs["zone"] = dict(user_input)
+            state = self.hass.states.get(user_input.get("zone"))
+            attributes = state.attributes if state is not None else {}
+            latitude = as_coordinate(attributes.get(CONF_LATITUDE), -90, 90)
+            longitude = as_coordinate(attributes.get(CONF_LONGITUDE), -180, 180)
+            if latitude is None or longitude is None:
+                errors["base"] = "invalid_location"
+            else:
+                result, error = await self._async_search_nearby(
+                    latitude=latitude, longitude=longitude, user_input=user_input, source_step="zone"
+                )
+                if result is not None:
+                    return result
+                errors["base"] = cast(str, error)
+        return self.async_show_form(
+            step_id="zone",
+            data_schema=self.add_suggested_values_to_schema(
+                self._nearby_search_schema({
+                    vol.Required("zone"): EntitySelector(EntitySelectorConfig(domain="zone")),
+                }),
+                self._search_inputs.get("zone"),
             ),
             errors=errors,
         )
@@ -405,18 +434,6 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         }
         fields.update(self._common_search_fields())
         return vol.Schema(fields)
-
-    @staticmethod
-    def _coordinate_selector(*, minimum: float, maximum: float) -> NumberSelector:
-        """Return a bounded numeric coordinate selector."""
-        return NumberSelector(
-            NumberSelectorConfig(
-                min=minimum,
-                max=maximum,
-                step="any",
-                mode=NumberSelectorMode.BOX,
-            )
-        )
 
     def _registry_station_types(self) -> tuple[str, ...]:
         """Read station-type suggestions from the in-memory registry cache."""
@@ -616,6 +633,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         search_steps = {
             "home": self.async_step_home,
             "coordinates": self.async_step_coordinates,
+            "zone": self.async_step_zone,
             "area": self.async_step_area,
         }
         return await search_steps.get(self._search_step_id, self.async_step_home)()

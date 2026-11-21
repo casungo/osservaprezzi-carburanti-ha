@@ -239,6 +239,7 @@ def test_config_flow_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["menu_options"] == [
         "home",
         "coordinates",
+        "zone",
         "area",
         "station_id",
     ]
@@ -1367,3 +1368,15 @@ def test_options_save_schedule_without_stale_hours_attr():
     result = handler._save_schedule("0 8 * * *")
     assert result["type"] == "create_entry"
     assert result["data"][CONF_CRON_EXPRESSION] == "0 8 * * *"
+
+
+def test_zone_search_and_invalid_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    flow = _make_config_flow(monkeypatch)
+    flow.hass.states.get.return_value = None
+    assert asyncio.run(flow.async_step_zone({"zone": "zone.missing"}))["errors"] == {"base": "invalid_location"}
+    flow.hass.states.get.return_value = MagicMock(attributes= {"latitude": 41.9, "longitude": 12.5})
+    flow._async_search_nearby = AsyncMock(return_value=({"type": "form"}, None))
+    assert asyncio.run(flow.async_step_zone({"zone": "zone.home", "radius_km": 5}))["type"] == "form"
+    flow._async_search_nearby = AsyncMock(return_value=(None, "no_stations_found"))
+    assert asyncio.run(flow.async_step_zone({"zone": "zone.home", "radius_km": 5}))["errors"] == {"base": "no_stations_found"}
+    assert asyncio.run(flow.async_step_zone())["step_id"] == "zone"

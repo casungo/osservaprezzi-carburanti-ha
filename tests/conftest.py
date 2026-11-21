@@ -169,6 +169,10 @@ def _mock_ha_modules():
     sys.modules["homeassistant.config_entries"].SOURCE_IMPORT = "import"
     sys.modules["homeassistant.core"].callback = lambda f: f
     sys.modules["homeassistant.helpers.selector"].SelectOptionDict = dict
+    for name in ("LocationSelector", "EntitySelector"):
+        setattr(sys.modules["homeassistant.helpers.selector"], name, MagicMock)
+    for name in ("LocationSelectorConfig", "EntitySelectorConfig"):
+        setattr(sys.modules["homeassistant.helpers.selector"], name, dict)
     sys.modules["homeassistant.helpers.selector"].SelectSelector = MagicMock
     sys.modules["homeassistant.helpers.selector"].SelectSelectorConfig = dict
 

@@ -312,7 +312,7 @@ async def _exercise_coordinates_path(hass: HomeAssistant) -> None:
         hass,
         "coordinates",
         {
-            **ROME,
+            "location": dict(ROME),
             CONF_RADIUS_KM: 200,
             CONF_RESULT_LIMIT: 1,
         },

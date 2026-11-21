@@ -8,7 +8,8 @@
           "home": "Find stations near Home",
           "coordinates": "Find stations near coordinates",
           "area": "Search the station registry",
-          "station_id": "Enter a station ID"
+          "station_id": "Enter a station ID",
+          "zone": "Find stations near a zone"
         }
       },
       "home": {
@@ -25,12 +26,11 @@
         "title": "Find stations near coordinates",
         "description": "The coordinates are used only for this local search. They are not stored or sent to MIMIT or another provider.",
         "data": {
-          "latitude": "Latitude",
-          "longitude": "Longitude",
           "radius_km": "Search radius (km)",
           "text_filter": "Name, brand, address, or operator contains",
           "station_type": "Station type contains",
-          "result_limit": "Maximum results"
+          "result_limit": "Maximum results",
+          "location": "Location"
         }
       },
       "area": {
@@ -84,6 +84,16 @@
         "description": "{result_count} matching stations from the last available cache. Already configured: {configured_count}, excluded from selection. Select one or more. Cache updated: {registry_updated}. Only the first {result_limit} results are shown. Narrow the search to find other stations.",
         "data": {
           "station_id": "Stations"
+        }
+      },
+      "zone": {
+        "title": "Find stations near a zone",
+        "data": {
+          "zone": "Zone",
+          "radius_km": "Search radius (km)",
+          "text_filter": "Name, brand, address, or operator contains",
+          "station_type": "Station type contains",
+          "result_limit": "Maximum results"
         }
       }
     },

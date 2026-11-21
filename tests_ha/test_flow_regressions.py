@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers.selector import NumberSelector, SelectSelector
+from homeassistant.helpers.selector import LocationSelector, SelectSelector
 
 from custom_components.osservaprezzi_carburanti import config_flow
 from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
@@ -32,18 +32,10 @@ async def test_coordinate_selectors_are_bounded_real_number_selectors(
 
     assert result["type"] is FlowResultType.FORM
     fields = result["data_schema"].schema
-    latitude = next(marker for marker in fields if marker.schema == config_flow.CONF_LATITUDE)
-    longitude = next(marker for marker in fields if marker.schema == config_flow.CONF_LONGITUDE)
+    location = next(marker for marker in fields if marker.schema == "location")
     station_type = next(marker for marker in fields if marker.schema == config_flow.CONF_STATION_TYPE)
-    assert isinstance(fields[latitude], NumberSelector)
-    assert fields[latitude].config == {
-        "min": -90.0,
-        "max": 90.0,
-        "step": "any",
-        "mode": "box",
-    }
-    assert fields[longitude].config["min"] == -180.0
-    assert fields[longitude].config["max"] == 180.0
+    assert isinstance(fields[location], LocationSelector)
+    assert fields[location].config == {"radius": False}
     assert isinstance(fields[station_type], SelectSelector)
     assert fields[station_type].config["options"] == ["Stradale", "Autostradale"]
     assert fields[station_type].config["custom_value"] is True

@@ -23,6 +23,7 @@ async def test_manual_station_id_path(hass: HomeAssistant, monkeypatch) -> None:
     assert result["menu_options"] == [
         "home",
         "coordinates",
+        "zone",
         "area",
         "station_id",
     ]

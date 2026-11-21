@@ -8,7 +8,8 @@
           "home": "Trova stazioni vicino a casa",
           "coordinates": "Trova stazioni vicino a coordinate",
           "area": "Cerca nel registro delle stazioni",
-          "station_id": "Inserisci l'ID della stazione"
+          "station_id": "Inserisci l'ID della stazione",
+          "zone": "Trova stazioni vicino a una zona"
         }
       },
       "home": {
@@ -25,12 +26,11 @@
         "title": "Trova stazioni vicino a coordinate",
         "description": "Le coordinate vengono usate solo per questa ricerca locale. Non vengono salvate né inviate al MIMIT o ad altri servizi.",
         "data": {
-          "latitude": "Latitudine",
-          "longitude": "Longitudine",
           "radius_km": "Raggio di ricerca (km)",
           "text_filter": "Nome, marchio, indirizzo o gestore contiene",
           "station_type": "Tipologia impianto contiene",
-          "result_limit": "Numero massimo di risultati"
+          "result_limit": "Numero massimo di risultati",
+          "location": "Posizione"
         }
       },
       "area": {
@@ -84,6 +84,16 @@
         "description": "{result_count} stazioni corrispondenti dall'ultima cache disponibile. Già configurate: {configured_count}, escluse dalla selezione. Selezionane una o più. Cache aggiornata il {registry_updated}. Sono mostrati solo i primi {result_limit} risultati. Restringi la ricerca per trovare altre stazioni.",
         "data": {
           "station_id": "Stazioni"
+        }
+      },
+      "zone": {
+        "title": "Trova stazioni vicino a una zona",
+        "data": {
+          "zone": "Zona",
+          "radius_km": "Raggio di ricerca (km)",
+          "text_filter": "Nome, marchio, indirizzo o gestore contiene",
+          "station_type": "Tipologia impianto contiene",
+          "result_limit": "Numero massimo di risultati"
         }
       }
     },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 DOMAIN = "osservaprezzi_carburanti"
+EVENT_PRICE_CHANGED = "osservaprezzi_carburanti_price_changed"
 
 # Station config
 CONF_STATION_ID = "station_id"

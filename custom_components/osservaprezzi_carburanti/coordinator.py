@@ -19,6 +19,7 @@ from .api import fetch_station_data
 from .const import (
     CONF_STATION_ID,
     DOMAIN,
+    EVENT_PRICE_CHANGED,
 )
 from .csv_manager import CSVStationManager
 from .data_helpers import parse_coordinate
@@ -361,6 +362,22 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             else:
                 previous_price = existing_fuel.get("price") if existing_fuel else None
                 price_changed_at = now_iso if previous_price is not None else None
+                bus = getattr(self.hass, "bus", None)
+                if previous_price is not None and new_price is not None and bus is not None:
+                    bus.async_fire(
+                        EVENT_PRICE_CHANGED,
+                        {
+                            "station_id": str(station_id),
+                            "station_name": data.get("name") or data.get("nomeImpianto"),
+                            "fuel": fuel_name,
+                            "fuel_key": fuel_key,
+                            "is_self": bool(fuel.get("isSelf")),
+                            "old_price": previous_price,
+                            "new_price": new_price,
+                            "delta": round(new_price - previous_price, 4),
+                            "direction": "up" if new_price > previous_price else "down",
+                        },
+                    )
 
             processed_fuel: ProcessedFuel = {
                 "price": new_price,

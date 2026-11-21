@@ -229,6 +229,34 @@ class TestStationProcessing:
             "price_changed_at": "2025-03-04T12:00:00+00:00",
         }
 
+    def test_price_changed_event(self) -> None:
+        coordinator = _make_coordinator()
+        coordinator.csv_manager.get_station_by_id.return_value = None
+        bus = coordinator.hass.bus
+        bus.async_fire.reset_mock()
+
+        def update(price: float) -> None:
+            coordinator.data = coordinator._process_station_data({
+                "id": 123, "name": "Station", "fuels": [
+                    {"name": "Benzina", "isSelf": True, "price": price}
+                ],
+            })
+
+        update(1.7)
+        update(1.7)
+        bus.async_fire.assert_not_called()
+        update(1.8)
+        bus.async_fire.assert_called_once_with(
+            coordinator_module.EVENT_PRICE_CHANGED,
+            {"station_id": "123", "station_name": "Station", "fuel": "Benzina",
+             "fuel_key": "Benzina_self", "is_self": True, "old_price": 1.7,
+             "new_price": 1.8, "delta": 0.1, "direction": "up"},
+        )
+        bus.async_fire.reset_mock()
+        update(1.6)
+        assert bus.async_fire.call_args.args[1]["direction"] == "down"
+        assert bus.async_fire.call_args.args[1]["delta"] == -0.2
+
     def test_process_station_data_enriches_station_and_fuels(self) -> None:
         coordinator = _make_coordinator()
         coordinator.csv_manager.get_station_by_id.return_value = {

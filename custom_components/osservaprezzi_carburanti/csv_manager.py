@@ -22,7 +22,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CSV_UPDATE_INTERVAL, CSV_URL, DEFAULT_HEADERS, DOMAIN
 from .data_helpers import parse_coordinate
-from .models import StationRecord
+from .models import _MISSING, StationRecord
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -275,28 +275,29 @@ class CSVStationManager:
         self,
         values: list[str],
         col_indices: dict[str, int],
-    ) -> tuple[str, dict[str, Any]] | None:
+    ) -> tuple[str, StationRecord] | None:
         """Parse CSV station fields into the station cache structure."""
         if not values:
             return None
 
-        station_data: dict[str, Any] = {}
-        for internal_col, idx in col_indices.items():
+        def field(name: str) -> Any:
+            idx = col_indices[name]
             if idx < 0 or idx >= len(values):
-                continue
+                return _MISSING
+            return values[idx].strip() or None
 
-            value = values[idx].strip()
-            if internal_col in ("latitude", "longitude"):
-                minimum, maximum = (-90, 90) if internal_col == "latitude" else (-180, 180)
-                station_data[internal_col] = parse_coordinate(value, minimum, maximum)
-            else:
-                station_data[internal_col] = value or None
-
-        station_id = station_data.get("id")
-        latitude = station_data.get("latitude")
-        longitude = station_data.get("longitude")
-        if station_id and latitude is not None and longitude is not None:
-            return station_id, station_data
+        station_id = field("id")
+        latitude_value = field("latitude")
+        longitude_value = field("longitude")
+        latitude = parse_coordinate(latitude_value or "", -90, 90) if latitude_value is not _MISSING else None
+        longitude = parse_coordinate(longitude_value or "", -180, 180) if longitude_value is not _MISSING else None
+        if station_id is not _MISSING and station_id and latitude is not None and longitude is not None:
+            return station_id, StationRecord(
+                id=station_id, operator=field("operator"), brand=field("brand"),
+                station_type=field("station_type"), name=field("name"),
+                address=field("address"), municipality=field("municipality"),
+                province=field("province"), latitude=latitude, longitude=longitude,
+            )
         return None
 
     def _parse_csv_content_to_cache(
@@ -329,7 +330,7 @@ class CSVStationManager:
                 if parsed_station is None:
                     continue
                 station_id, station_data = parsed_station
-                stations_cache[station_id] = StationRecord.from_mapping(station_data)
+                stations_cache[station_id] = station_data
             except (IndexError, TypeError, ValueError) as err:
                 _LOGGER.warning("Error parsing CSV line %d: %s", line_num, err)
 

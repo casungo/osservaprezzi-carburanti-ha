@@ -231,7 +231,7 @@ async def test_options_presets_and_custom_cron(hass) -> None:
     assert schedule_marker.default() == "custom"
     assert fields[schedule_marker].config["translation_key"] == "refresh_schedule"
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"refresh_schedule": "custom", CONF_PRICE_STALE_HOURS: 72}
+        result["flow_id"], {"refresh_schedule": "custom", CONF_PRICE_STALE_HOURS: "72"}
     )
     assert result["step_id"] == "custom"
     assert next(iter(result["data_schema"].schema)).default() == "17 9 * * 2"
@@ -244,7 +244,7 @@ async def test_options_presets_and_custom_cron(hass) -> None:
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"refresh_schedule": "every_six_hours", CONF_PRICE_STALE_HOURS: 24}
+        result["flow_id"], {"refresh_schedule": "every_six_hours", CONF_PRICE_STALE_HOURS: "24"}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {CONF_CRON_EXPRESSION: "0 */6 * * *", CONF_PRICE_STALE_HOURS: 24}

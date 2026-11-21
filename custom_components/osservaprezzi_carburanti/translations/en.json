@@ -294,6 +294,16 @@
         "weekdays": "Weekdays at 08:00",
         "custom": "Custom"
       }
+    },
+    "price_stale_hours": {
+      "options": {
+        "6": "6 hours",
+        "12": "12 hours",
+        "24": "24 hours",
+        "48": "48 hours",
+        "72": "72 hours",
+        "168": "168 hours"
+      }
     }
   },
   "exceptions": {

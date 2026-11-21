@@ -294,6 +294,16 @@
         "weekdays": "Giorni feriali alle 08:00",
         "custom": "Personalizzata"
       }
+    },
+    "price_stale_hours": {
+      "options": {
+        "6": "6 ore",
+        "12": "12 ore",
+        "24": "24 ore",
+        "48": "48 ore",
+        "72": "72 ore",
+        "168": "168 ore"
+      }
     }
   },
   "exceptions": {

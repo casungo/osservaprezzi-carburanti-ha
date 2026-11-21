@@ -1320,6 +1320,7 @@ def test_single_selected_station_validation_error(monkeypatch, exception, error)
     monkeypatch.setattr("custom_components.osservaprezzi_carburanti.config_flow._validate_station", AsyncMock(side_effect=exception))
     result = asyncio.run(flow.async_step_select_station({CONF_STATION_ID: ["123"]}))
     assert result["errors"] == {"base": error}
+    assert bool(flow._nearby_candidates) is not isinstance(exception, InvalidStation)
 
 
 @pytest.mark.parametrize("step", ["station_id", "reconfigure", "select_station"])

@@ -532,6 +532,16 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                                 errors["base"] = "rate_limited"
                             else:
                                 errors["base"] = "cannot_connect"
+                            if isinstance(err, InvalidStation):
+                                self._nearby_candidates = tuple(
+                                    candidate for candidate in candidates
+                                    if candidate.station_id != station_id
+                                )
+                                available_candidates = tuple(
+                                    candidate for candidate in available_candidates
+                                    if candidate.station_id != station_id
+                                )
+                                available_ids.discard(station_id)
                             _LOGGER.warning(
                                 "Unable to validate selected station %s: %s", station_id, err
                             )
@@ -558,6 +568,11 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             except (TypeError, ValueError) as err:
                 _LOGGER.exception("Unexpected nearby station selection error: %s", err)
                 errors["base"] = "unknown"
+
+        if not available_candidates:
+            result = await self._async_return_to_search_step()
+            result["errors"] = errors
+            return result
 
         options = [
             SelectOptionDict(
@@ -786,8 +801,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Required(
                     CONF_PRICE_STALE_HOURS,
-                    default=self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
-                ): vol.In(PRICE_STALE_HOUR_OPTIONS),
+                    default=str(self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS)),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[str(hours) for hours in PRICE_STALE_HOUR_OPTIONS],
+                    translation_key="price_stale_hours",
+                )),
             }
         )
         return self.async_show_form(

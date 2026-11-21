@@ -304,3 +304,50 @@ def test_open_closed_sensor_caches_state_reschedules_and_checks_coordinator_avai
     # Failed coordinator marks entity unavailable even with valid schedule.
     coordinator.last_update_success = False
     assert sensor.available is False
+
+
+def test_open_closed_extra_state_attributes_and_service_disabled_default(monkeypatch):
+    monkeypatch.setattr(binary_sensor_module.dt_util, "now", lambda: datetime(2026, 6, 1, 12, 0))
+    coordinator = SimpleNamespace(data={"opening_hours": []}, hass="hass", last_update_success=True)
+    entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+    sensor = StationOpenClosedBinarySensor(coordinator, entry)
+
+    assert StationServiceBinarySensor._attr_entity_registry_enabled_default is False
+    assert sensor.extra_state_attributes == {
+        "self_service_available": None,
+        "served_available": None,
+        "today_schedule": None,
+    }
+
+    coordinator.data["opening_hours"] = [
+        {"giornoSettimanaId": 1, "flagChiusura": True, "flagSelf": True, "flagServito": False}
+    ]
+    assert sensor.extra_state_attributes == {
+        "self_service_available": True,
+        "served_available": False,
+        "today_schedule": "Closed",
+    }
+
+    coordinator.data["opening_hours"] = [{"giornoSettimanaId": 1, "flagH24": True}]
+    assert sensor.extra_state_attributes == {
+        "self_service_available": None,
+        "served_available": None,
+        "today_schedule": "24/7",
+    }
+
+    coordinator.data["opening_hours"] = [
+        {
+            "giornoSettimanaId": 1,
+            "oraAperturaMattina": "08:00",
+            "oraChiusuraMattina": "12:00",
+            "oraAperturaPomeriggio": "15:00",
+            "oraChiusuraPomeriggio": "19:00",
+            "flagSelf": True,
+            "flagServito": True,
+        }
+    ]
+    assert sensor.extra_state_attributes == {
+        "self_service_available": True,
+        "served_available": True,
+        "today_schedule": "08:00-12:00, 15:00-19:00",
+    }

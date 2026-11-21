@@ -116,6 +116,27 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
         return self._open
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return today's schedule and service availability."""
+        now = dt_util.now()
+        rows = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
+        schedule = _find_schedule_for_day(rows, now.isoweekday(), now.date())
+        result: dict[str, Any] = {"self_service_available": None, "served_available": None, "today_schedule": None}
+        if schedule is None:
+            return result
+        for key, field in (("self_service_available", "flagSelf"), ("served_available", "flagServito")):
+            if schedule.get(field) is not None:
+                result[key] = bool(schedule[field])
+        if schedule.get("flagChiusura"):
+            result["today_schedule"] = "Closed"
+        elif schedule.get("flagH24"):
+            result["today_schedule"] = "24/7"
+        else:
+            intervals = _schedule_intervals_for_date(schedule, now.date(), now.tzinfo)
+            result["today_schedule"] = ", ".join(f"{start:%H:%M}-{end:%H:%M}" for start, end in intervals) or None
+        return result
+
+    @property
     def available(self) -> bool:
         """Return True if schedule data is available."""
         return bool(super().available and _has_valid_opening_hours(self.coordinator.data))
@@ -124,6 +145,7 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
 class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
     """Representation of a binary sensor for a specific station service."""
 
+    _attr_entity_registry_enabled_default = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
 

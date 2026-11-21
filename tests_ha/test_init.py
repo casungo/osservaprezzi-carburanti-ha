@@ -303,7 +303,9 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     service_entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, f"{STATION_ID}_service_1")
     assert price_entity_id is not None and hass.states.get(price_entity_id).state == "1.798"
     assert open_entity_id is not None and hass.states.get(open_entity_id).state == "on"
-    assert service_entity_id is not None and hass.states.get(service_entity_id).state == "on"
+    assert service_entity_id is not None
+    service_entry = registry.async_get(service_entity_id)
+    assert service_entry is not None and service_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
 
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     refreshed_data = deepcopy(coordinator.data)
@@ -321,7 +323,9 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     wifi_entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, f"{STATION_ID}_service_8")
     assert gasolio_entity_id is not None and hass.states.get(gasolio_entity_id).state == "1.689"
     assert phone_entity_id is not None
-    assert wifi_entity_id is not None and hass.states.get(wifi_entity_id).state == "on"
+    assert wifi_entity_id is not None
+    wifi_entry = registry.async_get(wifi_entity_id)
+    assert wifi_entry is not None and wifi_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
     dynamic_entity_ids = {gasolio_entity_id, phone_entity_id, wifi_entity_id}
 
     coordinator.async_set_updated_data(refreshed_data)
@@ -426,13 +430,18 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert not hass.services.has_service(DOMAIN, SERVICE_COMPARE_STATIONS)
     assert not hass.services.has_service(DOMAIN, SERVICE_REFRESH_PRICES)
     assert not hass.services.has_service(DOMAIN, SERVICE_SEARCH_REGISTRY)
+    enabled_entity_ids_after_reload = {
+        entity_id
+        for entity_id in entity_ids_after_reload
+        if (entry_obj := registry.async_get(entity_id)) is not None and entry_obj.disabled_by is None
+    }
     unloaded_states = {
         entity_id: hass.states.get(entity_id).state
-        for entity_id in entity_ids_after_reload
+        for entity_id in enabled_entity_ids_after_reload
         if hass.states.get(entity_id) is not None
     }
     assert unloaded_states == {
-        entity_id: "unavailable" for entity_id in entity_ids_after_reload
+        entity_id: "unavailable" for entity_id in enabled_entity_ids_after_reload
     }
     assert fetch_station_data.await_count >= 3
 

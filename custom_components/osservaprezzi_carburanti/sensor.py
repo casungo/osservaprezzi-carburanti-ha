@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections.abc import Callable
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription, SensorStateClass
@@ -8,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
@@ -130,6 +132,7 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
     ) -> None:
         """Initialize the station fuel sensor."""
         super().__init__(coordinator, entry)
+        self._stale_listener: Callable[[], None] | None = None
         self._fuel_key = fuel_key
 
         self._fuel_name, self._service_type = fuel_key.rsplit("_", 1)
@@ -139,6 +142,45 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
         self._attr_unique_id = f"{self._station_id}_{fuel_key}"
         self._attr_icon = _get_fuel_icon(self._fuel_name)
         self._attr_suggested_display_precision = 3
+
+    def _stale_at(self) -> datetime | None:
+        """Return the staleness deadline for the current price."""
+        fuel = (self.coordinator.data or {}).get("fuels", {}).get(self._fuel_key, {})
+        value = fuel.get("last_update")
+        parsed = dt_util.parse_datetime(value) if isinstance(value, str) else None
+        if not isinstance(parsed, datetime) or parsed.tzinfo is None:
+            return None
+        hours = int(getattr(self._entry, "options", {}).get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS))
+        return parsed + timedelta(hours=hours)
+
+    @callback
+    def _schedule_stale(self) -> None:
+        if self._stale_listener:
+            self._stale_listener()
+            self._stale_listener = None
+        deadline = self._stale_at()
+        if deadline is not None and deadline > dt_util.utcnow():
+            self._stale_listener = async_track_point_in_utc_time(self.hass, self._stale_tick, dt_util.as_utc(deadline))
+
+    @callback
+    def _stale_tick(self, now: datetime) -> None:
+        self._stale_listener = None
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._schedule_stale()
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._stale_listener:
+            self._stale_listener()
+            self._stale_listener = None
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._schedule_stale()
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> StateType:
@@ -191,6 +233,8 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
 
 class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):
     """Representation of a sensor for station information."""
+
+    _attr_entity_registry_enabled_default = False
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True

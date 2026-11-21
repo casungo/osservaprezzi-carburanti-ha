@@ -980,3 +980,60 @@ def test_fuel_sensor_availability_and_unrecorded_attributes():
     coordinator.data["fuels"]["gasolio_self"] = {"price": 1.85}
     coordinator.last_update_success = False
     assert sensor.available is False
+
+
+def test_fuel_sensor_stale_timer_lifecycle_and_info_disabled_default(monkeypatch):
+    scheduled = []
+    unsubs = []
+    writes = []
+
+    def fake_track_point(hass, cb, point):
+        scheduled.append((cb, point))
+        return lambda: unsubs.append(point)
+
+    monkeypatch.setattr(sensor_module, "async_track_point_in_utc_time", fake_track_point)
+    monkeypatch.setattr(
+        sensor_module.dt_util,
+        "parse_datetime",
+        lambda val: datetime.fromisoformat(val) if isinstance(val, str) else None,
+    )
+    monkeypatch.setattr(sensor_module.dt_util, "as_utc", lambda dt: dt.astimezone(timezone.utc))
+    now_utc = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sensor_module.dt_util, "utcnow", lambda: now_utc)
+
+    coordinator = SimpleNamespace(data=_sample_station_data(), hass="hass", last_update_success=True)
+    entry = SimpleNamespace(data={CONF_STATION_ID: "12345"}, options={"price_stale_hours": 24})
+    sensor = OsservaprezziStationSensor(coordinator, entry, "gasolio_self")
+    sensor.async_write_ha_state = lambda: writes.append("written")
+
+    assert StationInfoSensor._attr_entity_registry_enabled_default is False
+
+    # Add arms a one-shot timer at last_update + 24h.
+    asyncio.run(sensor.async_added_to_hass())
+    assert len(scheduled) == 1
+    assert scheduled[0][1] == datetime(2026, 6, 2, 6, 0, tzinfo=timezone.utc)
+
+    # Coordinator update cancels previous timer and schedules a fresh one.
+    sensor._handle_coordinator_update()
+    assert len(unsubs) == 1
+    assert len(scheduled) == 2
+
+    # Firing the timer clears the listener and writes HA state.
+    sensor._stale_tick(scheduled[1][1])
+    assert sensor._stale_listener is None
+    assert writes == ["written"]
+
+    # Removing with no active listener is safe; removing with an active listener unsubscribes it.
+    asyncio.run(sensor.async_will_remove_from_hass())
+    sensor._schedule_stale()
+    assert sensor._stale_listener is not None
+    asyncio.run(sensor.async_will_remove_from_hass())
+    assert sensor._stale_listener is None
+    assert len(unsubs) == 2
+
+    # Already-stale or missing last_update does not schedule a timer.
+    now_utc = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    sensor._schedule_stale()
+    assert sensor._stale_listener is None
+    coordinator.data["fuels"]["gasolio_self"]["last_update"] = None
+    assert sensor._stale_at() is None

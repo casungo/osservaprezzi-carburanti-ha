@@ -38,6 +38,9 @@ class FakeCSVManager:
         self.initialize_result = initialize_result
         self.clear_result = clear_result
 
+    def registry_status(self):
+        return {"last_update": None}
+
     async def async_clear_cache(self) -> bool:
         """Track cache clear calls."""
         self.clear_calls += 1
@@ -817,9 +820,15 @@ def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
     registry_callback = track_registry.call_args.args[1]
     asyncio.run(registry_callback(datetime(2026, 1, 1)))
     shared_manager.async_periodic_update.assert_awaited_once()
+    init_module.issue_registry.async_create_issue.assert_called()
+    monkeypatch.setattr(shared_manager, "registry_status", lambda: {"last_update": "recent"})
+    monkeypatch.setattr(init_module.dt_util, "parse_datetime", lambda value: datetime(2026, 1, 1))
+    monkeypatch.setattr(init_module.dt_util, "now", lambda: datetime(2026, 1, 2))
+    asyncio.run(registry_callback(datetime(2026, 1, 1)))
     shared_manager.async_periodic_update.return_value = True
     asyncio.run(registry_callback(datetime(2026, 1, 2)))
-    assert shared_manager.async_periodic_update.await_count == 2
+    assert shared_manager.async_periodic_update.await_count == 3
+    init_module.issue_registry.async_delete_issue.assert_called_with(hass, init_module.DOMAIN, "csv_registry_stale")
 
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
     assert asyncio.run(init_module.async_unload_entry(hass, second)) is True

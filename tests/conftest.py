@@ -102,6 +102,7 @@ def _mock_ha_modules():
         "homeassistant",
         "homeassistant.components",
         "homeassistant.components.diagnostics",
+        "homeassistant.components.repairs",
         "homeassistant.components.sensor",
         "homeassistant.components.button",
         "homeassistant.components.binary_sensor",
@@ -131,6 +132,7 @@ def _mock_ha_modules():
         if mod_name not in sys.modules:
             sys.modules[mod_name] = MagicMock()
 
+    sys.modules["homeassistant.components.repairs"].RepairsFlow = _MockConfigFlow
     sys.modules["homeassistant.components.button"].ButtonEntity = _MockEntity
     sys.modules["homeassistant.components.sensor"].SensorEntityDescription = _MockSensorEntityDescription
     sys.modules["homeassistant.components.sensor"].SensorEntity = _MockSensorEntity
@@ -147,7 +149,7 @@ def _mock_ha_modules():
     sys.modules["homeassistant.helpers.update_coordinator"].CoordinatorEntity = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = _MockCoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = _SentinelUpdateFailed
-    sys.modules["homeassistant.helpers.issue_registry"].IssueSeverity = MagicMock(ERROR="error")
+    sys.modules["homeassistant.helpers.issue_registry"].IssueSeverity = MagicMock(ERROR="error", WARNING="warning")
     store_cls = MagicMock()
     store_cls.return_value.async_remove = AsyncMock()
     sys.modules["homeassistant.helpers.storage"].Store = store_cls

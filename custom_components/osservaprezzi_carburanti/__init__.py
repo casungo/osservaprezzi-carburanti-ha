@@ -100,7 +100,8 @@ def _async_create_station_not_found_issue(hass: HomeAssistant, entry: ConfigEntr
         hass,
         DOMAIN,
         _station_not_found_issue_id(entry),
-        is_fixable=False,
+        is_fixable=True,
+        data={"entry_id": entry.entry_id},
         is_persistent=True,
         severity=issue_registry.IssueSeverity.ERROR,
         translation_key=STATION_NOT_FOUND_ISSUE,
@@ -236,6 +237,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info("Performing periodic CSV data update at %s", now)
             if not await csv_manager.async_periodic_update():
                 _LOGGER.warning("Periodic CSV update failed")
+                last_update = csv_manager.registry_status().get("last_update")
+                updated = dt_util.parse_datetime(last_update) if last_update else None
+                if updated is None or dt_util.now() - updated > timedelta(days=7):
+                    issue_registry.async_create_issue(
+                        hass, DOMAIN, "csv_registry_stale", is_fixable=False,
+                        severity=issue_registry.IssueSeverity.WARNING,
+                        translation_key="csv_registry_stale",
+                    )
+            else:
+                issue_registry.async_delete_issue(hass, DOMAIN, "csv_registry_stale")
 
         domain_data[_CSV_UPDATE_LISTENER] = async_track_time_interval(
             hass,

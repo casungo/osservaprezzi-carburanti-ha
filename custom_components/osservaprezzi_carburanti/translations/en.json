@@ -143,7 +143,39 @@
   "issues": {
     "station_not_found": {
       "title": "Station not found",
-      "description": "MIMIT could not find station {station} (ID {station_id}). Open Settings > Devices & services > Osservaprezzi Carburanti and choose Reconfigure from the station menu to enter a valid ID."
+      "description": "MIMIT could not find station {station} (ID {station_id}). Open Settings > Devices & services > Osservaprezzi Carburanti and choose Reconfigure from the station menu to enter a valid ID.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Station not found",
+            "description": "Choose how to resolve this issue.",
+            "menu_options": {
+              "replace_station": "Replace station",
+              "remove_station": "Remove station"
+            }
+          },
+          "replace_station": {
+            "title": "Replace station",
+            "data": {
+              "station_id": "Station ID"
+            }
+          },
+          "remove_station": {
+            "title": "Remove station",
+            "description": "Confirm removal of the station."
+          }
+        },
+        "error": {
+          "invalid_station": "Invalid station.",
+          "already_configured": "Station already configured.",
+          "rate_limited": "Too many requests. Try again later.",
+          "cannot_connect": "Unable to connect."
+        }
+      }
+    },
+    "csv_registry_stale": {
+      "title": "Station registry is outdated",
+      "description": "The station registry could not be updated and is more than seven days old."
     }
   },
   "entity": {

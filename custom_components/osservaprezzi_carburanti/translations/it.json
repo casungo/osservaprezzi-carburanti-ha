@@ -143,7 +143,39 @@
   "issues": {
     "station_not_found": {
       "title": "Stazione non trovata",
-      "description": "La stazione {station} (ID {station_id}) non è stata trovata dal MIMIT. Apri Impostazioni > Dispositivi e servizi > Osservaprezzi Carburanti e scegli Riconfigura nel menu della stazione per inserire un ID valido."
+      "description": "La stazione {station} (ID {station_id}) non è stata trovata dal MIMIT. Apri Impostazioni > Dispositivi e servizi > Osservaprezzi Carburanti e scegli Riconfigura nel menu della stazione per inserire un ID valido.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Stazione non trovata",
+            "description": "Scegli come risolvere il problema.",
+            "menu_options": {
+              "replace_station": "Sostituisci stazione",
+              "remove_station": "Rimuovi stazione"
+            }
+          },
+          "replace_station": {
+            "title": "Sostituisci stazione",
+            "data": {
+              "station_id": "ID stazione"
+            }
+          },
+          "remove_station": {
+            "title": "Rimuovi stazione",
+            "description": "Conferma la rimozione della stazione."
+          }
+        },
+        "error": {
+          "invalid_station": "Stazione non valida.",
+          "already_configured": "Stazione già configurata.",
+          "rate_limited": "Troppe richieste. Riprova più tardi.",
+          "cannot_connect": "Connessione non riuscita."
+        }
+      }
+    },
+    "csv_registry_stale": {
+      "title": "Registro stazioni non aggiornato",
+      "description": "Impossibile aggiornare il registro delle stazioni da oltre sette giorni."
     }
   },
   "entity": {

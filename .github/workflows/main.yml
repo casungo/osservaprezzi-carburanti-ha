@@ -94,7 +94,7 @@ jobs:
       - name: Run codespell
         run: |
           python -m pip install codespell
-          codespell --skip="./.git,./.venv,./.venv-ha,./artifacts,./tests/unit/fixtures,./README.it.md,./custom_components/osservaprezzi_carburanti/translations/it.json"
+          codespell
 
       - name: Run actionlint
         run: |

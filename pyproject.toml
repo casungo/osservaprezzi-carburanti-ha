@@ -76,3 +76,7 @@ source = ["custom_components/osservaprezzi_carburanti"]
 [tool.coverage.report]
 fail_under = 100
 show_missing = true
+
+[tool.codespell]
+skip = "./.git,./.venv,./.venv-ha,./artifacts,./tests/unit/fixtures,./README.it.md,./custom_components/osservaprezzi_carburanti/translations/it.json"
+ignore-words-list = "hass,nome"

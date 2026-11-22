@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0-beta.4] - 2026-11-22
+
+### Changed
+
+- **Minimum Home Assistant version (`2026.3.0+` / Python 3.14):** Declared `"homeassistant": "2026.3.0"`
+  in `hacs.json` and standardized the integration, tests, and CI workflows on Python 3.14.
+- **Typed `entry.runtime_data`:** Migrated per-entry runtime state from `hass.data[DOMAIN][entry_id]`
+  to typed `entry.runtime_data` (`OsservaprezziRuntimeData` / `OsservaprezziConfigEntry`) while
+  preserving existing setup, rollback, reload, service, and unload behavior.
+- **Translations & Blueprints:** Added 15 missing service field translations across `strings.json`,
+  `translations/en.json`, and `translations/it.json`, removed stale wording from
+  `fuel_price_drop_alert.yaml`, and rewrote `README.md` / `README.it.md` with 1:1 parity.
+- **Tooling & CI:** Hardened strict mypy against real Home Assistant types, expanded Ruff lint
+  checks, unified tests under `tests/unit/` and `tests/ha/` with architecture, translation-parity,
+  and blueprint contract tests, added automated `release.yml` and `security.yml` workflows, and
+  optimized CI execution (~5x faster PR runs).
+
+### Tests and validation
+
+- 594 unit tests passed (7 optional-environment skips), 100% statement and branch coverage, 21 real
+  Home Assistant tests passed, Ruff, mypy, codespell, actionlint, Hassfest, and HACS validation
+  passed.
+- Full Home Assistant Docker regression (`upgrade`, `fresh`, `lived`, `outage`, `recovery`) and
+  release KPI guardrails passed with 0 correctness failures.
+
 ## [2.8.0-beta.3] - 2026-11-21
 
 ### Fixed

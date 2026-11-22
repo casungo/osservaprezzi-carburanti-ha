@@ -1029,12 +1029,10 @@ class TestCSVParsing:
 
             class FakeResponse:
                 status = 200
-
-                def __init__(self) -> None:
-                    self.headers = {
-                        "ETag": '"abc123"',
-                        "Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT",
-                    }
+                headers = {  # noqa: RUF012
+                    "ETag": '"abc123"',
+                    "Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+                }
 
                 async def __aenter__(self):
                     return self

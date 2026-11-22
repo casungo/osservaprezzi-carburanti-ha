@@ -13,8 +13,7 @@ from custom_components.osservaprezzi_carburanti.binary_sensor import (
     StationServiceBinarySensor,
     async_setup_entry,
 )
-from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID
-from custom_components.osservaprezzi_carburanti.runtime import OsservaprezziRuntimeData
+from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
 
 
 def _sample_station_data():
@@ -52,11 +51,15 @@ class TestBinarySensorSetup:
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
-        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-        hass = SimpleNamespace(data={})
+        coordinator.config_entry = entry
+        entry.runtime_data = SimpleNamespace(
+            stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         added_entities = []
 
-        def _add_entities(entities, update_before_add=False):
+        def _add_entities(entities, update_before_add=False, *, config_subentry_id=None):
+            assert config_subentry_id == "subentry"
             added_entities.extend(entities)
             assert update_before_add is False
 
@@ -86,14 +89,17 @@ class TestBinarySensorSetup:
             data={CONF_STATION_ID: "12345"},
             async_on_unload=unload_callbacks.append,
         )
-        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-        hass = SimpleNamespace(data={})
+        coordinator.config_entry = entry
+        entry.runtime_data = SimpleNamespace(
+            stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         batches = []
         asyncio.run(
             async_setup_entry(
                 hass,
                 entry,
-                lambda entities, update_before_add=False: batches.append(list(entities)),
+                lambda entities, update_before_add=False, **kwargs: batches.append(list(entities)),
             )
         )
         assert batches == []
@@ -289,9 +295,7 @@ class TestServiceBinarySensor:
         assert entity.extra_state_attributes == {
             "service_id": "99",
             "service_name": "Custom",
-            "service_description": "Desc",
             "service_icon": "mdi:star",
-            "service_image_url": "https://example.test",
         }
 
 

@@ -14,7 +14,6 @@ from custom_components.osservaprezzi_carburanti.button import (
     async_setup_entry,
 )
 from custom_components.osservaprezzi_carburanti.const import DOMAIN
-from custom_components.osservaprezzi_carburanti.runtime import OsservaprezziRuntimeData
 
 
 def test_button_setup_and_press_refreshes_only_its_coordinator() -> None:
@@ -22,8 +21,9 @@ def test_button_setup_and_press_refreshes_only_its_coordinator() -> None:
     coordinator = MagicMock(data=None, last_update_success=True, last_refresh_from_cache=False)
     coordinator.async_request_manual_refresh = AsyncMock()
     entry = MagicMock(entry_id="entry", data={"station_id": "123"})
-    entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-    hass = MagicMock(data={})
+    coordinator.config_entry = entry
+    entry.runtime_data.stations = {"subentry": MagicMock(coordinator=coordinator)}
+    hass = MagicMock(data={DOMAIN: {"entry": {"coordinator": coordinator}}})
     add_entities = MagicMock()
 
     asyncio.run(async_setup_entry(hass, entry, add_entities))

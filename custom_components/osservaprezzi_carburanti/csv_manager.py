@@ -243,7 +243,7 @@ class CSVStationManager:
             _LOGGER.info("Successfully updated CSV station data")
             return True
 
-        except (aiohttp.ClientError, TimeoutError, OSError, UnicodeDecodeError) as err:
+        except (TimeoutError, aiohttp.ClientError, OSError, UnicodeDecodeError) as err:
             _LOGGER.error("Error updating CSV data: %s", str(err) or type(err).__name__)
             return False
 

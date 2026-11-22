@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER
+from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.selector import LocationSelector, SelectSelector
 
 from custom_components.osservaprezzi_carburanti import config_flow
 from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
+from tests.ha.test_hub import hub
 
 
 async def test_coordinate_selectors_are_bounded_real_number_selectors(
@@ -49,40 +50,25 @@ async def test_reconfigure_duplicate_is_rejected_before_station_api(
     monkeypatch,
 ) -> None:
     """Do not call MIMIT when the requested unique ID already exists."""
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Current",
-        unique_id="station_123",
-        data={CONF_STATION_ID: "123"},
-    )
-    duplicate = MockConfigEntry(
-        domain=DOMAIN,
-        title="Other",
-        unique_id="station_456",
-        data={CONF_STATION_ID: "456"},
-    )
+    entry = hub("123", "456")
     entry.add_to_hass(hass)
-    duplicate.add_to_hass(hass)
+    subentry = next(s for s in entry.subentries.values() if s.unique_id == "123")
     validate_station = AsyncMock(return_value={"name": "Should not be used"})
     monkeypatch.setattr(config_flow, "_validate_station", validate_station)
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": SOURCE_RECONFIGURE,
-            "entry_id": entry.entry_id,
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "station"),
+        context={"source": "reconfigure", "subentry_id": subentry.subentry_id},
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_STATION_ID: "456",
+            "cron_expression": "30 8 * * *",
+            "price_stale_hours": "24",
+            "tracked_fuels": [],
+            "tracked_service_modes": [],
         },
     )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "station_id"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {CONF_STATION_ID: "456"},
-    )
-
     assert result["errors"] == {CONF_STATION_ID: "already_configured"}
     validate_station.assert_not_awaited()
 
@@ -113,10 +99,11 @@ async def test_capped_search_selection_uses_real_flow_handler(hass, monkeypatch)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"municipality": "Roma", "result_limit": 1}
     )
-    assert result["step_id"] == "select_station_stale_limited"
+    assert result["step_id"] == "select_station"
     assert result["description_placeholders"]["result_limit"] == "1"
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_STATION_ID: ["123"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_STATION_ID: "123"}
+    assert result["data"] == {}
+    assert next(iter(result["result"].subentries.values())).unique_id == "123"

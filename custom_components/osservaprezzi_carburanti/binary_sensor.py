@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -26,46 +26,59 @@ from .entity import (
 )
 from .runtime import OsservaprezziConfigEntry
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: OsservaprezziConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up binary sensor entities for a station."""
-    coordinator: CarburantiDataUpdateCoordinator = entry.runtime_data.coordinator
-    station_id = entry.data[CONF_STATION_ID]
-    known_unique_ids: set[str] = set()
+    """Set up binary sensors for each station."""
 
-    @callback
-    def _async_discover_entities() -> None:
-        data = coordinator.data or {}
-        entities: list[BinarySensorEntity] = []
-        if _has_valid_opening_hours(data) and f"{station_id}_open_closed" not in known_unique_ids:
-            entities.append(StationOpenClosedBinarySensor(coordinator, entry))
-        available_service_ids = _get_available_service_ids(data.get("services", []))
-        for service_id, service_info in ADDITIONAL_SERVICES.items():
+    def setup_station(subentry_id: str, coordinator: CarburantiDataUpdateCoordinator) -> None:
+        station_entry = coordinator.config_entry
+        station_id = station_entry.data[CONF_STATION_ID]
+        known_unique_ids: set[str] = set()
+
+        @callback
+        def _async_discover_entities() -> None:
+            data = coordinator.data or {}
+            entities: list[BinarySensorEntity] = []
             if (
-                service_id in available_service_ids
-                and f"{station_id}_service_{service_id}" not in known_unique_ids
+                _has_valid_opening_hours(data)
+                and f"{station_id}_open_closed" not in known_unique_ids
             ):
-                entities.append(
-                    StationServiceBinarySensor(coordinator, entry, service_id, service_info)
-                )
-        if not entities:
-            return
-        known_unique_ids.update(cast(str, entity._attr_unique_id) for entity in entities)
-        async_add_entities(entities, update_before_add=False)
+                entities.append(StationOpenClosedBinarySensor(coordinator, station_entry))
+            available_service_ids = _get_available_service_ids(data.get("services", []))
+            for service_id, service_info in ADDITIONAL_SERVICES.items():
+                if (
+                    service_id in available_service_ids
+                    and f"{station_id}_service_{service_id}" not in known_unique_ids
+                ):
+                    entities.append(
+                        StationServiceBinarySensor(
+                            coordinator, station_entry, service_id, service_info
+                        )
+                    )
+            if not entities:
+                return
+            known_unique_ids.update(
+                entity._attr_unique_id for entity in entities if entity._attr_unique_id is not None
+            )
+            async_add_entities(entities, update_before_add=False, config_subentry_id=subentry_id)
 
-    _async_discover_entities()
-    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
+        _async_discover_entities()
+        entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
+
+    for subentry_id, station in entry.runtime_data.stations.items():
+        setup_station(subentry_id, station.coordinator)
 
 
 class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
     """Binary sensor indicating if the station is currently open."""
 
     _attr_has_entity_name = True
-    _attr_icon = "mdi:storefront"
     _open: bool | None = None
 
     def __init__(self, coordinator: CarburantiDataUpdateCoordinator, entry: ConfigEntry) -> None:
@@ -177,7 +190,8 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
             self._attr_translation_key = translation_key
         else:
             self._attr_name = service_info["name"]
-        self._attr_icon = service_info["icon"]
+        if not translation_key:
+            self._attr_icon = service_info["icon"]
 
     @property
     def is_on(self) -> bool:
@@ -194,7 +208,5 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
         return {
             "service_id": self._service_id,
             "service_name": self._service_info.get("name"),
-            "service_description": self._service_info.get("description"),
             "service_icon": self._service_info.get("icon"),
-            "service_image_url": self._service_info.get("image_url"),
         }

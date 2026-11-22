@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
 from datetime import datetime, timedelta
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, cast
 
 import homeassistant.helpers.config_validation as cv
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
@@ -20,10 +20,16 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CRON_EXPRESSION,
+    CONF_MIGRATED_TO_HUB,
+    CONF_PRICE_STALE_HOURS,
     CONF_STATION_ID,
+    CONF_TRACKED_FUELS,
+    CONF_TRACKED_SERVICE_MODES,
     CSV_UPDATE_INTERVAL,
     DEFAULT_CRON_EXPRESSION,
     DOMAIN,
+    HUB_UNIQUE_ID,
+    SUBENTRY_TYPE_STATION,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 from .cron_helper import get_next_run_time
@@ -31,7 +37,7 @@ from .csv_manager import (
     CSV_MANAGER_DATA_KEY,
     get_shared_csv_manager,
 )
-from .runtime import OsservaprezziConfigEntry, OsservaprezziRuntimeData
+from .runtime import OsservaprezziRuntimeData, StationRuntimeData
 from .services import async_register_services as _async_register_services
 from .services import async_unregister_services
 
@@ -41,8 +47,9 @@ CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 _CSV_MANAGER = CSV_MANAGER_DATA_KEY
 _CSV_UPDATE_LISTENER = "csv_update_listener"
-_ACTIVE_ENTRIES = "active_entries"
-_RESTORING_ENTRIES = "restoring_entries"
+_INITIAL_REFRESH_TASK = "initial_refresh_task"
+_INITIAL_REFRESH_STOP_EVENT = "initial_refresh_stop_event"
+_REFRESH_RESULT_LISTENER = "refresh_result_listener"
 INITIAL_REFRESH_RETRY_INTERVAL = timedelta(minutes=30)
 STATION_NOT_FOUND_ISSUE = "station_not_found"
 
@@ -80,6 +87,9 @@ _LEGACY_DEFAULT_ENTITY_NAMES = frozenset(
 _LEGACY_REMOVED_ENTITY_UNIQUE_ID_SUFFIXES = frozenset(
     {
         "address",
+        "nomeImpianto",
+        "id",
+        "brand",
         "opening_hours",
         "services",
     }
@@ -92,32 +102,32 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     return True
 
 
-def _station_not_found_issue_id(entry: ConfigEntry) -> str:
-    """Return the repair issue ID for one config entry."""
-    return f"{STATION_NOT_FOUND_ISSUE}_{entry.entry_id}"
+def _station_not_found_issue_id(subentry_id: str) -> str:
+    """Return the repair issue ID for a station."""
+    return f"{STATION_NOT_FOUND_ISSUE}_{subentry_id}"
 
 
-def _async_create_station_not_found_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Create a translated repair issue for an invalid station ID."""
+def _async_create_station_not_found_issue(
+    hass: HomeAssistant, entry: ConfigEntry, station: StationRuntimeData
+) -> None:
+    """Create a repair issue identifying the hub and station subentry."""
+    subentry = entry.subentries[station.subentry_id]
     issue_registry.async_create_issue(
         hass,
         DOMAIN,
-        _station_not_found_issue_id(entry),
+        _station_not_found_issue_id(station.subentry_id),
         is_fixable=True,
-        data={"entry_id": entry.entry_id},
+        data={"entry_id": entry.entry_id, "subentry_id": station.subentry_id},
         is_persistent=True,
         severity=issue_registry.IssueSeverity.ERROR,
         translation_key=STATION_NOT_FOUND_ISSUE,
-        translation_placeholders={
-            "station": entry.title,
-            "station_id": str(entry.data.get(CONF_STATION_ID, "")),
-        },
+        translation_placeholders={"station": subentry.title, "station_id": station.station_id},
     )
 
 
-def _async_delete_station_not_found_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the repair issue after a successful refresh."""
-    issue_registry.async_delete_issue(hass, DOMAIN, _station_not_found_issue_id(entry))
+def _async_delete_station_not_found_issue(hass: HomeAssistant, subentry_id: str) -> None:
+    """Remove a station repair issue."""
+    issue_registry.async_delete_issue(hass, DOMAIN, _station_not_found_issue_id(subentry_id))
 
 
 def _async_create_entry_task(
@@ -135,7 +145,7 @@ def _async_create_entry_task(
 
 def _async_start_initial_refresh(
     hass: HomeAssistant,
-    coordinator: CarburantiDataUpdateCoordinator,
+    station: StationRuntimeData,
     entry: ConfigEntry,
     stop_event: asyncio.Event,
 ) -> asyncio.Task[None]:
@@ -143,18 +153,19 @@ def _async_start_initial_refresh(
     return _async_create_entry_task(
         hass,
         entry,
-        _async_initial_refresh(hass, coordinator, entry, stop_event),
-        f"{DOMAIN}_{entry.entry_id}_initial_refresh",
+        _async_initial_refresh(hass, station, entry, stop_event),
+        f"{DOMAIN}_{station.subentry_id}_initial_refresh",
     )
 
 
 async def _async_initial_refresh(
     hass: HomeAssistant,
-    coordinator: CarburantiDataUpdateCoordinator,
+    station: StationRuntimeData,
     entry: ConfigEntry,
     stop_event: asyncio.Event,
 ) -> None:
     """Load the first station payload without blocking Home Assistant startup."""
+    coordinator = station.coordinator
     while not stop_event.is_set():
         try:
             await coordinator.async_refresh()
@@ -164,13 +175,13 @@ async def _async_initial_refresh(
             _LOGGER.exception("Initial refresh failed for station %s", entry.title)
 
         if coordinator.station_not_found:
-            _async_create_station_not_found_issue(hass, entry)
+            _async_create_station_not_found_issue(hass, entry, station)
             stop_event.set()
             return
         if getattr(coordinator, "last_update_success", False) and not getattr(
             coordinator, "last_refresh_from_cache", False
         ):
-            _async_delete_station_not_found_issue(hass, entry)
+            _async_delete_station_not_found_issue(hass, station.subentry_id)
             stop_event.set()
             return
 
@@ -204,41 +215,29 @@ async def _async_wait_for_task(task: asyncio.Task[None]) -> None:
                 return
 
 
-async def _async_cleanup_failed_entry_setup(
-    hass: HomeAssistant,
-    entry: OsservaprezziConfigEntry,
-    coordinator: CarburantiDataUpdateCoordinator,
-    platforms_loaded: list[Platform | str],
-) -> None:
-    """Release resources owned by an entry whose platform setup failed."""
-    try:
-        if platforms_loaded and not await hass.config_entries.async_unload_platforms(
-            entry, platforms_loaded
-        ):
-            _LOGGER.error("Failed to unload platforms after setup failure for %s", entry.title)
-    finally:
-        domain_data = hass.data.get(DOMAIN, {})
-        domain_data[_ACTIVE_ENTRIES].pop(entry.entry_id)
-        entry_data = entry.runtime_data
-        for listener in (entry_data.listener, entry_data.refresh_result_listener):
-            if listener is not None:
-                listener()
-
-        await coordinator.async_shutdown()
-        _async_remove_csv_owner_if_unused(hass)
+async def _async_release_stations(stations: dict[str, StationRuntimeData]) -> None:
+    """Cancel callbacks and close each station coordinator."""
+    released = list(stations.values())
+    stations.clear()
+    for station in released:
+        if station.listener is not None:
+            station.listener()
+        if station.coordinator_listener is not None:
+            station.coordinator_listener()
+        await _async_cancel_initial_refresh(station.initial_refresh_task)
+        await station.coordinator.async_shutdown()
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntry) -> bool:
-    """Set up Osservaprezzi Carburanti from a config entry."""
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up a hub and its station coordinators."""
+    if entry.data.get(CONF_MIGRATED_TO_HUB):
+        return True
     _async_register_services(hass)
-
     domain_data = hass.data.setdefault(DOMAIN, {})
     csv_manager = get_shared_csv_manager(hass)
-
     if domain_data.get(_CSV_UPDATE_LISTENER) is None:
 
         async def _async_csv_update_callback(now: datetime) -> None:
-            _LOGGER.info("Performing periodic CSV data update at %s", now)
             if not await csv_manager.async_periodic_update():
                 _LOGGER.warning("Periodic CSV update failed")
                 last_update = csv_manager.registry_status().get("last_update")
@@ -260,132 +259,120 @@ async def async_setup_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntry
             _async_csv_update_callback,
             timedelta(hours=CSV_UPDATE_INTERVAL),
         )
+    stations: dict[str, StationRuntimeData] = {}
+    entry.runtime_data = OsservaprezziRuntimeData(stations=stations)
+    domain_data[entry.entry_id] = {"stations": stations}
 
-    coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
-    stop_event = asyncio.Event()
-    # Reserve shared registry ownership while storage is still loading.
-    entry.runtime_data = OsservaprezziRuntimeData(
-        coordinator=coordinator, initial_refresh_stop_event=stop_event
-    )
-    active_entries = domain_data.setdefault(_ACTIVE_ENTRIES, {})
-    restoring_entries = domain_data.setdefault(_RESTORING_ENTRIES, set())
-    restoring_entries.add(entry.entry_id)
-    try:
+    async def _setup_station(subentry: ConfigSubentry) -> None:
+        station_id = str(subentry.data[CONF_STATION_ID])
+        # The coordinator still consumes the former entry interface. Each station
+        # needs an independent storage key until it accepts subentries directly.
+        station_entry = cast(
+            ConfigEntry,
+            SimpleNamespace(
+                entry_id=subentry.subentry_id,
+                unique_id=station_id,
+                title=subentry.title,
+                data=subentry.data,
+                options=subentry.data,
+            ),
+        )
+        coordinator = CarburantiDataUpdateCoordinator(hass, station_entry, csv_manager)
+        station = StationRuntimeData(subentry.subentry_id, station_id, coordinator)
+        stations[subentry.subentry_id] = station
         await coordinator.async_restore()
-    except BaseException:
-        restoring_entries.remove(entry.entry_id)
-        await coordinator.async_shutdown()
-        _async_remove_csv_owner_if_unused(hass)
-        raise
-    restoring_entries.remove(entry.entry_id)
-    active_entries[entry.entry_id] = entry
+        cron = subentry.data.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
+        stop_event = asyncio.Event()
 
-    cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
-    _LOGGER.info(
-        "Setting up cron schedule for %s with expression: %s", entry.title, cron_expression
-    )
+        def schedule() -> None:
+            if subentry.subentry_id not in stations:
+                return
+            next_run = get_next_run_time(cron)
+            station.listener = async_track_point_in_utc_time(
+                hass, refresh, dt_util.as_utc(next_run)
+            )
 
-    def _schedule_next_refresh() -> None:
-        if (
-            active_entries.get(entry.entry_id) is not entry
-            or entry.runtime_data.coordinator is not coordinator
-        ):
-            return
+        async def refresh(now: datetime) -> None:
+            try:
+                await coordinator.async_request_refresh()
+            finally:
+                schedule()
 
+        @callback
+        def refresh_result() -> None:
+            if coordinator.station_not_found:
+                _async_create_station_not_found_issue(hass, entry, station)
+                stop_event.set()
+            elif coordinator.last_update_success and not coordinator.last_refresh_from_cache:
+                _async_delete_station_not_found_issue(hass, station.subentry_id)
+                stop_event.set()
+
+        schedule()
+        station.coordinator_listener = coordinator.async_add_listener(refresh_result)
+        station.initial_refresh_task = _async_start_initial_refresh(
+            hass, station, entry, stop_event
+        )
+
+    platforms_loaded: list[Platform] = []
+    try:
+        for subentry in entry.subentries.values():
+            if subentry.subentry_type == SUBENTRY_TYPE_STATION:
+                await _setup_station(subentry)
+        _async_cleanup_legacy_entity_registry(hass, entry)
+        existing = {id(platform) for platform in entity_platform.async_get_platforms(hass, DOMAIN)}
+        setup_task = hass.async_create_task(
+            hass.config_entries.async_forward_entry_setups(entry, PLATFORMS),
+            f"{DOMAIN}_{entry.entry_id}_platform_setup",
+        )
         try:
-            next_run_time = get_next_run_time(cron_expression)
-        except (ImportError, TypeError, ValueError) as err:
-            _LOGGER.error("Failed to compute next cron schedule for %s: %s", entry.title, err)
+            await asyncio.shield(setup_task)
+        except BaseException:
+            with contextlib.suppress(BaseException):
+                await _async_wait_for_task(setup_task)
+            platforms_loaded = [
+                cast(Platform, platform.domain)
+                for platform in entity_platform.async_get_platforms(hass, DOMAIN)
+                if id(platform) not in existing and platform.config_entry is entry
+            ]
             raise
-
-        _LOGGER.info(
-            "Scheduling next refresh for %s at %s",
-            entry.title,
-            next_run_time,
-        )
-        listener: Callable[[], None] = async_track_point_in_utc_time(
-            hass,
-            _request_refresh,
-            dt_util.as_utc(next_run_time),
-        )
-        entry.runtime_data.listener = listener
-
-    async def _request_refresh(now: datetime) -> None:
-        _LOGGER.info("Executing scheduled refresh for %s at %s", entry.title, now)
-        try:
-            await coordinator.async_request_refresh()
-        finally:
-            _schedule_next_refresh()
-
-    try:
-        _schedule_next_refresh()
-    except ImportError, TypeError, ValueError:
-        await coordinator.async_shutdown()
-        active_entries.pop(entry.entry_id, None)
-        _async_remove_csv_owner_if_unused(hass)
-        return False
-
-    @callback
-    def _async_handle_refresh_result() -> None:
-        if coordinator.station_not_found:
-            _async_create_station_not_found_issue(hass, entry)
-            stop_event.set()
-        elif coordinator.last_update_success and not getattr(
-            coordinator, "last_refresh_from_cache", False
-        ):
-            _async_delete_station_not_found_issue(hass, entry)
-            stop_event.set()
-
-    entry.runtime_data.refresh_result_listener = coordinator.async_add_listener(
-        _async_handle_refresh_result
-    )
-    _async_cleanup_legacy_entity_registry(hass, entry)
-    existing_platform_ids = {
-        id(platform) for platform in entity_platform.async_get_platforms(hass, DOMAIN)
-    }
-    setup_task = hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(entry, PLATFORMS),
-        f"{DOMAIN}_{entry.entry_id}_platform_setup",
-    )
-    try:
-        await asyncio.shield(setup_task)
     except BaseException:
-        with contextlib.suppress(BaseException):
-            await _async_wait_for_task(setup_task)
 
-        platforms_loaded = [
-            platform.domain
-            for platform in entity_platform.async_get_platforms(hass, DOMAIN)
-            if id(platform) not in existing_platform_ids and platform.config_entry is entry
-        ]
-        cleanup_task = hass.async_create_task(
-            _async_cleanup_failed_entry_setup(hass, entry, coordinator, platforms_loaded),
-            f"{DOMAIN}_{entry.entry_id}_setup_rollback",
-        )
+        async def rollback() -> None:
+            try:
+                if platforms_loaded and not await hass.config_entries.async_unload_platforms(
+                    entry, platforms_loaded
+                ):
+                    _LOGGER.error(
+                        "Failed to unload platforms after setup failure for %s", entry.title
+                    )
+            finally:
+                domain_data.pop(entry.entry_id, None)
+                await _async_release_stations(stations)
+                del entry.runtime_data
+                _async_remove_csv_owner_if_unused(hass)
+
+        cleanup_task = hass.async_create_task(rollback(), f"{DOMAIN}_{entry.entry_id}_rollback")
         try:
             await _async_wait_for_task(cleanup_task)
         except BaseException:
             _LOGGER.exception("Failed to roll back setup for %s", entry.title)
         raise
-    entry.runtime_data.initial_refresh_task = _async_start_initial_refresh(
-        hass,
-        coordinator,
-        entry,
-        stop_event,
-    )
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
 
 def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Clean stale entity registry data left by previous releases."""
-    station_id = getattr(entry, "data", {}).get(CONF_STATION_ID)
-    if not station_id:
-        return
-
+    station_ids = {
+        str(subentry.data[CONF_STATION_ID])
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_STATION and CONF_STATION_ID in subentry.data
+    }
     entity_registry = er.async_get(hass)
     removed_unique_ids = {
-        f"{station_id}_{suffix}" for suffix in _LEGACY_REMOVED_ENTITY_UNIQUE_ID_SUFFIXES
+        f"{station_id}_{suffix}"
+        for station_id in station_ids
+        for suffix in _LEGACY_REMOVED_ENTITY_UNIQUE_ID_SUFFIXES
     }
 
     for entity_entry in list(entity_registry.entities.values()):
@@ -398,11 +385,15 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
         entity_id = getattr(entity_entry, "entity_id", None)
         if not isinstance(unique_id, str) or not isinstance(entity_id, str):
             continue
-        if not unique_id.startswith(f"{station_id}_"):
+        if unique_id.startswith(("market_cheapest_", "market_average_")):
+            continue
+        if not any(unique_id.startswith(f"{station_id}_") for station_id in station_ids):
             entity_registry.async_remove(entity_id)
             continue
 
-        if entity_id.startswith("sensor.") and unique_id.startswith(f"{station_id}_service_"):
+        if entity_id.startswith("sensor.") and any(
+            unique_id.startswith(f"{station_id}_service_") for station_id in station_ids
+        ):
             entity_registry.async_remove(entity_id)
             continue
 
@@ -415,16 +406,16 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
             entity_registry.async_update_entity(entity_id, name=None)
 
     device_registry = dr.async_get(hass)
-    expected_identifier = (DOMAIN, str(station_id))
+    expected_identifiers = {(DOMAIN, station_id) for station_id in station_ids}
     for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
         identifiers: set[tuple[str, str]] = getattr(device, "identifiers", set())
-        if expected_identifier in identifiers:
+        if identifiers & expected_identifiers or (DOMAIN, "market_summary") in identifiers:
             continue
         if any(
             isinstance(item, tuple)
             and len(item) == 2
             and item[0] == DOMAIN
-            and item[1] != str(station_id)
+            and item[1] not in station_ids
             for item in identifiers
         ):
             device_registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
@@ -433,11 +424,9 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
 def _async_remove_csv_owner_if_unused(hass: HomeAssistant) -> bool:
     """Remove registry-wide resources when no config entries remain."""
     domain_data = hass.data.get(DOMAIN, {})
-    if domain_data.get(_ACTIVE_ENTRIES) or domain_data.get(_RESTORING_ENTRIES):
+    if any(isinstance(value, dict) and "stations" in value for value in domain_data.values()):
         return False
 
-    domain_data.pop(_ACTIVE_ENTRIES, None)
-    domain_data.pop(_RESTORING_ENTRIES, None)
     listener = domain_data.pop(_CSV_UPDATE_LISTENER, None)
     if listener is not None:
         listener()
@@ -456,39 +445,139 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         hass.config_entries.async_update_entry(config_entry, data=new_data, version=2)
         _LOGGER.info("Migrated config entry from version 1 to 2, removed config_type")
 
+    if config_entry.version == 2:
+        station_id = str(config_entry.data[CONF_STATION_ID])
+        station_title = config_entry.title
+        station_data = {CONF_STATION_ID: station_id}
+        for key in (
+            CONF_CRON_EXPRESSION,
+            CONF_PRICE_STALE_HOURS,
+            CONF_TRACKED_FUELS,
+            CONF_TRACKED_SERVICE_MODES,
+        ):
+            if key in config_entry.options:
+                station_data[key] = config_entry.options[key]
+            elif key in config_entry.data:
+                station_data[key] = config_entry.data[key]
+
+        hub = next(
+            (
+                entry
+                for entry in hass.config_entries.async_entries(DOMAIN)
+                if entry.entry_id != config_entry.entry_id and entry.unique_id == HUB_UNIQUE_ID
+            ),
+            None,
+        )
+        first_entry = hub is None
+        if hub is None:
+            hub = config_entry
+            hass.config_entries.async_update_entry(
+                hub,
+                version=3,
+                unique_id=HUB_UNIQUE_ID,
+                title="Osservaprezzi Carburanti",
+                data={},
+                options={},
+            )
+        subentry = next(
+            (
+                item
+                for item in hub.subentries.values()
+                if item.subentry_type == SUBENTRY_TYPE_STATION and item.unique_id == station_id
+            ),
+            None,
+        )
+        if subentry is None:
+            subentry = ConfigSubentry(
+                data=MappingProxyType(station_data),
+                subentry_type=SUBENTRY_TYPE_STATION,
+                title=station_title,
+                unique_id=station_id,
+            )
+            hass.config_entries.async_add_subentry(hub, subentry)
+
+        entity_registry = er.async_get(hass)
+        for entity in er.async_entries_for_config_entry(entity_registry, config_entry.entry_id):
+            if entity.unique_id.startswith(("market_cheapest_", "market_average_")):
+                if not first_entry:
+                    entity_registry.async_update_entity(
+                        entity.entity_id,
+                        config_entry_id=hub.entry_id,
+                        config_subentry_id=None,
+                    )
+                continue
+            entity_registry.async_update_entity(
+                entity.entity_id,
+                config_entry_id=hub.entry_id,
+                config_subentry_id=subentry.subentry_id,
+            )
+        device_registry = dr.async_get(hass)
+        entry_devices = dr.async_entries_for_config_entry(device_registry, config_entry.entry_id)
+        device = next(
+            (item for item in entry_devices if (DOMAIN, station_id) in item.identifiers),
+            None,
+        )
+        if device is not None:
+            if hasattr(device, "config_entry_id"):
+                device_registry.async_update_device(
+                    device.id,
+                    new_config_entry_id=hub.entry_id,
+                    new_config_subentry_id=subentry.subentry_id,
+                )
+            else:
+                device_registry.async_update_device(
+                    device.id,
+                    add_config_entry_id=hub.entry_id,
+                    add_config_subentry_id=subentry.subentry_id,
+                    remove_config_entry_id=config_entry.entry_id,
+                    remove_config_subentry_id=None,
+                )
+        if not first_entry:
+            market_device = next(
+                (item for item in entry_devices if (DOMAIN, "market_summary") in item.identifiers),
+                None,
+            )
+            if market_device is not None:
+                device_registry.async_update_device(
+                    market_device.id,
+                    add_config_entry_id=hub.entry_id,
+                    remove_config_entry_id=config_entry.entry_id,
+                )
+
+        old_store: Store[Any] = Store(hass, 1, f"{DOMAIN}.{config_entry.entry_id}.data")
+        station_store: Store[Any] = Store(hass, 1, f"{DOMAIN}.{subentry.subentry_id}.data")
+        try:
+            old_cache = await old_store.async_load()
+            if old_cache is not None and await station_store.async_load() is None:
+                await station_store.async_save(old_cache)
+        except Exception:
+            _LOGGER.exception("Could not migrate cached payload for station %s", station_id)
+
+        if not first_entry:
+            hass.config_entries.async_update_entry(
+                config_entry,
+                version=3,
+                data={CONF_MIGRATED_TO_HUB: True},
+                options={},
+                unique_id=None,
+            )
+            if getattr(hub, "state", None) not in (None, ConfigEntryState.NOT_LOADED):
+                hass.config_entries.async_schedule_reload(hub.entry_id)
+            hass.async_create_task(hass.config_entries.async_remove(config_entry.entry_id))
+
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntry) -> bool:
-    """Unload a config entry."""
-    entry_data = getattr(entry, "runtime_data", None)
-    if entry_data is None:
-        return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    task = entry_data.initial_refresh_task
-    stop_event = entry_data.initial_refresh_stop_event
-    initial_refresh_was_running = task is not None and not task.done()
-    if initial_refresh_was_running and stop_event is not None:
-        stop_event.set()
-        await _async_cancel_initial_refresh(task)
-
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if not unload_ok:
-        if initial_refresh_was_running and stop_event is not None:
-            stop_event.clear()
-            entry_data.initial_refresh_task = _async_start_initial_refresh(
-                hass, entry_data.coordinator, entry, stop_event
-            )
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload the hub and its station resources."""
+    if entry.data.get(CONF_MIGRATED_TO_HUB):
+        return True
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
-
-    if entry_data.listener is not None:
-        entry_data.listener()
-    if entry_data.refresh_result_listener is not None:
-        entry_data.refresh_result_listener()
-    if stop_event is not None:
-        stop_event.set()
-    await _async_cancel_initial_refresh(entry_data.initial_refresh_task)
-    hass.data[DOMAIN][_ACTIVE_ENTRIES].pop(entry.entry_id)
-    await entry_data.coordinator.async_shutdown()
+    stations = entry.runtime_data.stations
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    await _async_release_stations(stations)
+    del entry.runtime_data
     if _async_remove_csv_owner_if_unused(hass):
         async_unregister_services(hass)
     return True
@@ -496,7 +585,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntr
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove repair issues and persisted storage owned by a deleted config entry."""
-    _async_delete_station_not_found_issue(hass, entry)
+    for subentry in entry.subentries.values():
+        _async_delete_station_not_found_issue(hass, subentry.subentry_id)
+        await Store(hass, 1, f"{DOMAIN}.{subentry.subentry_id}.data").async_remove()
     await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.data").async_remove()
 
 

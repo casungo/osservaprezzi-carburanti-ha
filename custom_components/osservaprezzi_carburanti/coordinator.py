@@ -37,6 +37,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
     """Coordinate API and CSV enrichment updates for a single station."""
 
     config_entry: ConfigEntry
+
     _fast_fail_next_refresh: bool = False
 
     def __init__(
@@ -181,7 +182,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
                     self.station_not_found = True
                     raise UpdateFailed(f"Station with ID {station_id} not found") from err
                 last_err = err
-            except (aiohttp.ClientError, TimeoutError) as err:
+            except (TimeoutError, aiohttp.ClientError) as err:
                 last_err = err
 
             if attempt < len(retry_delays):
@@ -240,7 +241,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
     @staticmethod
     def _is_transient_error(err: Exception | None) -> bool:
         """Return True for recoverable request failures."""
-        if isinstance(err, TimeoutError):
+        if isinstance(err, asyncio.TimeoutError):
             return True
         if isinstance(err, aiohttp.ClientResponseError):
             return err.status != 404

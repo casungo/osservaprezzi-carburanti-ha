@@ -1,27 +1,31 @@
-"""Typed runtime state for a configured station."""
-
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 
-if TYPE_CHECKING:
-    from .coordinator import CarburantiDataUpdateCoordinator
+from .coordinator import CarburantiDataUpdateCoordinator
+
+
+@dataclass
+class StationRuntimeData:
+    """Resources owned by a station subentry."""
+
+    subentry_id: str
+    station_id: str
+    coordinator: CarburantiDataUpdateCoordinator
+    listener: Callable[[], None] | None = None
+    coordinator_listener: Callable[[], None] | None = None
+    initial_refresh_task: asyncio.Task[None] | None = None
 
 
 @dataclass
 class OsservaprezziRuntimeData:
-    """Resources owned by one configuration entry."""
+    """Resources owned by a loaded config entry."""
 
-    coordinator: CarburantiDataUpdateCoordinator
-    listener: Callable[[], None] | None = None
-    initial_refresh_task: asyncio.Task[None] | None = None
-    initial_refresh_stop_event: asyncio.Event | None = None
-    refresh_result_listener: Callable[[], None] | None = None
+    stations: dict[str, StationRuntimeData]
 
 
 type OsservaprezziConfigEntry = ConfigEntry[OsservaprezziRuntimeData]

@@ -16,7 +16,6 @@ from custom_components.osservaprezzi_carburanti.csv_manager import (
     RegistrySnapshot,
     RegistryUnavailableError,
 )
-from custom_components.osservaprezzi_carburanti.runtime import OsservaprezziRuntimeData
 
 init_module = importlib.import_module("custom_components.osservaprezzi_carburanti")
 services_module = importlib.import_module("custom_components.osservaprezzi_carburanti.services")
@@ -174,11 +173,40 @@ def _build_hass_with_services() -> tuple[MagicMock, dict[str, object]]:
         coroutine, name=name
     )
 
+    def entries(domain):
+        stations = {
+            key: SimpleNamespace(coordinator=value["coordinator"])
+            for key, value in hass.data.get(domain, {}).items()
+            if isinstance(value, dict) and value.get("coordinator") is not None
+        }
+        return [
+            SimpleNamespace(
+                state=services_module.ConfigEntryState.LOADED,
+                runtime_data=SimpleNamespace(stations=stations),
+            )
+        ]
+
+    hass.config_entries.async_entries.side_effect = entries
+
     def _register(domain, service, handler, **kwargs):
         registered_services[service] = handler
 
     hass.services.async_register.side_effect = _register
     return hass, registered_services
+
+
+def _as_hub(entry):
+    if not hasattr(entry, "data"):
+        entry.data = {}
+    station_id = str(entry.data.get("station_id", entry.entry_id))
+    options = getattr(entry, "options", {})
+    station_data = {**options, "station_id": station_id}
+    entry.subentries = {
+        station_id: SimpleNamespace(
+            subentry_id=station_id, subentry_type="station", title=entry.title, data=station_data
+        )
+    }
+    return entry
 
 
 def test_force_csv_update_service_updates_shared_csv_once(monkeypatch) -> None:
@@ -189,10 +217,8 @@ def test_force_csv_update_service_updates_shared_csv_once(monkeypatch) -> None:
     second = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -214,10 +240,8 @@ def test_force_csv_update_service_does_not_refresh_when_shared_update_fails(monk
     second = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -242,10 +266,8 @@ def test_force_csv_update_service_does_not_reload_shared_manager(monkeypatch) ->
     second = FakeCoordinator(load_result=False)
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -266,10 +288,8 @@ def test_force_csv_update_service_refreshes_all_with_shared_manager(monkeypatch)
     second = FakeCoordinator(load_result=False, initialize_result=False)
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -290,10 +310,8 @@ def test_clear_cache_service_clears_shared_csv_once(monkeypatch) -> None:
     second = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -317,10 +335,8 @@ def test_clear_cache_service_does_not_refresh_when_clear_fails(monkeypatch) -> N
     second = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -343,10 +359,8 @@ def test_clear_cache_service_does_not_refresh_when_primary_initialize_fails(monk
     second = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -369,10 +383,8 @@ def test_clear_cache_service_does_not_reload_shared_manager(monkeypatch) -> None
     second = FakeCoordinator(load_result=False)
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -395,10 +407,8 @@ def test_clear_cache_service_refreshes_all_with_shared_manager(monkeypatch) -> N
     second = FakeCoordinator(load_result=False, initialize_result=False)
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -454,7 +464,7 @@ def test_cache_services_raise_when_no_coordinators(monkeypatch) -> None:
     )
 
     assert result == {"stations": {}, "ranking": []}
-    with pytest.raises(services_module.HomeAssistantError, match="No matching"):
+    with pytest.raises(services_module.ServiceValidationError, match="No matching"):
         asyncio.run(
             registered_services[services_module.SERVICE_REFRESH_PRICES](SimpleNamespace(data={}))
         )
@@ -465,13 +475,7 @@ def test_force_csv_update_translates_manager_exception(monkeypatch) -> None:
     monkeypatch.setattr(services_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     hass, registered_services = _build_hass_with_services()
     coordinator = FakeCoordinator(force_error=RuntimeError("private path: /tmp/cache.csv"))
-    hass.data = {
-        init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coordinator))
-            }
-        }
-    }
+    hass.data = {init_module.DOMAIN: {"entry_1": {"coordinator": coordinator}}}
     init_module._async_register_services(hass)
 
     with pytest.raises(services_module.HomeAssistantError, match="Unable to update") as exc_info:
@@ -488,13 +492,7 @@ def test_clear_cache_translates_manager_exception(monkeypatch) -> None:
     hass, registered_services = _build_hass_with_services()
     coordinator = FakeCoordinator()
     coordinator.csv_manager.async_clear_cache = AsyncMock(side_effect=RuntimeError("private data"))
-    hass.data = {
-        init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coordinator))
-            }
-        }
-    }
+    hass.data = {init_module.DOMAIN: {"entry_1": {"coordinator": coordinator}}}
     init_module._async_register_services(hass)
 
     with pytest.raises(services_module.HomeAssistantError, match="Unable to reset") as exc_info:
@@ -512,11 +510,9 @@ def test_force_csv_update_attempts_all_refreshes_before_raising(monkeypatch) -> 
     third = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-                "entry_3": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(third)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
+            "entry_3": {"coordinator": third},
         }
     }
     init_module._async_register_services(hass)
@@ -534,13 +530,7 @@ def test_force_csv_update_propagates_cancellation(monkeypatch) -> None:
     monkeypatch.setattr(services_module, "CarburantiDataUpdateCoordinator", FakeCoordinator)
     hass, registered_services = _build_hass_with_services()
     coordinator = FakeCoordinator(force_error=asyncio.CancelledError())
-    hass.data = {
-        init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coordinator))
-            }
-        }
-    }
+    hass.data = {init_module.DOMAIN: {"entry_1": {"coordinator": coordinator}}}
     init_module._async_register_services(hass)
 
     with pytest.raises(asyncio.CancelledError):
@@ -581,10 +571,8 @@ def test_compare_stations_service_returns_station_payload(monkeypatch) -> None:
     second.data = {}
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         },
     }
 
@@ -640,10 +628,8 @@ def test_refresh_prices_service_supports_all_and_station_subset(monkeypatch) -> 
     second.config_entry = SimpleNamespace(data={init_module.CONF_STATION_ID: "456"})
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(first)),
-                "entry_2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(second)),
-            }
+            "entry_1": {"coordinator": first},
+            "entry_2": {"coordinator": second},
         }
     }
     init_module._async_register_services(hass)
@@ -677,14 +663,12 @@ def test_refresh_prices_service_rejects_unknown_station(monkeypatch) -> None:
     coordinator.config_entry = SimpleNamespace(data={init_module.CONF_STATION_ID: "123"})
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coordinator))
-            }
+            "entry_1": {"coordinator": coordinator},
         }
     }
     init_module._async_register_services(hass)
 
-    with pytest.raises(services_module.HomeAssistantError, match="No matching"):
+    with pytest.raises(services_module.ServiceValidationError, match="No matching"):
         asyncio.run(
             registered_services[services_module.SERVICE_REFRESH_PRICES](
                 SimpleNamespace(data={"station_ids": ["999"]})
@@ -701,9 +685,7 @@ def test_search_registry_service_returns_public_matches(monkeypatch) -> None:
     coordinator.config_entry = SimpleNamespace(data={init_module.CONF_STATION_ID: "123"})
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "entry_1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coordinator))
-            }
+            "entry_1": {"coordinator": coordinator},
         }
     }
     manager = MagicMock()
@@ -816,7 +798,7 @@ def test_setup_entry_registers_services_after_last_entry_unload(monkeypatch) -> 
         add_update_listener=MagicMock(return_value=lambda: None),
     )
 
-    asyncio.run(init_module.async_setup_entry(hass, entry))
+    asyncio.run(init_module.async_setup_entry(hass, _as_hub(entry)))
 
     assert services_module.SERVICE_FORCE_CSV_UPDATE in registered_services
     assert services_module.SERVICE_CLEAR_CACHE in registered_services
@@ -853,13 +835,19 @@ def test_two_entries_share_one_manager_and_registry_timer(monkeypatch) -> None:
 
     first = make_entry("entry_1")
     second = make_entry("entry_2")
-    assert asyncio.run(init_module.async_setup_entry(hass, first)) is True
-    assert asyncio.run(init_module.async_setup_entry(hass, second)) is True
+    assert asyncio.run(init_module.async_setup_entry(hass, _as_hub(first))) is True
+    assert asyncio.run(init_module.async_setup_entry(hass, _as_hub(second))) is True
 
     domain_data = hass.data[init_module.DOMAIN]
     shared_manager = domain_data[init_module._CSV_MANAGER]
-    assert first.runtime_data.coordinator.csv_manager is shared_manager
-    assert second.runtime_data.coordinator.csv_manager is shared_manager
+    assert (
+        next(iter(domain_data["entry_1"]["stations"].values())).coordinator.csv_manager
+        is shared_manager
+    )
+    assert (
+        next(iter(domain_data["entry_2"]["stations"].values())).coordinator.csv_manager
+        is shared_manager
+    )
     track_registry.assert_called_once()
     shared_manager.async_periodic_update = AsyncMock(return_value=False)
     registry_callback = track_registry.call_args.args[1]
@@ -975,8 +963,8 @@ def test_setup_entry_rolls_back_when_platform_forwarding_fails(
 
     if other_entry_loaded:
         first_entry = make_entry("entry_1")
-        assert asyncio.run(init_module.async_setup_entry(hass, first_entry)) is True
-        first_coordinator = first_entry.runtime_data.coordinator
+        assert asyncio.run(init_module.async_setup_entry(hass, _as_hub(first_entry))) is True
+        first_coordinator = next(iter(first_entry.runtime_data.stations.values())).coordinator
         first_cron_listener = cron_listeners[0]
         failed_entry_id = "entry_2"
         failed_listener_index = 1
@@ -991,10 +979,10 @@ def test_setup_entry_rolls_back_when_platform_forwarding_fails(
 
     if isinstance(setup_error, asyncio.CancelledError):
         with pytest.raises(asyncio.CancelledError):
-            asyncio.run(init_module.async_setup_entry(hass, failed_entry))
+            asyncio.run(init_module.async_setup_entry(hass, _as_hub(failed_entry)))
     else:
         with pytest.raises(RuntimeError, match="platform setup failed"):
-            asyncio.run(init_module.async_setup_entry(hass, failed_entry))
+            asyncio.run(init_module.async_setup_entry(hass, _as_hub(failed_entry)))
 
     domain_data = hass.data[init_module.DOMAIN]
     assert failed_entry_id not in domain_data
@@ -1012,7 +1000,9 @@ def test_setup_entry_rolls_back_when_platform_forwarding_fails(
     else:
         assert "Failed to unload platforms after setup failure" in caplog.text
     if other_entry_loaded:
-        assert first_entry.runtime_data.coordinator is first_coordinator
+        assert (
+            next(iter(domain_data["entry_1"]["stations"].values())).coordinator is first_coordinator
+        )
         assert domain_data[init_module._CSV_MANAGER] is shared_manager
         assert domain_data[init_module._CSV_UPDATE_LISTENER] is registry_listeners[0]
         assert first_coordinator.shutdown_calls == 0
@@ -1024,9 +1014,14 @@ def test_setup_entry_rolls_back_when_platform_forwarding_fails(
         registry_listeners[0].assert_called_once()
 
     hass.config_entries.async_forward_entry_setups.side_effect = None
-    retry_entry = make_entry(failed_entry_id)
-    assert asyncio.run(init_module.async_setup_entry(hass, retry_entry)) is True
-    assert retry_entry.runtime_data.coordinator is created_coordinators[-1]
+    assert (
+        asyncio.run(init_module.async_setup_entry(hass, _as_hub(make_entry(failed_entry_id))))
+        is True
+    )
+    assert (
+        next(iter(hass.data[init_module.DOMAIN][failed_entry_id]["stations"].values())).coordinator
+        is created_coordinators[-1]
+    )
     assert len(cron_listeners) == failed_listener_index + 2
     cron_listeners[-1].assert_not_called()
     if other_entry_loaded:
@@ -1073,7 +1068,7 @@ def test_setup_entry_releases_csv_owner_when_restore_is_cancelled(monkeypatch) -
     entry = SimpleNamespace(entry_id="entry_1", title="entry_1", options={})
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(init_module.async_setup_entry(hass, entry))
+        asyncio.run(init_module.async_setup_entry(hass, _as_hub(entry)))
 
     assert created_coordinators[0].shutdown_calls == 1
     registry_listener.assert_called_once()
@@ -1123,12 +1118,12 @@ def test_cancelled_restore_preserves_shared_resources_for_another_restoring_entr
             )
 
         pending = entry("pending")
-        task = asyncio.create_task(init_module.async_setup_entry(hass, pending))
+        task = asyncio.create_task(init_module.async_setup_entry(hass, _as_hub(pending)))
         await restore_started.wait()
         manager = hass.data[init_module.DOMAIN][init_module._CSV_MANAGER]
         try:
             with pytest.raises(asyncio.CancelledError):
-                await init_module.async_setup_entry(hass, entry("cancelled"))
+                await init_module.async_setup_entry(hass, _as_hub(entry("cancelled")))
             assert hass.data[init_module.DOMAIN][init_module._CSV_MANAGER] is manager
             registry_listener.assert_not_called()
         finally:
@@ -1171,7 +1166,7 @@ def test_setup_entry_adds_registry_timer_to_manager_created_by_config_flow(
         add_update_listener=MagicMock(return_value=lambda: None),
     )
 
-    assert asyncio.run(init_module.async_setup_entry(hass, entry)) is True
+    assert asyncio.run(init_module.async_setup_entry(hass, _as_hub(entry))) is True
 
     assert hass.data[init_module.DOMAIN][init_module._CSV_MANAGER] is shared_manager
     track_registry.assert_called_once()
@@ -1181,32 +1176,33 @@ def test_setup_entry_adds_registry_timer_to_manager_created_by_config_flow(
 def test_cleanup_legacy_entity_registry_clears_old_default_name(monkeypatch) -> None:
     registry = FakeEntityRegistry(
         {
-            "sensor.station_brand": SimpleNamespace(
-                entity_id="sensor.station_brand",
+            "sensor.station_location": SimpleNamespace(
+                entity_id="sensor.station_location",
                 platform=init_module.DOMAIN,
                 config_entry_id="entry_1",
-                unique_id="123_brand",
-                name="Brand",
+                unique_id="123_location",
+                name="Location",
             )
         }
     )
     monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
     entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
-    assert registry.updated == [("sensor.station_brand", {"name": None})]
+    assert registry.updated == [("sensor.station_location", {"name": None})]
     assert registry.removed == []
 
 
 def test_cleanup_legacy_entity_registry_keeps_custom_name(monkeypatch) -> None:
     registry = FakeEntityRegistry(
         {
-            "sensor.station_brand": SimpleNamespace(
-                entity_id="sensor.station_brand",
+            "sensor.station_location": SimpleNamespace(
+                entity_id="sensor.station_location",
                 platform=init_module.DOMAIN,
                 config_entry_id="entry_1",
-                unique_id="123_brand",
+                unique_id="123_location",
                 name="Marchio preferito",
             )
         }
@@ -1214,6 +1210,7 @@ def test_cleanup_legacy_entity_registry_keeps_custom_name(monkeypatch) -> None:
     monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
     entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
@@ -1258,20 +1255,22 @@ def test_cleanup_registry_skips_unrelated_entries_and_removes_previous_station(
     monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
     entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
     assert registry.removed == ["sensor.other_station"]
 
 
-def test_cleanup_legacy_entity_registry_removes_stale_address(monkeypatch) -> None:
+@pytest.mark.parametrize("suffix", ["address", "nomeImpianto", "id", "brand"])
+def test_cleanup_legacy_entity_registry_removes_stale_sensors(monkeypatch, suffix) -> None:
     registry = FakeEntityRegistry(
         {
             "sensor.station_address": SimpleNamespace(
                 entity_id="sensor.station_address",
                 platform=init_module.DOMAIN,
                 config_entry_id="entry_1",
-                unique_id="123_address",
+                unique_id=f"123_{suffix}",
                 name="Address",
             )
         }
@@ -1279,6 +1278,7 @@ def test_cleanup_legacy_entity_registry_removes_stale_address(monkeypatch) -> No
     monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
     entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
@@ -1307,6 +1307,7 @@ def test_cleanup_legacy_entity_registry_removes_legacy_service_sensors(monkeypat
     monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
     entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
@@ -1342,6 +1343,7 @@ def test_cleanup_registry_removes_previous_station_service_entities(monkeypatch)
     monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
     entry = SimpleNamespace(entry_id="entry_1", data={"station_id": "123"})
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
 
     assert registry.updated == []
@@ -1382,8 +1384,8 @@ def test_setup_entry_scheduled_refresh_reschedules(monkeypatch) -> None:
         add_update_listener=MagicMock(return_value=lambda: None),
     )
 
-    assert asyncio.run(init_module.async_setup_entry(hass, entry)) is True
-    coordinator = entry.runtime_data.coordinator
+    assert asyncio.run(init_module.async_setup_entry(hass, _as_hub(entry))) is True
+    coordinator = next(iter(entry.runtime_data.stations.values())).coordinator
     asyncio.run(callbacks[0](datetime(2026, 1, 1)))
 
     assert coordinator.refresh_calls == 1
@@ -1425,10 +1427,11 @@ def test_scheduled_refresh_does_not_rearm_after_unload(monkeypatch) -> None:
     )
 
     async def run_race() -> None:
-        assert await init_module.async_setup_entry(hass, entry) is True
+        assert await init_module.async_setup_entry(hass, _as_hub(entry)) is True
         refresh = asyncio.create_task(callbacks[0](datetime(2026, 1, 1)))
         await started.wait()
-        hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES].pop(entry.entry_id)
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        assert await init_module.async_unload_entry(hass, entry)
         release.set()
         await refresh
 
@@ -1474,17 +1477,22 @@ def test_old_scheduled_refresh_does_not_overwrite_reload_listener(monkeypatch) -
     replacement_listener = MagicMock()
 
     async def run_race() -> None:
-        assert await init_module.async_setup_entry(hass, entry) is True
+        assert await init_module.async_setup_entry(hass, _as_hub(entry)) is True
         refresh = asyncio.create_task(callbacks[0](datetime(2026, 1, 1)))
         await started.wait()
-        entry.runtime_data = OsservaprezziRuntimeData(replacement, listener=replacement_listener)
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        assert await init_module.async_unload_entry(hass, entry)
+        hass.data[init_module.DOMAIN][entry.entry_id] = {
+            "coordinator": replacement,
+            "listener": replacement_listener,
+        }
         release.set()
         await refresh
 
     asyncio.run(run_race())
 
     assert len(callbacks) == 1
-    assert entry.runtime_data.listener is replacement_listener
+    assert hass.data[init_module.DOMAIN][entry.entry_id]["listener"] is replacement_listener
 
 
 def test_setup_entry_returns_false_when_cron_schedule_fails(monkeypatch) -> None:
@@ -1501,7 +1509,8 @@ def test_setup_entry_returns_false_when_cron_schedule_fails(monkeypatch) -> None
         options={},
     )
 
-    assert asyncio.run(init_module.async_setup_entry(hass, entry)) is False
+    with pytest.raises(ValueError, match="bad"):
+        asyncio.run(init_module.async_setup_entry(hass, _as_hub(entry)))
     assert "entry_1" not in hass.data.get(init_module.DOMAIN, {})
 
 
@@ -1538,7 +1547,7 @@ def test_setup_entry_runs_refresh_in_background(monkeypatch) -> None:
     )
 
     async def run_setup() -> None:
-        assert await init_module.async_setup_entry(hass, entry) is True
+        assert await init_module.async_setup_entry(hass, _as_hub(entry)) is True
         await created[0].refresh_started.wait()
         created[0].release_refresh.set()
 
@@ -1570,30 +1579,30 @@ def test_refresh_listener_creates_station_not_found_issue(monkeypatch) -> None:
     )
 
     async def run_setup_and_unload() -> None:
-        assert await init_module.async_setup_entry(hass, entry) is True
-        coordinator = entry.runtime_data.coordinator
+        assert await init_module.async_setup_entry(hass, _as_hub(entry)) is True
+        station = next(iter(entry.runtime_data.stations.values()))
+        coordinator = station.coordinator
+        assert station.listener is not None
+        assert station.coordinator_listener is not None
+        assert station.initial_refresh_task is not None
         init_module.issue_registry.async_create_issue.reset_mock()
+        init_module.issue_registry.async_delete_issue.reset_mock()
         coordinator.station_not_found = False
         coordinator.last_update_success = False
-        init_module.issue_registry.async_delete_issue.reset_mock()
         coordinator._listeners[0]()
         init_module.issue_registry.async_create_issue.assert_not_called()
         init_module.issue_registry.async_delete_issue.assert_not_called()
-        assert not entry.runtime_data.initial_refresh_stop_event.is_set()
-
         coordinator.station_not_found = True
-        coordinator.last_update_success = False
         coordinator._listeners[0]()
         init_module.issue_registry.async_create_issue.assert_called_once()
-
         coordinator.station_not_found = False
         coordinator.last_update_success = True
         coordinator._listeners[0]()
         init_module.issue_registry.async_delete_issue.assert_called_once_with(
-            hass, init_module.DOMAIN, "station_not_found_entry_1"
+            hass, init_module.DOMAIN, "station_not_found_123"
         )
-        assert entry.runtime_data.initial_refresh_stop_event.is_set()
         assert await init_module.async_unload_entry(hass, entry) is True
+        assert not hasattr(entry, "runtime_data")
 
     asyncio.run(run_setup_and_unload())
 
@@ -1605,7 +1614,10 @@ def test_initial_refresh_returns_when_stopped_before_first_attempt() -> None:
 
     asyncio.run(
         init_module._async_initial_refresh(
-            MagicMock(), coordinator, SimpleNamespace(title="Stopped"), stop_event
+            MagicMock(),
+            SimpleNamespace(coordinator=coordinator, subentry_id="sub", station_id="123"),
+            SimpleNamespace(title="Stopped"),
+            stop_event,
         )
     )
 
@@ -1649,42 +1661,19 @@ def test_wait_for_task_survives_cancellation_while_task_is_running() -> None:
     asyncio.run(run_wait())
 
 
-def test_failed_setup_cleanup_handles_absent_resources() -> None:
-    async def run_cleanup() -> tuple[MagicMock, MagicMock, dict[str, object]]:
-        hass, _ = _build_hass_with_services()
-        manager = FakeCSVManager()
-        unsubscribe_refresh_result = MagicMock()
-        coordinator = FakeCoordinator()
-        entry = SimpleNamespace(entry_id="entry_1", title="Test station")
-        entry.runtime_data = OsservaprezziRuntimeData(
-            coordinator, refresh_result_listener=unsubscribe_refresh_result
-        )
-        hass.data = {
-            init_module.DOMAIN: {
-                init_module._CSV_MANAGER: manager,
-                init_module._ACTIVE_ENTRIES: {entry.entry_id: entry},
-            }
-        }
-
-        await init_module._async_cleanup_failed_entry_setup(hass, entry, coordinator, [])
-        return hass, unsubscribe_refresh_result, {"coordinator": coordinator, "manager": manager}
-
-    hass, unsubscribe_refresh_result, resources = asyncio.run(run_cleanup())
-    unsubscribe_refresh_result.assert_called_once()
-    assert resources["coordinator"].shutdown_calls == 1
-    assert hass.data[init_module.DOMAIN] == {}
+def test_release_stations_handles_absent_listeners() -> None:
+    coordinator = FakeCoordinator()
+    stations = {"sub": init_module.StationRuntimeData("sub", "123", coordinator)}
+    asyncio.run(init_module._async_release_stations(stations))
+    assert stations == {}
+    assert coordinator.shutdown_calls == 1
 
 
-def test_unload_entry_without_setup_data_is_idempotent() -> None:
-    async def run_unload() -> None:
-        hass, _ = _build_hass_with_services()
-        hass.data = {init_module.DOMAIN: {}}
-        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
-        entry = SimpleNamespace(entry_id="missing")
-
-        assert await init_module.async_unload_entry(hass, entry) is True
-
-    asyncio.run(run_unload())
+def test_unload_migrated_entry_does_not_unload_platforms() -> None:
+    hass, _ = _build_hass_with_services()
+    entry = SimpleNamespace(data={init_module.CONF_MIGRATED_TO_HUB: True})
+    assert asyncio.run(init_module.async_unload_entry(hass, entry)) is True
+    hass.config_entries.async_unload_platforms.assert_not_called()
 
 
 def test_initial_refresh_retries_after_transient_failure(monkeypatch) -> None:
@@ -1713,7 +1702,14 @@ def test_initial_refresh_retries_after_transient_failure(monkeypatch) -> None:
 
     monkeypatch.setattr(init_module.asyncio, "wait_for", timeout_once)
 
-    asyncio.run(init_module._async_initial_refresh(hass, coordinator, entry, stop_event))
+    asyncio.run(
+        init_module._async_initial_refresh(
+            hass,
+            SimpleNamespace(coordinator=coordinator, subentry_id="sub", station_id="123"),
+            entry,
+            stop_event,
+        )
+    )
 
     assert coordinator.refresh_calls == 2
     assert wait_calls == [init_module.INITIAL_REFRESH_RETRY_INTERVAL.total_seconds()]
@@ -1743,7 +1739,12 @@ def test_initial_refresh_logs_unexpected_error_then_recovers(monkeypatch) -> Non
     monkeypatch.setattr(init_module.asyncio, "wait_for", timeout_once)
 
     asyncio.run(
-        init_module._async_initial_refresh(MagicMock(), coordinator, entry, asyncio.Event())
+        init_module._async_initial_refresh(
+            MagicMock(),
+            SimpleNamespace(coordinator=coordinator, subentry_id="sub", station_id="123"),
+            entry,
+            asyncio.Event(),
+        )
     )
 
     assert coordinator.refresh_calls == 2
@@ -1764,7 +1765,12 @@ def test_initial_refresh_propagates_cancellation() -> None:
         coordinator = BlockingCoordinator()
         entry = SimpleNamespace(entry_id="entry_1", title="Test Station")
         task = asyncio.create_task(
-            init_module._async_initial_refresh(MagicMock(), coordinator, entry, asyncio.Event())
+            init_module._async_initial_refresh(
+                MagicMock(),
+                SimpleNamespace(coordinator=coordinator, subentry_id="sub", station_id="123"),
+                entry,
+                asyncio.Event(),
+            )
         )
         await coordinator.started.wait()
         task.cancel()
@@ -1812,12 +1818,20 @@ def test_station_not_found_creates_issue_and_success_deletes_it() -> None:
         title="Test Station",
         data={init_module.CONF_STATION_ID: "123"},
     )
+    entry.subentries = {"sub": SimpleNamespace(title="Test Station")}
     hass = MagicMock()
     issue_registry = init_module.issue_registry
     issue_registry.async_create_issue.reset_mock()
     issue_registry.async_delete_issue.reset_mock()
 
-    asyncio.run(init_module._async_initial_refresh(hass, coordinator, entry, asyncio.Event()))
+    asyncio.run(
+        init_module._async_initial_refresh(
+            hass,
+            SimpleNamespace(coordinator=coordinator, subentry_id="sub", station_id="123"),
+            entry,
+            asyncio.Event(),
+        )
+    )
 
     issue_registry.async_create_issue.assert_called_once()
     assert issue_registry.async_create_issue.call_args.kwargs["translation_key"] == (
@@ -1825,9 +1839,16 @@ def test_station_not_found_creates_issue_and_success_deletes_it() -> None:
     )
 
     coordinator.not_found = False
-    asyncio.run(init_module._async_initial_refresh(hass, coordinator, entry, asyncio.Event()))
+    asyncio.run(
+        init_module._async_initial_refresh(
+            hass,
+            SimpleNamespace(coordinator=coordinator, subentry_id="sub", station_id="123"),
+            entry,
+            asyncio.Event(),
+        )
+    )
     issue_registry.async_delete_issue.assert_called_once_with(
-        hass, init_module.DOMAIN, "station_not_found_entry_1"
+        hass, init_module.DOMAIN, "station_not_found_sub"
     )
 
 
@@ -1840,7 +1861,11 @@ def test_unload_entry_cancels_initial_refresh_task() -> None:
             init_module.DOMAIN: {
                 init_module._CSV_MANAGER: coordinator.csv_manager,
                 init_module._CSV_UPDATE_LISTENER: MagicMock(),
-                init_module._ACTIVE_ENTRIES: {},
+                "entry_1": {
+                    "listener": MagicMock(),
+                    "coordinator": coordinator,
+                    "initial_refresh_task": pending_task,
+                },
             },
             services_module._SERVICES_REGISTERED: (
                 services_module.SERVICE_FORCE_CSV_UPDATE,
@@ -1853,11 +1878,19 @@ def test_unload_entry_cancels_initial_refresh_task() -> None:
         hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
         entry = SimpleNamespace(
             entry_id="entry_1",
-            runtime_data=OsservaprezziRuntimeData(
-                coordinator, listener=MagicMock(), initial_refresh_task=pending_task
+            data={},
+            runtime_data=init_module.OsservaprezziRuntimeData(
+                stations={
+                    "sub": init_module.StationRuntimeData(
+                        "sub",
+                        "123",
+                        coordinator,
+                        listener=hass.data[init_module.DOMAIN]["entry_1"]["listener"],
+                        initial_refresh_task=pending_task,
+                    )
+                }
             ),
         )
-        hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES][entry.entry_id] = entry
 
         assert await init_module.async_unload_entry(hass, entry) is True
         return pending_task
@@ -1880,7 +1913,7 @@ def test_migrate_entry_version_one_removes_config_type() -> None:
 
 def test_migrate_entry_current_version_is_noop() -> None:
     hass = MagicMock()
-    entry = SimpleNamespace(version=2, data={"station_id": "123"})
+    entry = SimpleNamespace(version=3, data={})
 
     assert asyncio.run(init_module.async_migrate_entry(hass, entry)) is True
     hass.config_entries.async_update_entry.assert_not_called()
@@ -1894,7 +1927,7 @@ def test_unload_entry_removes_listener_coordinator_and_services() -> None:
         init_module.DOMAIN: {
             init_module._CSV_MANAGER: coordinator.csv_manager,
             init_module._CSV_UPDATE_LISTENER: MagicMock(),
-            init_module._ACTIVE_ENTRIES: {},
+            "entry_1": {"listener": listener, "coordinator": coordinator},
         },
         services_module._SERVICES_REGISTERED: (
             services_module.SERVICE_FORCE_CSV_UPDATE,
@@ -1906,9 +1939,16 @@ def test_unload_entry_removes_listener_coordinator_and_services() -> None:
     }
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
     entry = SimpleNamespace(
-        entry_id="entry_1", runtime_data=OsservaprezziRuntimeData(coordinator, listener=listener)
+        entry_id="entry_1",
+        data={},
+        runtime_data=init_module.OsservaprezziRuntimeData(
+            stations={
+                "sub": init_module.StationRuntimeData(
+                    "sub", "123", coordinator, listener=locals().get("listener")
+                )
+            }
+        ),
     )
-    hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES][entry.entry_id] = entry
 
     assert asyncio.run(init_module.async_unload_entry(hass, entry)) is True
     listener.assert_called_once()
@@ -1935,15 +1975,24 @@ def test_unload_entry_returns_false_without_cleanup() -> None:
     hass, _ = _build_hass_with_services()
     listener = MagicMock()
     coordinator = FakeCoordinator()
-    hass.data = {init_module.DOMAIN: {init_module._ACTIVE_ENTRIES: {}}}
+    hass.data = {
+        init_module.DOMAIN: {"entry_1": {"listener": listener, "coordinator": coordinator}}
+    }
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
     entry = SimpleNamespace(
-        entry_id="entry_1", runtime_data=OsservaprezziRuntimeData(coordinator, listener=listener)
+        entry_id="entry_1",
+        data={},
+        runtime_data=init_module.OsservaprezziRuntimeData(
+            stations={
+                "sub": init_module.StationRuntimeData(
+                    "sub", "123", coordinator, listener=locals().get("listener")
+                )
+            }
+        ),
     )
-    hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES][entry.entry_id] = entry
 
     assert asyncio.run(init_module.async_unload_entry(hass, entry)) is False
-    assert "entry_1" in hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES]
+    assert "entry_1" in hass.data[init_module.DOMAIN]
     listener.assert_not_called()
     assert coordinator.shutdown_calls == 0
 
@@ -1951,60 +2000,63 @@ def test_unload_entry_returns_false_without_cleanup() -> None:
 def test_unload_entry_handles_absent_optional_listeners() -> None:
     hass, _ = _build_hass_with_services()
     coordinator = FakeCoordinator()
-    hass.data = {init_module.DOMAIN: {init_module._ACTIVE_ENTRIES: {}}}
+    hass.data = {
+        init_module.DOMAIN: {
+            "entry_1": {
+                "coordinator": coordinator,
+                "listener": None,
+                init_module._REFRESH_RESULT_LISTENER: None,
+            }
+        }
+    }
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
-    entry = SimpleNamespace(entry_id="entry_1", runtime_data=OsservaprezziRuntimeData(coordinator))
-    hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES][entry.entry_id] = entry
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        data={},
+        runtime_data=init_module.OsservaprezziRuntimeData(
+            stations={
+                "sub": init_module.StationRuntimeData(
+                    "sub", "123", coordinator, listener=locals().get("listener")
+                )
+            }
+        ),
+    )
 
     assert asyncio.run(init_module.async_unload_entry(hass, entry)) is True
     assert "entry_1" not in hass.data[init_module.DOMAIN]
     assert coordinator.shutdown_calls == 1
 
 
-def test_failed_unload_restarts_running_initial_refresh(monkeypatch) -> None:
-    async def run_unload() -> tuple[asyncio.Task[None], asyncio.Task[None]]:
+def test_failed_unload_keeps_running_initial_refresh() -> None:
+    async def run_unload() -> None:
         hass, _ = _build_hass_with_services()
         coordinator = FakeCoordinator()
-        stop_event = asyncio.Event()
-        original_task = asyncio.create_task(asyncio.Event().wait())
-        cancel_initial_refresh = AsyncMock()
-        monkeypatch.setattr(
-            init_module,
-            "_async_cancel_initial_refresh",
-            cancel_initial_refresh,
+        task = asyncio.create_task(asyncio.Event().wait())
+        station = init_module.StationRuntimeData(
+            "sub", "123", coordinator, initial_refresh_task=task
         )
-        hass.data = {init_module.DOMAIN: {init_module._ACTIVE_ENTRIES: {}}}
-        hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
         entry = SimpleNamespace(
             entry_id="entry_1",
-            title="Test Station",
-            data={init_module.CONF_STATION_ID: "123"},
-            runtime_data=OsservaprezziRuntimeData(
-                coordinator,
-                initial_refresh_task=original_task,
-                initial_refresh_stop_event=stop_event,
-            ),
+            data={},
+            runtime_data=init_module.OsservaprezziRuntimeData({"sub": station}),
         )
-        hass.data[init_module.DOMAIN][init_module._ACTIVE_ENTRIES][entry.entry_id] = entry
-
+        hass.data = {init_module.DOMAIN: {"entry_1": {"stations": entry.runtime_data.stations}}}
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
         assert await init_module.async_unload_entry(hass, entry) is False
-        replacement_task = entry.runtime_data.initial_refresh_task
-        cancel_initial_refresh.assert_awaited_once_with(original_task)
-        original_task.cancel()
-        replacement_task.cancel()
-        for task in (original_task, replacement_task):
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        return original_task, replacement_task
+        assert not task.done()
+        assert coordinator.shutdown_calls == 0
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
-    original_task, replacement_task = asyncio.run(run_unload())
-    assert original_task.cancelled()
-    assert replacement_task is not original_task
+    asyncio.run(run_unload())
 
 
 def test_remove_entry_deletes_station_not_found_issue() -> None:
     hass = MagicMock()
-    entry = SimpleNamespace(entry_id="entry_1")
+    entry = SimpleNamespace(
+        entry_id="entry_1", subentries={"sub": SimpleNamespace(subentry_id="sub")}
+    )
     init_module.issue_registry.async_delete_issue.reset_mock()
 
     asyncio.run(init_module.async_remove_entry(hass, entry))
@@ -2012,7 +2064,7 @@ def test_remove_entry_deletes_station_not_found_issue() -> None:
     init_module.issue_registry.async_delete_issue.assert_called_once_with(
         hass,
         init_module.DOMAIN,
-        "station_not_found_entry_1",
+        "station_not_found_sub",
     )
 
 
@@ -2040,10 +2092,8 @@ def test_refresh_service_reports_coordinator_failure_without_exception(monkeypat
     successful = FakeCoordinator()
     hass.data = {
         init_module.DOMAIN: {
-            "active_entries": {
-                "failed": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(failed)),
-                "successful": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(successful)),
-            }
+            "failed": {"coordinator": failed},
+            "successful": {"coordinator": successful},
         }
     }
     init_module._async_register_services(hass)
@@ -2074,6 +2124,7 @@ def test_cleanup_legacy_entity_registry_removes_orphaned_devices(monkeypatch) ->
         lambda _reg, _entry_id: [orphaned, current, other],
     )
 
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
     init_module._async_cleanup_legacy_entity_registry(hass, entry)
 
     device_registry.async_update_device.assert_called_once_with(
@@ -2103,8 +2154,190 @@ def test_initial_refresh_continues_when_last_refresh_from_cache(monkeypatch) -> 
     monkeypatch.setattr(
         init_module, "INITIAL_REFRESH_RETRY_INTERVAL", init_module.timedelta(seconds=0)
     )
-    asyncio.run(
-        init_module._async_initial_refresh(hass, CacheFallbackCoordinator(), entry, stop_event)
+    station = SimpleNamespace(
+        coordinator=CacheFallbackCoordinator(), subentry_id="sub", station_id="123"
     )
+    asyncio.run(init_module._async_initial_refresh(hass, station, entry, stop_event))
     assert calls == 2
     assert stop_event.is_set()
+
+
+def test_cleanup_preserves_market_summary(monkeypatch) -> None:
+    entry = SimpleNamespace(entry_id="entry", data={init_module.CONF_STATION_ID: "1"})
+    entities = {
+        key: SimpleNamespace(
+            platform=init_module.DOMAIN,
+            config_entry_id="entry",
+            unique_id=key,
+            entity_id="sensor." + key,
+        )
+        for key in ("market_cheapest_benzina", "market_average_benzina")
+    }
+    registry = SimpleNamespace(
+        entities=entities, async_remove=MagicMock(), async_update_entity=MagicMock()
+    )
+    devices = SimpleNamespace(async_update_device=MagicMock())
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry)
+    monkeypatch.setattr(init_module.dr, "async_get", lambda hass: devices)
+    monkeypatch.setattr(
+        init_module.dr,
+        "async_entries_for_config_entry",
+        lambda *args: [
+            SimpleNamespace(id="market", identifiers={(init_module.DOMAIN, "market_summary")})
+        ],
+    )
+    entry.subentries = {"sub": SimpleNamespace(subentry_type="station", data=entry.data)}
+    init_module._async_cleanup_legacy_entity_registry(MagicMock(), entry)
+    registry.async_remove.assert_not_called()
+    devices.async_update_device.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    (
+        "first",
+        "duplicate",
+        "modern",
+        "cache_error",
+        "missing_device",
+        "save_cache",
+        "missing_market",
+    ),
+    [
+        (True, False, True, False, False, False, False),
+        (False, False, False, False, False, False, False),
+        (False, True, True, True, False, False, False),
+        (False, False, True, False, True, True, True),
+    ],
+)
+def test_migration_consolidates_station_entry(
+    monkeypatch, first, duplicate, modern, cache_error, missing_device, save_cache, missing_market
+):
+    station = SimpleNamespace(
+        entry_id="old",
+        version=2,
+        title="Station",
+        unique_id="station_123",
+        data={"station_id": "123", "tracked_fuels": ["Benzina"]},
+        options={"cron_expression": "0 6 * * *", "price_stale_hours": 48},
+        subentries={},
+    )
+    existing_subentry = init_module.ConfigSubentry(
+        data={"station_id": "123"}, title="Station", unique_id="123", subentry_type="station"
+    )
+    hub = (
+        station
+        if first
+        else SimpleNamespace(
+            entry_id="hub",
+            unique_id="hub",
+            state=init_module.ConfigEntryState.LOADED
+            if modern
+            else init_module.ConfigEntryState.NOT_LOADED,
+            subentries={"existing": existing_subentry} if duplicate else {},
+        )
+    )
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [station] if first else [hub, station]
+    hass.config_entries.async_remove = AsyncMock(return_value=True)
+    hass.async_create_task.side_effect = lambda coroutine: asyncio.create_task(coroutine)
+
+    def update(entry, **kwargs):
+        for key, value in kwargs.items():
+            setattr(entry, key, value)
+
+    hass.config_entries.async_update_entry.side_effect = update
+    hass.config_entries.async_add_subentry.side_effect = lambda entry, sub: entry.subentries.update(
+        {sub.subentry_id: sub}
+    )
+    store = MagicMock()
+    store.async_load = AsyncMock(
+        side_effect=RuntimeError("cache") if cache_error else None, return_value=None
+    )
+    store.async_save = AsyncMock()
+    if save_cache:
+        store.async_load.side_effect = [{"cached": True}, None]
+    monkeypatch.setattr(init_module, "Store", MagicMock(return_value=store))
+    registry = MagicMock()
+    entity = SimpleNamespace(unique_id="123_Benzina_self", entity_id="sensor.test")
+    summary = SimpleNamespace(unique_id="market_cheapest_benzina", entity_id="sensor.summary")
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: registry, raising=False)
+    monkeypatch.setattr(
+        init_module.er,
+        "async_entries_for_config_entry",
+        lambda reg, eid: [entity, summary],
+        raising=False,
+    )
+    device = SimpleNamespace(
+        id="device",
+        identifiers={(init_module.DOMAIN, "123")},
+        **({"config_entry_id": "old"} if modern else {}),
+    )
+    market = SimpleNamespace(
+        id="market",
+        identifiers={(init_module.DOMAIN, "market_summary")},
+        config_entries={"old"},
+    )
+    devices = MagicMock()
+    entry_devices = ([] if missing_device else [device]) + ([] if missing_market else [market])
+    monkeypatch.setattr(init_module.dr, "async_get", lambda hass: devices, raising=False)
+    monkeypatch.setattr(
+        init_module.dr,
+        "async_entries_for_config_entry",
+        lambda reg, eid: entry_devices,
+        raising=False,
+    )
+
+    async def migrate():
+        assert await init_module.async_migrate_entry(hass, station)
+        await asyncio.sleep(0)
+
+    asyncio.run(migrate())
+    assert station.version == 3
+    if first:
+        assert station.unique_id == "hub"
+    else:
+        assert station.data == {init_module.CONF_MIGRATED_TO_HUB: True}
+        if modern:
+            hass.config_entries.async_schedule_reload.assert_called_once_with(hub.entry_id)
+        else:
+            hass.config_entries.async_schedule_reload.assert_not_called()
+        hass.config_entries.async_remove.assert_awaited_once_with("old")
+    registry.async_update_entity.assert_any_call(
+        "sensor.test",
+        config_entry_id=hub.entry_id,
+        config_subentry_id=next(iter(hub.subentries.values())).subentry_id,
+    )
+    assert devices.async_update_device.called is not missing_device
+    if save_cache:
+        store.async_save.assert_awaited_once_with({"cached": True})
+
+
+def test_migrated_setup_does_not_reserve_resources():
+    hass = MagicMock()
+    entry = SimpleNamespace(data={init_module.CONF_MIGRATED_TO_HUB: True})
+    assert asyncio.run(init_module.async_setup_entry(hass, entry)) is True
+    assert not hass.data.setdefault.called
+
+
+def test_setup_ignores_other_subentry_types(monkeypatch):
+    monkeypatch.setattr(init_module, "async_track_time_interval", lambda *args: lambda: None)
+    monkeypatch.setattr(init_module.er, "async_get", lambda hass: FakeEntityRegistry({}))
+    hass, _ = _build_hass_with_services()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    entry = SimpleNamespace(
+        entry_id="hub",
+        title="Hub",
+        data={},
+        subentries={"other": SimpleNamespace(subentry_type="other")},
+        async_on_unload=MagicMock(),
+        add_update_listener=MagicMock(),
+    )
+
+    async def run():
+        assert await init_module.async_setup_entry(hass, entry)
+        assert entry.runtime_data.stations == {}
+        assert await init_module.async_unload_entry(hass, entry)
+
+    asyncio.run(run())

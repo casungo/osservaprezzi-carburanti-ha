@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER
+from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.osservaprezzi_carburanti import config_flow
 from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
 from custom_components.osservaprezzi_carburanti.csv_manager import RegistrySnapshot
+from tests.ha.test_hub import hub, station
 
 
 async def test_manual_station_id_path(hass: HomeAssistant, monkeypatch) -> None:
@@ -44,8 +45,9 @@ async def test_manual_station_id_path(hass: HomeAssistant, monkeypatch) -> None:
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Manual Station"
-    assert result["data"] == {CONF_STATION_ID: "123"}
+    assert result["title"] == "Osservaprezzi Carburanti"
+    assert result["data"] == {}
+    assert next(iter(result["result"].subentries.values())).data[CONF_STATION_ID] == "123"
     validate_station.assert_awaited_once_with(hass, "123")
 
 
@@ -113,11 +115,10 @@ async def test_nearby_home_path_adds_selected_stations(
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_STATION_ID: "456"}
-    assert result["result"].unique_id == "station_456"
-    entries = hass.config_entries.async_entries(DOMAIN)
-    assert {entry.data[CONF_STATION_ID] for entry in entries} == {"456", "789"}
-    assert {entry.unique_id for entry in entries} == {"station_456", "station_789"}
+    assert result["data"] == {}
+    entry = result["result"]
+    assert entry.unique_id == "hub"
+    assert {subentry.unique_id for subentry in entry.subentries.values()} == {"456", "789"}
     manager.async_ensure_registry.assert_awaited_once_with(allow_stale=True)
     assert validate_station.await_args_list == [
         ((hass, "456"),),
@@ -130,41 +131,32 @@ async def test_reconfigure_changes_station_in_place(
     monkeypatch,
 ) -> None:
     """Use Home Assistant's reconfigure contract without creating a new entry."""
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Old Station",
-        unique_id="station_123",
-        data={CONF_STATION_ID: "123"},
-    )
+    entry = hub("123")
     entry.add_to_hass(hass)
+    subentry = next(iter(entry.subentries.values()))
     validate_station = AsyncMock(return_value={"name": "New Station"})
     monkeypatch.setattr(config_flow, "_validate_station", validate_station)
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": SOURCE_RECONFIGURE,
-            "entry_id": entry.entry_id,
+    monkeypatch.setattr(hass.config_entries, "async_reload", AsyncMock(return_value=True))
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "station"),
+        context={"source": "reconfigure", "subentry_id": subentry.subentry_id},
+    )
+    assert result["type"] is FlowResultType.FORM
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_STATION_ID: "456",
+            "cron_expression": "30 8 * * *",
+            "price_stale_hours": "24",
+            "tracked_fuels": [],
+            "tracked_service_modes": [],
         },
     )
-    assert result["type"] is FlowResultType.MENU
-    assert result["step_id"] == "reconfigure"
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "station_id"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {CONF_STATION_ID: "456"},
-    )
-
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data == {CONF_STATION_ID: "456"}
-    assert entry.unique_id == "station_456"
-    assert entry.title == "New Station"
+    assert subentry.data[CONF_STATION_ID] == "456"
+    assert subentry.unique_id == "456"
+    assert subentry.title == "New Station"
 
 
 def _suggestions(result) -> dict:
@@ -178,11 +170,7 @@ def _suggestions(result) -> dict:
 
 async def test_area_retry_preserves_fields_and_excludes_configured(hass, monkeypatch) -> None:
     """Keep the user's filters and selections through a temporary API failure."""
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-    existing = MockConfigEntry(
-        domain=DOMAIN, unique_id="station_123", data={CONF_STATION_ID: "123"}
-    )
+    existing = hub("123")
     existing.add_to_hass(hass)
     snapshot = RegistrySnapshot(
         stations=tuple(
@@ -196,32 +184,39 @@ async def test_area_retry_preserves_fields_and_excludes_configured(hass, monkeyp
     manager.registry_station_types.return_value = ()
     manager.async_ensure_registry = AsyncMock(return_value=snapshot)
     monkeypatch.setattr(config_flow, "get_shared_csv_manager", lambda hass: manager)
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(
+    result = await hass.config_entries.subentries.async_init(
+        (existing.entry_id, "station"), context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"next_step_id": "area"}
     )
     values = {"municipality": "Unknown", "province": "", "text_filter": "", "result_limit": 9}
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], values)
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], values)
     assert result["errors"] == {"base": "no_stations_found"}
     assert _suggestions(result)["municipality"] == "Unknown"
     assert _suggestions(result)["result_limit"] == 9
 
     values["municipality"] = "Roma"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], values)
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], values)
     selector = next(iter(result["data_schema"].schema.values()))
     assert [option["value"] for option in selector.config["options"]] == ["456"]
     validate = AsyncMock(side_effect=config_flow.CannotConnect("offline"))
     monkeypatch.setattr(config_flow, "_validate_station", validate)
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_STATION_ID: ["456"]}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "456"}
     )
     assert result["errors"] == {"base": "cannot_connect"}
-    assert _suggestions(result)[CONF_STATION_ID] == ["456"]
+    assert _suggestions(result)[CONF_STATION_ID] == "456"
 
-    second = MockConfigEntry(domain=DOMAIN, unique_id="station_456", data={CONF_STATION_ID: "456"})
-    second.add_to_hass(hass)
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_STATION_ID: ["456"]}
+    from types import MappingProxyType
+
+    from homeassistant.config_entries import ConfigSubentry
+
+    payload = station("456")
+    payload["data"] = MappingProxyType(payload["data"])
+    hass.config_entries.async_add_subentry(existing, ConfigSubentry(**payload))
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_STATION_ID: "456"}
     )
     assert result["step_id"] == "area"
     assert result["errors"] == {"base": "all_stations_configured"}
@@ -230,72 +225,42 @@ async def test_area_retry_preserves_fields_and_excludes_configured(hass, monkeyp
     validate.assert_awaited_once()
 
 
-async def test_options_presets_and_custom_cron(hass) -> None:
-    """Preserve existing custom schedules and use native translated selectors."""
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-    from custom_components.osservaprezzi_carburanti.const import (
-        CONF_CRON_EXPRESSION,
-        CONF_PRICE_STALE_HOURS,
-    )
-
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        unique_id="station_123",
-        data={CONF_STATION_ID: "123"},
-        options={CONF_CRON_EXPRESSION: "17 9 * * 2", CONF_PRICE_STALE_HOURS: 48},
-    )
+async def test_custom_cron_validation(hass, monkeypatch) -> None:
+    """Reject invalid cron and retain station options until a valid update."""
+    entry = hub("123")
     entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    fields = result["data_schema"].schema
-    schedule_marker = next(marker for marker in fields if marker.schema == "refresh_schedule")
-    assert schedule_marker.default() == "custom"
-    assert fields[schedule_marker].config["translation_key"] == "refresh_schedule"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"refresh_schedule": "custom", CONF_PRICE_STALE_HOURS: "72"}
+    subentry = next(iter(entry.subentries.values()))
+    monkeypatch.setattr(
+        config_flow, "_validate_station", AsyncMock(return_value={"name": "Station"})
     )
-    assert result["step_id"] == "custom"
-    assert next(iter(result["data_schema"].schema)).default() == "17 9 * * 2"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_CRON_EXPRESSION: "bad"}
+    monkeypatch.setattr(hass.config_entries, "async_reload", AsyncMock(return_value=True))
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "station"),
+        context={"source": "reconfigure", "subentry_id": subentry.subentry_id},
     )
-    assert result["errors"] == {CONF_CRON_EXPRESSION: "invalid_cron_expression"}
-    assert _suggestions(result)[CONF_CRON_EXPRESSION] == "bad"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_CRON_EXPRESSION: "0 6 * * *"}
-    )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {
-        CONF_CRON_EXPRESSION: "0 6 * * *",
-        CONF_PRICE_STALE_HOURS: 72,
+    values = {
+        CONF_STATION_ID: "123",
+        "cron_expression": "bad",
+        "price_stale_hours": "72",
         "tracked_fuels": [],
         "tracked_service_modes": [],
     }
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"refresh_schedule": "every_six_hours", CONF_PRICE_STALE_HOURS: "24"}
-    )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {
-        CONF_CRON_EXPRESSION: "0 */6 * * *",
-        CONF_PRICE_STALE_HOURS: 24,
-        "tracked_fuels": [],
-        "tracked_service_modes": [],
-    }
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], values)
+    assert result["errors"] == {"cron_expression": "invalid_cron_expression"}
+    values["cron_expression"] = "0 6 * * *"
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], values)
+    assert result["type"] is FlowResultType.ABORT
+    assert subentry.data["cron_expression"] == "0 6 * * *"
+    assert subentry.data["price_stale_hours"] == 72
 
 
 async def test_docker_probe_accepts_all_configured_search_results(hass, monkeypatch) -> None:
     """Keep the Docker regression compatible with the duplicate-free selectors."""
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
     from scripts import ha_docker_probe as probe
 
     hass.config.latitude = probe.ROME[config_flow.CONF_LATITUDE]
     hass.config.longitude = probe.ROME[config_flow.CONF_LONGITUDE]
-    MockConfigEntry(
-        domain=DOMAIN, unique_id="station_123", data={CONF_STATION_ID: "123"}
-    ).add_to_hass(hass)
+    hub("123").add_to_hass(hass)
     manager = MagicMock()
     manager.registry_station_types.return_value = ()
     manager.async_ensure_registry = AsyncMock(
@@ -319,3 +284,4 @@ async def test_docker_probe_accepts_all_configured_search_results(hass, monkeypa
     await probe._exercise_coordinates_path(hass)
     await probe._exercise_area_path(hass)
     assert not hass.config_entries.flow.async_progress()
+    assert not hass.config_entries.subentries.async_progress()

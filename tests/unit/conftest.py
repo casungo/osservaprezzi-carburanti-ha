@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 
 class _MockEntity:
@@ -69,6 +70,10 @@ class _SentinelHomeAssistantError(Exception):
         self.translation_key = kwargs.get("translation_key")
 
 
+class _SentinelServiceValidationError(_SentinelHomeAssistantError):
+    """Stands in for ServiceValidationError."""
+
+
 class _SentinelUpdateFailed(_SentinelHomeAssistantError):
     """Stands in for homeassistant.helpers.update_coordinator.UpdateFailed."""
 
@@ -96,6 +101,69 @@ class _MockOptionsFlow(_MockConfigFlow):
         """Store the config entry like Home Assistant's options flow base."""
         self.config_entry = config_entry
         self.options = getattr(config_entry, "options", {}) if config_entry else {}
+
+
+@dataclass
+class _MockConfigSubentry:
+    data: dict
+    subentry_type: str
+    title: str
+    unique_id: str | None
+    subentry_id: str = ""
+
+    def __post_init__(self):
+        if not self.subentry_id:
+            self.subentry_id = uuid4().hex
+
+
+class _MockConfigSubentryFlow(_MockConfigFlow):
+    """Minimal station flow with entry and reconfiguration accessors."""
+
+    def _get_entry(self):
+        return self.config_entry
+
+    def _get_reconfigure_subentry(self):
+        return self.config_entry.subentries[self.context["subentry_id"]]
+
+    def async_create_entry(self, **kwargs):
+        return {"type": "create_entry", **kwargs}
+
+    def async_update_reload_and_abort(self, entry, subentry, **kwargs):
+        self.hass.config_entries.async_update_subentry(
+            entry,
+            subentry,
+            data={**subentry.data, **kwargs.get("data_updates", {})},
+            title=kwargs.get("title", subentry.title),
+            unique_id=kwargs.get("unique_id", subentry.unique_id),
+        )
+        return {"type": "abort", "reason": "reconfigure_successful"}
+
+
+class _MockConfigEntries:
+    """In-memory subentry operations for lightweight tests."""
+
+    def async_add_subentry(self, entry, subentry):
+        entry.subentries[subentry.subentry_id] = subentry
+        return True
+
+    def async_update_subentry(self, entry, subentry, **changes):
+        for key, value in changes.items():
+            setattr(subentry, key, value)
+        return True
+
+    def async_remove_subentry(self, entry, subentry_id):
+        del entry.subentries[subentry_id]
+        return True
+
+
+class _MockAddConfigEntryEntitiesCallback:
+    """Record entity additions with their station association."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, entities, update_before_add=False, *, config_subentry_id=None):
+        self.calls.append((list(entities), update_before_add, config_subentry_id))
 
 
 def _mock_ha_modules():
@@ -139,6 +207,9 @@ def _mock_ha_modules():
         "homeassistant.components.sensor"
     ].SensorEntityDescription = _MockSensorEntityDescription
     sys.modules["homeassistant.components.sensor"].SensorEntity = _MockSensorEntity
+    sys.modules["homeassistant.components.sensor"].SensorDeviceClass = MagicMock(
+        TIMESTAMP="timestamp"
+    )
     sys.modules["homeassistant.components.sensor"].SensorStateClass = MagicMock(
         MEASUREMENT="measurement"
     )
@@ -173,10 +244,15 @@ def _mock_ha_modules():
         BINARY_SENSOR="binary_sensor",
     )
     sys.modules["homeassistant.exceptions"].HomeAssistantError = _SentinelHomeAssistantError
+    sys.modules["homeassistant.exceptions"].ServiceValidationError = _SentinelServiceValidationError
     sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = _SentinelConfigEntryNotReady
     sys.modules["homeassistant.data_entry_flow"].FlowResult = dict
     sys.modules["homeassistant.config_entries"].ConfigEntry = _MockCoordinatorEntity
     sys.modules["homeassistant.config_entries"].ConfigFlow = _MockConfigFlow
+    sys.modules["homeassistant.config_entries"].ConfigSubentry = _MockConfigSubentry
+    sys.modules["homeassistant.config_entries"].ConfigSubentryData = dict
+    sys.modules["homeassistant.config_entries"].ConfigSubentryFlow = _MockConfigSubentryFlow
+    sys.modules["homeassistant.config_entries"].ConfigEntries = _MockConfigEntries
     sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict
     sys.modules["homeassistant.config_entries"].OptionsFlow = _MockOptionsFlow
     sys.modules["homeassistant.config_entries"].SOURCE_IMPORT = "import"
@@ -204,6 +280,9 @@ def _mock_ha_modules():
     )
     sys.modules["homeassistant.helpers.entity_registry"].async_get = MagicMock()
     sys.modules["homeassistant.helpers.entity_platform"].async_get_platforms = MagicMock()
+    sys.modules[
+        "homeassistant.helpers.entity_platform"
+    ].AddConfigEntryEntitiesCallback = _MockAddConfigEntryEntitiesCallback
     sys.modules["voluptuous"].Required = MagicMock()
     sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
     sys.modules["homeassistant.helpers"].entity_platform = sys.modules[

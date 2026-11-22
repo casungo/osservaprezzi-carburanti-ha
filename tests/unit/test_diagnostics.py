@@ -10,8 +10,8 @@ from custom_components.osservaprezzi_carburanti import diagnostics
 from custom_components.osservaprezzi_carburanti.const import (
     CONF_CRON_EXPRESSION,
     CONF_STATION_ID,
+    DOMAIN,
 )
-from custom_components.osservaprezzi_carburanti.runtime import OsservaprezziRuntimeData
 
 
 class _Coordinator:
@@ -43,24 +43,30 @@ class _Coordinator:
 
 def _entry(coordinator=None) -> SimpleNamespace:
     return SimpleNamespace(
+        runtime_data=SimpleNamespace(stations={"sub": SimpleNamespace(coordinator=coordinator)})
+        if coordinator is not None
+        else None,
+        subentries={
+            "sub": SimpleNamespace(
+                data={CONF_STATION_ID: "12345", CONF_CRON_EXPRESSION: "0 6 * * *"}
+            )
+        },
         entry_id="entry-1",
-        runtime_data=OsservaprezziRuntimeData(coordinator) if coordinator else None,
         data={CONF_STATION_ID: "12345"},
         options={CONF_CRON_EXPRESSION: "0 6 * * *"},
     )
 
 
 def test_diagnostics_redacts_station_and_omits_location(monkeypatch) -> None:
-    monkeypatch.setattr(diagnostics, "CarburantiDataUpdateCoordinator", _Coordinator)
     monkeypatch.setattr(diagnostics, "get_next_run_time", lambda _: datetime(2025, 1, 1))
     coordinator = _Coordinator()
-    hass = SimpleNamespace(data={})
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": {"coordinator": coordinator}}})
 
     result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, _entry(coordinator)))
 
     assert result["entry"]["data"][CONF_STATION_ID] == "**REDACTED**"
     assert result["loaded"] is True
-    assert result["coordinator"] == {
+    assert result["stations"]["sub"]["coordinator"] == {
         "last_update_success": True,
         "last_refresh_from_cache": False,
         "station_not_found": False,
@@ -72,7 +78,7 @@ def test_diagnostics_redacts_station_and_omits_location(monkeypatch) -> None:
         "service_count": 1,
         "opening_hours_count": 1,
     }
-    assert result["registry"]["station_count"] == 100
+    assert result["stations"]["sub"]["registry"]["station_count"] == 100
     assert "station_info" not in result
     assert "latitude" not in str(result)
     assert "Private" not in str(result)
@@ -89,29 +95,27 @@ def test_diagnostics_handles_unloaded_entry() -> None:
             "options": {CONF_CRON_EXPRESSION: "0 6 * * *"},
         },
         "loaded": False,
+        "stations": {},
     }
 
 
 def test_diagnostics_handles_unexpected_payload_shapes(monkeypatch) -> None:
-    monkeypatch.setattr(diagnostics, "CarburantiDataUpdateCoordinator", _Coordinator)
     coordinator = _Coordinator()
     coordinator.data = {
         "fuels": [],
         "services": {},
         "opening_hours": {},
     }
-    hass = SimpleNamespace(data={})
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": {"coordinator": coordinator}}})
 
     result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, _entry(coordinator)))
 
-    assert result["coordinator"]["fuel_count"] == 0
-    assert result["coordinator"]["service_count"] == 0
-    assert result["coordinator"]["opening_hours_count"] == 0
+    assert result["stations"]["sub"]["coordinator"]["fuel_count"] == 0
+    assert result["stations"]["sub"]["coordinator"]["service_count"] == 0
+    assert result["stations"]["sub"]["coordinator"]["opening_hours_count"] == 0
 
 
 def test_diagnostics_reports_stale_fuels_and_invalid_schedule(monkeypatch) -> None:
-    monkeypatch.setattr(diagnostics, "CarburantiDataUpdateCoordinator", _Coordinator)
-
     def invalid_schedule(_):
         raise ValueError("invalid schedule")
 
@@ -125,9 +129,12 @@ def test_diagnostics_reports_stale_fuels_and_invalid_schedule(monkeypatch) -> No
     }
     result = asyncio.run(
         diagnostics.async_get_config_entry_diagnostics(
-            SimpleNamespace(data={}), _entry(coordinator)
+            SimpleNamespace(data={DOMAIN: {"entry-1": {"coordinator": coordinator}}}),
+            _entry(coordinator),
         )
     )
-    assert result["coordinator"]["stale_fuel_count"] == 1
-    assert result["coordinator"]["data_last_update"] == "2025-01-01T00:00:00+00:00"
-    assert result["coordinator"]["next_scheduled_refresh"] is None
+    assert result["stations"]["sub"]["coordinator"]["stale_fuel_count"] == 1
+    assert (
+        result["stations"]["sub"]["coordinator"]["data_last_update"] == "2025-01-01T00:00:00+00:00"
+    )
+    assert result["stations"]["sub"]["coordinator"]["next_scheduled_refresh"] is None

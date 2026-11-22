@@ -40,10 +40,28 @@ make kpi KPI_BASELINE=v2.6.0
 
 ## 3. Release guard and tagging
 
+### Release notes
+
+Write the GitHub release title and description in Italian for people using the Home Assistant
+app, including users without a technical background. Keep the title short and omit the version
+number. Use a few concise bullets about changes users can see or need to act on; explain any
+compatibility requirement or breaking change clearly. Do not list test results, coverage,
+internal implementation details, or unnecessary technical attachments.
+
+Check the actual code and commits, not earlier release descriptions. Compare prereleases with
+the preceding published version; for a stable release, also compare with the previous stable
+release so its notes cover changes introduced during prereleases. Verify the release flags rather
+than inferring the channel from the tag name. If a change is uncertain, investigate before
+describing it. Save the final description as a UTF-8 Markdown file and supply it to
+`gh release create` with `--notes-file`; use the descriptive title with `--title`.
+
 Run `scripts/release_guard.py` after committing the version bump (`manifest.json`) and
 `CHANGELOG.md`, and after pushing the target branch, before creating a tag. It requires a clean
 worktree and checks that `HEAD` matches the remote branch head and tag/channel naming rules
 (stable `X.Y.Z`; prerelease requires a SemVer suffix such as `X.Y.Z-beta.N`).
+
+Set `RELEASE_TITLE` to the reviewed title and `RELEASE_NOTES_FILE` to the path of the reviewed
+Markdown description before running either command below.
 
 Stable release:
 
@@ -55,7 +73,7 @@ TARGET_COMMIT="$(git rev-parse HEAD)"
 .venv/bin/python scripts/release_guard.py --channel stable --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
 git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"
 git push origin "$TAG"
-gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG"
+gh release create "$TAG" --target "$TARGET_COMMIT" --title "$RELEASE_TITLE" --notes-file "$RELEASE_NOTES_FILE"
 ```
 
 Prerelease:
@@ -68,7 +86,7 @@ TARGET_COMMIT="$(git rev-parse HEAD)"
 .venv/bin/python scripts/release_guard.py --channel prerelease --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
 git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"
 git push origin "$TAG"
-gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG" --prerelease
+gh release create "$TAG" --target "$TARGET_COMMIT" --title "$RELEASE_TITLE" --notes-file "$RELEASE_NOTES_FILE" --prerelease
 ```
 
 ## 4. Manual canary checklist

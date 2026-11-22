@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from email.utils import parsedate_to_datetime
 import logging
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
+from email.utils import parsedate_to_datetime
 from math import ceil, isfinite
 from typing import Any, cast
 
@@ -23,8 +23,8 @@ from .const import (
 )
 from .csv_manager import CSVStationManager
 from .data_helpers import parse_coordinate
-from .price_metadata import _finite_price
 from .models import ProcessedFuel, ProcessedPayload, ProcessedStationInfo, StationPayload
+from .price_metadata import _finite_price
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ _UNSET = object()
 class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
     """Coordinate API and CSV enrichment updates for a single station."""
 
+    config_entry: ConfigEntry
     _fast_fail_next_refresh: bool = False
 
     def __init__(
@@ -105,7 +106,9 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
         services = data.get("services")
         return (
             isinstance(fuels, dict)
-            and all(isinstance(key, str) and isinstance(value, dict) for key, value in fuels.items())
+            and all(
+                isinstance(key, str) and isinstance(value, dict) for key, value in fuels.items()
+            )
             and isinstance(services, list)
             and all(
                 isinstance(item, (dict, int, str)) and not isinstance(item, bool)
@@ -178,7 +181,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
                     self.station_not_found = True
                     raise UpdateFailed(f"Station with ID {station_id} not found") from err
                 last_err = err
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, TimeoutError) as err:
                 last_err = err
 
             if attempt < len(retry_delays):
@@ -214,7 +217,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             if retry_after:
                 try:
                     seconds = float(retry_after)
-                except (TypeError, ValueError, OverflowError):
+                except TypeError, ValueError, OverflowError:
                     seconds = None
                 if seconds is not None and isfinite(seconds):
                     parsed_delay = int(seconds)
@@ -223,15 +226,12 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
                 try:
                     retry_at = parsedate_to_datetime(retry_after)
                     if retry_at.tzinfo is None:
-                        retry_at = retry_at.replace(tzinfo=timezone.utc)
+                        retry_at = retry_at.replace(tzinfo=UTC)
                     now = dt_util.now()
                     if now.tzinfo is None:
-                        now = now.replace(tzinfo=timezone.utc)
-                    delay = (
-                        retry_at.astimezone(timezone.utc)
-                        - now.astimezone(timezone.utc)
-                    ).total_seconds()
-                except (TypeError, ValueError, OverflowError, IndexError):
+                        now = now.replace(tzinfo=UTC)
+                    delay = (retry_at.astimezone(UTC) - now.astimezone(UTC)).total_seconds()
+                except TypeError, ValueError, OverflowError, IndexError:
                     return default_delay
                 if isfinite(delay) and delay > 0:
                     return min(ceil(delay), MAX_RETRY_AFTER_SECONDS)
@@ -240,7 +240,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
     @staticmethod
     def _is_transient_error(err: Exception | None) -> bool:
         """Return True for recoverable request failures."""
-        if isinstance(err, asyncio.TimeoutError):
+        if isinstance(err, TimeoutError):
             return True
         if isinstance(err, aiohttp.ClientResponseError):
             return err.status != 404
@@ -250,7 +250,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
         self,
         station_id: str | None,
         *,
-        csv_station: dict[str, Any] | None | object = _UNSET,
+        csv_station: dict[str, Any] | object | None = _UNSET,
     ) -> dict[str, float | str] | None:
         """Get station coordinates using CSV data only."""
         if not station_id:
@@ -299,14 +299,14 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
         if parsed_dt is None:
             try:
                 parsed_dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 _LOGGER.warning("Failed to parse datetime: %s", datetime_str)
                 return None
 
         if parsed_dt.tzinfo is None:
             local_timezone = dt_util.get_default_time_zone()
             if not isinstance(local_timezone, tzinfo):
-                local_timezone = timezone.utc
+                local_timezone = UTC
             parsed_dt = parsed_dt.replace(tzinfo=local_timezone)
         return parsed_dt.replace(microsecond=0).isoformat()
 
@@ -398,8 +398,9 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             finite_price = _finite_price(new_price)
             if finite_price is not None:
                 history_by_date[now_iso[:10]] = finite_price
-            history = [{"date": date, "price": history_by_date[date]}
-                       for date in sorted(history_by_date)]
+            history = [
+                {"date": date, "price": history_by_date[date]} for date in sorted(history_by_date)
+            ]
 
             processed_fuel: ProcessedFuel = {
                 "price": new_price,

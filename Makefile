@@ -1,20 +1,51 @@
-.PHONY: test test-ha lint typecheck check hassfest hacs kpi
+.PHONY: help setup test test-ha format format-check lint typecheck check hassfest hacs kpi
 
 PYTHON ?= .venv/bin/python
 HA_PYTHON ?= .venv-ha/bin/python
+BASE_PYTHON ?= $(shell command -v python3.14 2>/dev/null || uv python find 3.14 2>/dev/null || echo python3.14)
 
 test:
 	$(PYTHON) -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
-	$(PYTHON) -m coverage report --fail-under=100
+	$(PYTHON) -m coverage report --fail-under=100 --show-missing
+
+help:
+	@printf '%s\n' \
+		'setup          Create test environments and install dependencies' \
+		'check          Run lint, type checking, and both test suites' \
+		'lint           Check Python code style and formatting' \
+		'format         Format Python code' \
+		'format-check   Check Python formatting' \
+		'typecheck      Run type checking against Home Assistant' \
+		'test           Run unit tests with coverage' \
+		'test-ha        Run Home Assistant contract tests' \
+		'hassfest       Run Home Assistant integration validation' \
+		'hacs           Validate the remote GitHub ref with HACS' \
+		'kpi            Compare release performance and correctness'
+
+setup:
+	@if [ ! -x .venv/bin/python ] || [ ! -x .venv-ha/bin/python ]; then \
+		command -v $(BASE_PYTHON) >/dev/null 2>&1 || { echo 'Missing $(BASE_PYTHON); install it or set BASE_PYTHON to an available Python executable.' >&2; exit 1; }; \
+	fi
+	@test -x .venv/bin/python || $(BASE_PYTHON) -m venv .venv
+	.venv/bin/python -m pip install -r requirements-test.txt
+	@test -x .venv-ha/bin/python || $(BASE_PYTHON) -m venv .venv-ha
+	.venv-ha/bin/python -m pip install -r requirements-ha-test.txt
 
 test-ha:
-	$(HA_PYTHON) -m pytest -c pytest-ha.ini -q
+	$(HA_PYTHON) -m pytest tests/ha -o asyncio_mode=auto -q
+
+format:
+	$(PYTHON) -m ruff format .
+
+format-check:
+	$(PYTHON) -m ruff format --check .
 
 lint:
 	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
 
 typecheck:
-	$(PYTHON) -m mypy
+	$(HA_PYTHON) -m mypy
 
 check: lint typecheck test test-ha
 
@@ -40,9 +71,3 @@ KPI_BASELINE ?= previous-stable
 KPI_ARGS ?=
 kpi:
 	$(PYTHON) scripts/benchmark_release.py --baseline $(KPI_BASELINE) $(KPI_ARGS)
-
-# Bounded real HA duration comparison; supply retained inputs and a new output path.
-SOAK_ARGS ?=
-.PHONY: soak
-soak:
-	$(PYTHON) scripts/soak_release.py $(SOAK_ARGS)

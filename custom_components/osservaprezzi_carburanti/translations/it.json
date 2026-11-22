@@ -282,7 +282,45 @@
     },
     "compare_stations": {
       "name": "Confronta prezzi stazioni",
-      "description": "Restituisce un confronto dei prezzi dei carburanti tra tutte le stazioni configurate."
+      "description": "Restituisce un confronto dei prezzi dei carburanti tra tutte le stazioni configurate.",
+      "fields": {
+        "fuel_type": {
+          "name": "Tipo di carburante",
+          "description": "Filtra facoltativamente per nome o chiave del carburante."
+        },
+        "service_mode": {
+          "name": "Modalità di servizio",
+          "description": "Filtra i prezzi self o servito."
+        },
+        "exclude_stale": {
+          "name": "Escludi prezzi obsoleti",
+          "description": "Esclude i prezzi più vecchi della soglia di freschezza configurata."
+        },
+        "only_open": {
+          "name": "Solo stazioni aperte",
+          "description": "Include solo le stazioni attualmente aperte."
+        },
+        "liters": {
+          "name": "Litri",
+          "description": "Quantità facoltativa per calcolare il costo totale stimato e il risparmio."
+        },
+        "sort_by": {
+          "name": "Ordina per",
+          "description": "Ordina i risultati per prezzo o distanza."
+        },
+        "latitude": {
+          "name": "Latitudine",
+          "description": "Latitudine usata per calcolare le distanze."
+        },
+        "longitude": {
+          "name": "Longitudine",
+          "description": "Longitudine usata per calcolare le distanze."
+        },
+        "zone": {
+          "name": "Zona",
+          "description": "Zona usata per calcolare le distanze."
+        }
+      }
     },
     "refresh_prices": {
       "name": "Aggiorna prezzi carburanti",
@@ -291,6 +329,14 @@
         "station_ids": {
           "name": "ID delle stazioni",
           "description": "Elenco facoltativo degli ID delle stazioni configurate da aggiornare."
+        },
+        "device_id": {
+          "name": "Stazioni (dispositivi)",
+          "description": "Dispositivi delle stazioni da aggiornare, facoltativi."
+        },
+        "entity_id": {
+          "name": "Entità delle stazioni",
+          "description": "Entità delle stazioni da aggiornare, facoltative."
         }
       }
     },
@@ -317,6 +363,22 @@
         "limit": {
           "name": "Risultati massimi",
           "description": "Numero massimo di stazioni da restituire."
+        },
+        "latitude": {
+          "name": "Latitudine",
+          "description": "Latitudine del centro della ricerca."
+        },
+        "longitude": {
+          "name": "Longitudine",
+          "description": "Longitudine del centro della ricerca."
+        },
+        "radius_km": {
+          "name": "Raggio (km)",
+          "description": "Raggio di ricerca in chilometri."
+        },
+        "zone": {
+          "name": "Zona",
+          "description": "Zona usata come centro della ricerca."
         }
       }
     }

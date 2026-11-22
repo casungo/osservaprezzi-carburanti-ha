@@ -1,4 +1,5 @@
 """Run state and config-flow assertions inside a real Home Assistant process."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -103,9 +104,7 @@ async def _exercise_profile(
 
     if profile == "recovery":
         configured_ids = sorted(existing_before)
-        before_summary = await _wait_for_station_states(
-            hass, configured_ids, timeout_seconds=30
-        )
+        before_summary = await _wait_for_station_states(hass, configured_ids, timeout_seconds=30)
         await _exercise_services(hass, configured_ids[0])
         after_summary = await _wait_for_station_states(hass, configured_ids)
         return {
@@ -192,7 +191,10 @@ async def _build_lived_profile(hass: HomeAssistant, station_ids: list[str]) -> d
 
 async def _create_station(hass: HomeAssistant, station_id: str) -> None:
     """Create one config entry through Home Assistant's real flow manager."""
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result: dict[str, Any] = cast(
+        dict[str, Any],
+        await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER}),
+    )
     _assert(result["type"] is FlowResultType.MENU, f"builder menu: {result}")
     result = await _configure(hass, result["flow_id"], {"next_step_id": "station_id"})
     _assert(result["type"] is FlowResultType.FORM, f"builder station form: {result}")
@@ -211,7 +213,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     """Read a small builder marker file."""
     if not path.is_file():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -226,9 +228,12 @@ async def _exercise_manual_path(
     expect_new: bool,
 ) -> None:
     """Exercise direct station-ID setup and duplicate protection."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_USER},
+    result: dict[str, Any] = cast(
+        dict[str, Any],
+        await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+        ),
     )
     _assert(result["type"] is FlowResultType.MENU, f"manual menu: {result}")
     result = await _configure(hass, result["flow_id"], {"next_step_id": "station_id"})
@@ -238,8 +243,7 @@ async def _exercise_manual_path(
         _assert(result["type"] is FlowResultType.CREATE_ENTRY, f"manual create: {result}")
     else:
         _assert(
-            result["type"] is FlowResultType.ABORT
-            and result.get("reason") == "already_configured",
+            result["type"] is FlowResultType.ABORT and result.get("reason") == "already_configured",
             f"manual duplicate: {result}",
         )
 
@@ -256,7 +260,9 @@ async def _exercise_home_path(hass: HomeAssistant, *, require_multi: bool) -> No
         return
     options = _selector_options(result)
     _assert(bool(options), f"home returned no candidates: {result}")
-    selected = [station_id for station_id in options if station_id not in _configured_station_ids(hass)]
+    selected = [
+        station_id for station_id in options if station_id not in _configured_station_ids(hass)
+    ]
     creating = len(selected) >= 2
     if require_multi and creating:
         selected = selected[:2]
@@ -365,9 +371,12 @@ async def _search(
     user_input: dict[str, Any],
 ) -> tuple[str, dict[str, Any]]:
     """Start one real Home Assistant config flow and run a search step."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_USER},
+    result: dict[str, Any] = cast(
+        dict[str, Any],
+        await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+        ),
     )
     _assert(result["type"] is FlowResultType.MENU, f"{step} menu: {result}")
     result = await _configure(hass, result["flow_id"], {"next_step_id": step})
@@ -381,7 +390,7 @@ async def _search(
             str(result.get("step_id", "")).startswith("select_station")
             or (
                 result.get("step_id") == step
-                and result.get("errors", {}).get("base") == "all_stations_configured"
+                and (result.get("errors") or {}).get("base") == "all_stations_configured"
             )
         ),
         f"{step} search: {result}",
@@ -395,7 +404,7 @@ async def _configure(
     user_input: dict[str, Any],
 ) -> dict[str, Any]:
     """Configure a flow and return its real Home Assistant result."""
-    return await hass.config_entries.flow.async_configure(flow_id, user_input)
+    return cast(dict[str, Any], await hass.config_entries.flow.async_configure(flow_id, user_input))
 
 
 def _assert_nearby_schema(result: dict[str, Any]) -> None:
@@ -465,8 +474,7 @@ async def _wait_for_station_states(
             entity_ids = sorted(
                 entity.entity_id
                 for entity in registry.entities.values()
-                if entity.platform == DOMAIN
-                and str(entity.unique_id).startswith(f"{station_id}_")
+                if entity.platform == DOMAIN and str(entity.unique_id).startswith(f"{station_id}_")
             )
             states = [hass.states.get(entity_id) for entity_id in entity_ids]
             available = sum(
@@ -494,8 +502,11 @@ async def _exercise_services(hass: HomeAssistant, station_id: str) -> None:
         blocking=True,
         return_response=True,
     )
-    _assert(isinstance(comparison, dict), f"Invalid comparison response: {comparison}")
+    if not isinstance(comparison, dict):
+        raise AssertionError(f"Invalid comparison response: {comparison}")
     stations = comparison.get("stations", {})
+    if not isinstance(stations, dict):
+        raise AssertionError(f"Invalid comparison stations: {comparison}")
     _assert(
         any(
             str(data.get("station_id")) == station_id
@@ -512,8 +523,13 @@ async def _exercise_services(hass: HomeAssistant, station_id: str) -> None:
         blocking=True,
         return_response=True,
     )
-    _assert(isinstance(search, dict), f"Invalid registry response: {search}")
-    _assert(search.get("result_count", 0) <= 1, f"Registry limit failed: {search}")
+    if not isinstance(search, dict):
+        raise AssertionError(f"Invalid registry response: {search}")
+    result_count = search.get("result_count", 0)
+    _assert(
+        isinstance(result_count, int) and result_count <= 1,
+        f"Registry limit failed: {search}",
+    )
 
     refresh = await hass.services.async_call(
         DOMAIN,
@@ -536,8 +552,7 @@ async def _exercise_reload(hass: HomeAssistant, station_id: str) -> dict[str, An
     before = sorted(
         entity.entity_id
         for entity in registry.entities.values()
-        if entity.platform == DOMAIN
-        and str(entity.unique_id).startswith(f"{station_id}_")
+        if entity.platform == DOMAIN and str(entity.unique_id).startswith(f"{station_id}_")
     )
     entry = next(
         entry
@@ -549,8 +564,7 @@ async def _exercise_reload(hass: HomeAssistant, station_id: str) -> dict[str, An
     after = sorted(
         entity.entity_id
         for entity in registry.entities.values()
-        if entity.platform == DOMAIN
-        and str(entity.unique_id).startswith(f"{station_id}_")
+        if entity.platform == DOMAIN and str(entity.unique_id).startswith(f"{station_id}_")
     )
     _assert(before == after, f"Entity IDs changed after reload: {before} -> {after}")
     return {"station_id": station_id, "entity_count": len(after)}

@@ -1,4 +1,5 @@
 """Derived price attributes shared by entities and action responses."""
+
 from __future__ import annotations
 
 import math
@@ -72,12 +73,15 @@ def price_metadata(
 
 
 def price_history_metadata(
-    price: float | None, history: list[dict[str, Any]] | None,
+    price: float | None,
+    history: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     """Return finite statistics for recorded prices."""
-    prices = [number for entry in (history if isinstance(history, list) else [])
-              if isinstance(entry, dict)
-              and (number := _finite_price(entry.get("price"))) is not None]
+    prices = [
+        number
+        for entry in (history if isinstance(history, list) else [])
+        if isinstance(entry, dict) and (number := _finite_price(entry.get("price"))) is not None
+    ]
     minimum = min(prices) if prices else None
     maximum = max(prices) if prices else None
     average = round(sum(value / len(prices) for value in prices), 3) if prices else None
@@ -88,7 +92,9 @@ def price_history_metadata(
         if math.isfinite(difference):
             percentage = round(difference, 2)
     return {
-        "min_30d": minimum, "max_30d": maximum, "avg_30d": average,
+        "min_30d": minimum,
+        "max_30d": maximum,
+        "avg_30d": average,
         "vs_avg_30d_pct": percentage,
         "is_30d_low": current <= minimum if current is not None and minimum is not None else None,
     }

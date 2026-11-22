@@ -1,0 +1,1176 @@
+"""Tests for pure sensor helper functions."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from datetime import UTC, date, datetime, time, timedelta
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+import pytest
+
+sys.path.insert(0, ".")
+
+from custom_components.osservaprezzi_carburanti import entity as entity_module
+from custom_components.osservaprezzi_carburanti import sensor as sensor_module
+from custom_components.osservaprezzi_carburanti.const import CONF_STATION_ID, DOMAIN
+from custom_components.osservaprezzi_carburanti.entity import (
+    HOLIDAY_SCHEDULE_ID,
+    _compute_easter,
+    _find_schedule_for_day,
+    _get_available_service_ids,
+    _has_valid_opening_hours,
+    _is_italian_holiday,
+    _parse_time,
+    _schedule_intervals_for_date,
+)
+from custom_components.osservaprezzi_carburanti.runtime import OsservaprezziRuntimeData
+from custom_components.osservaprezzi_carburanti.sensor import (
+    INFO_SENSOR_DESCRIPTORS,
+    OsservaprezziStationSensor,
+    StationInfoSensor,
+    StationLocationSensor,
+    StationNextChangeSensor,
+    _get_fuel_icon,
+    _price_metadata,
+    async_setup_entry,
+)
+
+
+def _sample_station_data():
+    return {
+        "fuels": {
+            "gasolio_self": {
+                "price": 1.701,
+                "last_update": "2026-06-01T08:00:00+02:00",
+                "validity_date": "2026-06-01T08:00:00+02:00",
+                "previous_price": 1.755,
+                "price_changed_at": "2026-05-31T08:00:00+02:00",
+            },
+            "benzina_servito": {"price": 1.899},
+        },
+        "station_info": {
+            "id": "12345",
+            "name": "Station Alpha",
+            "nomeImpianto": "Alpha Fuel",
+            "brand": "Brand X",
+            "address": "Via Roma 1",
+            "station_type": "Stradale",
+            "municipality": "Roma",
+            "province": "RM",
+            "operator": "Example Srl",
+            "coordinate_source": "registry_csv",
+            "latitude": 41.902782,
+            "longitude": 12.496366,
+        },
+        "opening_hours": [
+            {
+                "giornoSettimanaId": 1,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            }
+        ],
+        "services": [{"id": 1}, "8"],
+    }
+
+
+@pytest.fixture(autouse=True)
+def local_schedule_datetime(monkeypatch):
+    monkeypatch.setattr(sensor_module.dt_util, "as_local", lambda value: value)
+
+
+class TestEntitySetupRegression:
+    def test_setup_entry_creates_only_sensor_entities_and_unique_ids(self):
+        listeners = []
+        coordinator = SimpleNamespace(
+            data=_sample_station_data(),
+            hass=SimpleNamespace(),
+            async_add_listener=lambda listener: listeners.append(listener) or listeners.pop,
+        )
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            options={},
+            data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
+        )
+        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
+        hass = SimpleNamespace(data={})
+        added_entities = []
+
+        def _add_entities(entities, update_before_add=False):
+            added_entities.extend(entities)
+            assert update_before_add is False
+
+        asyncio.run(async_setup_entry(hass, entry, _add_entities))
+
+        unique_ids = {entity._attr_unique_id for entity in added_entities}
+        assert {
+            "12345_gasolio_self",
+            "12345_benzina_servito",
+            "12345_name",
+            "12345_nomeImpianto",
+            "12345_id",
+            "12345_brand",
+            "12345_location",
+            "12345_next_change",
+        } <= unique_ids
+        assert "12345_open_closed" not in unique_ids
+        assert "12345_service_1" not in unique_ids
+        assert "12345_service_8" not in unique_ids
+        assert sum(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities) == 2
+        assert any(isinstance(entity, StationLocationSensor) for entity in added_entities)
+
+    def test_discovers_only_new_valid_entities_after_refresh(self):
+        listeners = []
+        unload_callbacks = []
+        coordinator = SimpleNamespace(
+            data=_sample_station_data(),
+            hass=SimpleNamespace(),
+            async_add_listener=lambda listener: (
+                listeners.append(listener) or (lambda: listeners.remove(listener))
+            ),
+        )
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            options={},
+            data={CONF_STATION_ID: "12345"},
+            async_on_unload=unload_callbacks.append,
+        )
+        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
+        hass = SimpleNamespace(data={})
+        batches = []
+
+        asyncio.run(
+            async_setup_entry(
+                hass,
+                entry,
+                lambda entities, update_before_add=False: batches.append(list(entities)),
+            )
+        )
+        initial_ids = {entity._attr_unique_id for entity in batches[0]}
+        coordinator.data["fuels"]["gpl_self"] = {"price": 0.799}
+        coordinator.data["fuels"]["malformed"] = {"price": 1.0}
+        coordinator.data["station_info"]["company"] = "Example Srl"
+        listeners[0]()
+        assert {entity._attr_unique_id for entity in batches[-1]} == {
+            "12345_gpl_self",
+            "12345_company",
+        }
+        batch_count = len(batches)
+        listeners[0]()
+        del coordinator.data["fuels"]["gpl_self"]
+        listeners[0]()
+        coordinator.data["fuels"]["gpl_self"] = {"price": 0.8}
+        listeners[0]()
+        assert len(batches) == batch_count
+        assert initial_ids.isdisjoint({"12345_gpl_self", "12345_company"})
+        unload_callbacks[0]()
+        assert listeners == []
+
+    def test_setup_ignores_non_mapping_fuel_payload(self):
+        data = _sample_station_data()
+        data["fuels"] = []
+        coordinator = SimpleNamespace(
+            data=data,
+            hass=SimpleNamespace(),
+            async_add_listener=lambda listener: lambda: None,
+        )
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            options={},
+            data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
+        )
+        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
+        hass = SimpleNamespace(data={})
+        added_entities = []
+
+        asyncio.run(
+            async_setup_entry(
+                hass, entry, lambda entities, **kwargs: added_entities.extend(entities)
+            )
+        )
+
+        assert not any(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities)
+        assert any(isinstance(entity, StationInfoSensor) for entity in added_entities)
+
+    def test_setup_ignores_non_mapping_station_info_payload(self):
+        data = _sample_station_data()
+        data["station_info"] = []
+        coordinator = SimpleNamespace(
+            data=data,
+            hass=SimpleNamespace(),
+            async_add_listener=lambda listener: lambda: None,
+        )
+        entry = SimpleNamespace(
+            entry_id="entry_1",
+            options={},
+            data={CONF_STATION_ID: "12345"},
+            async_on_unload=lambda unsubscribe: None,
+        )
+        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
+        hass = SimpleNamespace(data={})
+        added_entities = []
+
+        asyncio.run(
+            async_setup_entry(
+                hass, entry, lambda entities, **kwargs: added_entities.extend(entities)
+            )
+        )
+
+        assert any(isinstance(entity, OsservaprezziStationSensor) for entity in added_entities)
+        assert not any(isinstance(entity, StationInfoSensor) for entity in added_entities)
+        assert any(isinstance(entity, StationLocationSensor) for entity in added_entities)
+
+    def test_price_sensor_keeps_state_and_attributes_contract(self):
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = OsservaprezziStationSensor(coordinator, entry, "gasolio_self")
+
+        assert entity._attr_unique_id == "12345_gasolio_self"
+        assert entity._attr_has_entity_name is True
+        assert entity._attr_suggested_display_precision == 3
+        assert entity.native_value == 1.701
+        assert entity.extra_state_attributes["fuel_type_name"] == "Gasolio"
+        assert entity.extra_state_attributes["is_self_service"] is True
+        assert entity.extra_state_attributes["station_brand"] == "Brand X"
+        assert entity.device_info["identifiers"] == {(DOMAIN, "12345")}
+        assert entity.device_info["name"] == "Alpha Fuel"
+        assert entity.device_info["configuration_url"] == (
+            "https://carburanti.mise.gov.it/ospzSearch/dettaglio/12345"
+        )
+
+    def test_base_entity_falls_back_to_station_id_for_device_name(self):
+        coordinator = SimpleNamespace(data={"station_info": {}}, hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = StationLocationSensor(coordinator, entry)
+
+        assert entity.device_info["name"] == "12345"
+        assert entity.device_info["model"] == "Fuel Station"
+
+    def test_price_sensor_handles_missing_data_and_unknown_fuel(self):
+        coordinator = SimpleNamespace(data=None, hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+        entity = OsservaprezziStationSensor(coordinator, entry, "gpl_self")
+
+        assert entity.native_value is None
+        assert entity.extra_state_attributes == {}
+
+        coordinator.data = {"fuels": {}, "station_info": {}}
+        assert entity.extra_state_attributes == {}
+
+    def test_price_sensor_preserves_fuel_acronyms_in_cached_label(self):
+        coordinator = SimpleNamespace(
+            data={
+                "fuels": {"GPL_E5_self": {"price": 0.9}},
+                "station_info": {},
+            },
+            hass=SimpleNamespace(),
+        )
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = OsservaprezziStationSensor(coordinator, entry, "GPL_E5_self")
+
+        assert entity._attr_name == "GPL E5 Self"
+        assert entity.extra_state_attributes["fuel_type_name"] == "GPL E5"
+
+    def test_info_and_location_sensor_properties(self):
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+        info = StationInfoSensor(
+            coordinator, entry, next(d for d in INFO_SENSOR_DESCRIPTORS if d.key == "brand")
+        )
+        location = StationLocationSensor(coordinator, entry)
+
+        assert info.entity_description.translation_key == "station_brand"
+        assert info.native_value == "Brand X"
+        assert location._attr_translation_key == "location"
+        assert location.native_value == "Via Roma 1"
+        assert location.available is True
+        assert location.extra_state_attributes["latitude"] == 41.902782
+        assert location.extra_state_attributes["municipality"] == "Roma"
+        assert location.extra_state_attributes["province"] == "RM"
+        assert location.extra_state_attributes["station_type"] == "Stradale"
+        assert location.extra_state_attributes["operator"] == "Example Srl"
+        assert location.extra_state_attributes["coordinate_source"] == "registry_csv"
+
+    def test_location_sensor_unavailable_without_coordinates(self):
+        coordinator = SimpleNamespace(
+            data={"station_info": {"name": "Station"}},
+            hass=SimpleNamespace(),
+        )
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+
+        entity = StationLocationSensor(coordinator, entry)
+
+        assert entity.native_value == "Station"
+        assert entity.available is False
+
+    def test_schedule_tick_uses_thread_safe_state_update(self):
+        entity = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        calls = []
+        entity.coordinator = SimpleNamespace(data={})
+        entity._next_change = ("no_schedule", None)
+        entity._next_change_now = None
+
+        def _async_write_ha_state():
+            calls.append("written")
+
+        entity.async_write_ha_state = _async_write_ha_state
+
+        entity._handle_time_tick(datetime(2026, 6, 1, 12, 0))
+
+        assert calls == ["written"]
+
+    def test_schedule_entity_registers_and_removes_timer(self, monkeypatch):
+        def listener():
+            calls.append("removed")
+
+        calls = []
+
+        def fake_track_point_in_utc_time(hass, callback, point_in_time):
+            calls.append((hass, callback, point_in_time))
+            return listener
+
+        monkeypatch.setattr(
+            entity_module, "async_track_point_in_utc_time", fake_track_point_in_utc_time
+        )
+        monkeypatch.setattr(entity_module.dt_util, "as_utc", lambda value: value)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2026, 6, 1, 12, 0))
+        coordinator = SimpleNamespace(data=_sample_station_data(), hass="hass")
+        entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
+        entity = StationNextChangeSensor(coordinator, entry)
+
+        asyncio.run(entity.async_added_to_hass())
+        assert entity._time_listener is listener
+        assert calls[0][2] == datetime(2026, 6, 1, 20, 0)
+        asyncio.run(entity.async_will_remove_from_hass())
+        assert entity._time_listener is None
+        assert calls[-1] == "removed"
+
+    def test_schedule_entity_can_be_removed_before_timer_registration(self):
+        entity = StationNextChangeSensor(
+            SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace()),
+            SimpleNamespace(data={CONF_STATION_ID: "12345"}),
+        )
+
+        asyncio.run(entity.async_will_remove_from_hass())
+
+        assert entity._time_listener is None
+
+
+class TestParseTime:
+    def test_hh_mm_format(self):
+        assert _parse_time("07:30") == time(7, 30)
+
+    def test_hh_mm_format_midnight(self):
+        assert _parse_time("00:00") == time(0, 0)
+
+    def test_hh_dot_mm_format(self):
+        assert _parse_time("07.30") == time(7, 30)
+
+    def test_hh_dot_mm_format_24(self):
+        assert _parse_time("24.00") == time(0, 0)
+
+    def test_hh_only_format(self):
+        assert _parse_time("7") == time(7, 0)
+
+    def test_hh_only_format_24(self):
+        assert _parse_time("24") == time(0, 0)
+
+    def test_none_returns_none(self):
+        assert _parse_time(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert _parse_time("") is None
+
+    def test_invalid_returns_none(self):
+        assert _parse_time("abc") is None
+
+
+class TestComputeEaster:
+    def test_easter_2024(self):
+        assert _compute_easter(2024) == date(2024, 3, 31)
+
+    def test_easter_2025(self):
+        assert _compute_easter(2025) == date(2025, 4, 20)
+
+    def test_easter_2026(self):
+        assert _compute_easter(2026) == date(2026, 4, 5)
+
+    def test_easter_2023(self):
+        assert _compute_easter(2023) == date(2023, 4, 9)
+
+
+class TestIsItalianHoliday:
+    def test_capodanno(self):
+        assert _is_italian_holiday(date(2025, 1, 1)) is True
+
+    def test_epifania(self):
+        assert _is_italian_holiday(date(2025, 1, 6)) is True
+
+    def test_liberazione(self):
+        assert _is_italian_holiday(date(2025, 4, 25)) is True
+
+    def test_festa_lavoro(self):
+        assert _is_italian_holiday(date(2025, 5, 1)) is True
+
+    def test_festa_repubblica(self):
+        assert _is_italian_holiday(date(2025, 6, 2)) is True
+
+    def test_ferragosto(self):
+        assert _is_italian_holiday(date(2025, 8, 15)) is True
+
+    def test_tutti_santi(self):
+        assert _is_italian_holiday(date(2025, 11, 1)) is True
+
+    def test_immacolata(self):
+        assert _is_italian_holiday(date(2025, 12, 8)) is True
+
+    def test_natale(self):
+        assert _is_italian_holiday(date(2025, 12, 25)) is True
+
+    def test_santo_stefano(self):
+        assert _is_italian_holiday(date(2025, 12, 26)) is True
+
+    def test_easter_monday_2025(self):
+        assert _is_italian_holiday(date(2025, 4, 21)) is True
+
+    def test_easter_sunday_2025(self):
+        assert _is_italian_holiday(date(2025, 4, 20)) is True
+
+    def test_regular_day(self):
+        assert _is_italian_holiday(date(2025, 3, 15)) is False
+
+    def test_not_holiday(self):
+        assert _is_italian_holiday(date(2025, 7, 14)) is False
+
+
+class TestScheduleIntervals:
+    def test_overnight_interval_uses_next_local_date(self):
+        timezone = ZoneInfo("Europe/Rome")
+        schedule = {
+            "flagOrarioContinuato": True,
+            "oraAperturaOrarioContinuato": "22:00",
+            "oraChiusuraOrarioContinuato": "02:00",
+        }
+
+        assert _schedule_intervals_for_date(schedule, date(2025, 3, 29), timezone) == [
+            (
+                datetime(2025, 3, 29, 22, 0, tzinfo=timezone),
+                datetime(2025, 3, 30, 2, 0, tzinfo=timezone),
+            )
+        ]
+
+    def test_h24_respects_dst_local_midnights(self):
+        timezone = ZoneInfo("Europe/Rome")
+        [(opens_at, closes_at)] = _schedule_intervals_for_date(
+            {"flagH24": True}, date(2025, 3, 30), timezone
+        )
+
+        assert opens_at == datetime(2025, 3, 30, 0, 0, tzinfo=timezone)
+        assert closes_at == datetime(2025, 3, 31, 0, 0, tzinfo=timezone)
+        assert closes_at.utcoffset() != opens_at.utcoffset()
+
+    def test_incomplete_interval_is_ignored(self):
+        assert (
+            _schedule_intervals_for_date(
+                {
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                },
+                date(2025, 3, 30),
+                ZoneInfo("Europe/Rome"),
+            )
+            == []
+        )
+
+
+class TestFindScheduleForDay:
+    def test_finds_regular_weekday(self):
+        opening_hours = [
+            {"giornoSettimanaId": 1},
+            {"giornoSettimanaId": 2},
+        ]
+        result = _find_schedule_for_day(opening_hours, 1, date(2025, 3, 17))
+        assert result is not None
+        assert result["giornoSettimanaId"] == 1
+
+    def test_returns_none_for_missing_day(self):
+        opening_hours = [
+            {"giornoSettimanaId": 1},
+        ]
+        result = _find_schedule_for_day(opening_hours, 5, date(2025, 3, 17))
+        assert result is None
+
+    def test_uses_holiday_schedule_on_holiday(self):
+        opening_hours = [
+            {"giornoSettimanaId": 1, "flagChiusura": True},
+            {
+                "giornoSettimanaId": HOLIDAY_SCHEDULE_ID,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "13:00",
+            },
+        ]
+        result = _find_schedule_for_day(opening_hours, 1, date(2025, 1, 1))
+        assert result is not None
+        assert result["giornoSettimanaId"] == HOLIDAY_SCHEDULE_ID
+
+    def test_regular_day_ignores_holiday_schedule(self):
+        opening_hours = [
+            {
+                "giornoSettimanaId": 1,
+                "flagOrarioContinuato": True,
+                "oraAperturaOrarioContinuato": "08:00",
+                "oraChiusuraOrarioContinuato": "20:00",
+            },
+            {"giornoSettimanaId": HOLIDAY_SCHEDULE_ID, "flagChiusura": True},
+        ]
+        result = _find_schedule_for_day(opening_hours, 1, date(2025, 3, 17))
+        assert result is not None
+        assert result["giornoSettimanaId"] == 1
+
+
+class TestHasValidOpeningHours:
+    def test_empty_data(self):
+        assert _has_valid_opening_hours({}) is False
+        assert _has_valid_opening_hours(None) is False
+
+    def test_no_opening_hours_key(self):
+        assert _has_valid_opening_hours({"fuels": {}}) is False
+
+    def test_empty_opening_hours(self):
+        assert _has_valid_opening_hours({"opening_hours": []}) is False
+
+    def test_h24(self):
+        assert _has_valid_opening_hours({"opening_hours": [{"flagH24": True}]}) is True
+
+    def test_non_communicated_hours_are_not_valid(self):
+        assert (
+            _has_valid_opening_hours(
+                {"opening_hours": [{"flagNonComunicato": True, "flagH24": True}]}
+            )
+            is False
+        )
+
+    def test_continuous_hours(self):
+        assert (
+            _has_valid_opening_hours(
+                {
+                    "opening_hours": [
+                        {
+                            "flagOrarioContinuato": True,
+                            "oraAperturaOrarioContinuato": "08:00",
+                            "oraChiusuraOrarioContinuato": "20:00",
+                        }
+                    ]
+                }
+            )
+            is True
+        )
+
+    def test_split_hours(self):
+        assert (
+            _has_valid_opening_hours(
+                {
+                    "opening_hours": [
+                        {
+                            "oraAperturaMattina": "07:00",
+                            "oraChiusuraMattina": "12:00",
+                            "oraAperturaPomeriggio": "15:00",
+                            "oraChiusuraPomeriggio": "19:00",
+                        }
+                    ]
+                }
+            )
+            is True
+        )
+
+    def test_all_closed(self):
+        assert _has_valid_opening_hours({"opening_hours": [{"flagChiusura": True}]}) is False
+
+    def test_no_valid_times(self):
+        assert _has_valid_opening_hours({"opening_hours": [{}]}) is False
+
+    def test_continuous_hours_missing_close_is_not_valid(self):
+        assert (
+            _has_valid_opening_hours(
+                {
+                    "opening_hours": [
+                        {
+                            "flagOrarioContinuato": True,
+                            "oraAperturaOrarioContinuato": "08:00",
+                        }
+                    ]
+                }
+            )
+            is False
+        )
+
+
+class TestGetFuelIcon:
+    def test_benzina(self):
+        assert _get_fuel_icon("Benzina") == "mdi:gas-station"
+
+    def test_gasolio(self):
+        assert _get_fuel_icon("Gasolio") == "mdi:fuel"
+
+    def test_diesel(self):
+        assert _get_fuel_icon("Diesel") == "mdi:fuel"
+
+    def test_gpl(self):
+        assert _get_fuel_icon("GPL") == "mdi:gas-cylinder"
+
+    def test_metano(self):
+        assert _get_fuel_icon("Metano") == "mdi:molecule-co2"
+
+    def test_other(self):
+        assert _get_fuel_icon("Unknown Fuel") == "mdi:currency-eur"
+
+
+class TestPriceMetadata:
+    def test_reports_delta_direction_age_and_staleness(self, monkeypatch):
+        updated_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: updated_at)
+        monkeypatch.setattr(
+            sensor_module.dt_util,
+            "now",
+            lambda: datetime(2026, 7, 28, 11, 0, tzinfo=UTC),
+        )
+
+        result = _price_metadata(
+            price=1.801,
+            previous_price=1.755,
+            last_update="2026-07-27T10:00:00+00:00",
+            stale_hours=24,
+        )
+
+        assert result == {
+            "price_delta": 0.046,
+            "price_direction": "up",
+            "price_age_minutes": 1500,
+            "price_is_stale": True,
+        }
+
+    @pytest.mark.parametrize(("minutes", "expected"), [(1440, False), (1441, True)])
+    def test_staleness_boundary_is_exclusive_at_threshold(self, monkeypatch, minutes, expected):
+        updated_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: updated_at)
+        monkeypatch.setattr(
+            sensor_module.dt_util,
+            "now",
+            lambda: updated_at + timedelta(minutes=minutes),
+        )
+
+        result = _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update="2026-07-27T10:00:00+00:00",
+            stale_hours=24,
+        )
+
+        assert result["price_age_minutes"] == minutes
+        assert result["price_is_stale"] is expected
+
+    def test_reports_down_unchanged_and_new_directions(self):
+        assert (
+            _price_metadata(
+                price=1.7,
+                previous_price=1.8,
+                last_update=None,
+                stale_hours=24,
+            )["price_direction"]
+            == "down"
+        )
+        assert (
+            _price_metadata(
+                price=1.8,
+                previous_price=1.8,
+                last_update=None,
+                stale_hours=24,
+            )["price_direction"]
+            == "unchanged"
+        )
+        assert (
+            _price_metadata(
+                price=1.8,
+                previous_price=None,
+                last_update=None,
+                stale_hours=24,
+            )["price_direction"]
+            == "new"
+        )
+
+    def test_ignores_boolean_prices_and_invalid_dates(self, monkeypatch):
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: None)
+
+        result = _price_metadata(
+            price=True,
+            previous_price=False,
+            last_update="invalid",
+            stale_hours=24,
+        )
+
+        assert result == {
+            "price_delta": None,
+            "price_direction": None,
+            "price_age_minutes": None,
+            "price_is_stale": None,
+        }
+
+    def test_naive_or_future_update_does_not_produce_negative_age(self, monkeypatch):
+        naive = datetime(2026, 7, 28, 10, 0)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: naive)
+        result = _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update="naive",
+            stale_hours=24,
+        )
+        assert result["price_age_minutes"] is None
+
+        future = datetime(2026, 7, 29, tzinfo=UTC)
+        monkeypatch.setattr(sensor_module.dt_util, "parse_datetime", lambda value: future)
+        monkeypatch.setattr(
+            sensor_module.dt_util,
+            "now",
+            lambda: datetime(2026, 7, 28, tzinfo=UTC),
+        )
+        result = _price_metadata(
+            price=1.8,
+            previous_price=None,
+            last_update="future",
+            stale_hours=24,
+        )
+        assert result["price_age_minutes"] == 0
+        assert result["price_is_stale"] is False
+
+
+class TestGetAvailableServiceIds:
+    def test_normalizes_mixed_service_payloads(self):
+        services = [{"id": 1}, "2", 3, {"id": "4"}, {"other": "ignored"}]
+        assert _get_available_service_ids(services) == {"1", "2", "3", "4"}
+
+
+class TestNextChangeH24:
+    def test_h24_only_today_closes_at_next_closed_midnight(self, monkeypatch):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        opening_hours = [
+            {"giornoSettimanaId": 1, "flagH24": True},
+            {"giornoSettimanaId": 2, "flagChiusura": True},
+        ]
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": opening_hours})
+        fixed_now = datetime(2025, 3, 17, 12, 0)
+
+        import custom_components.osservaprezzi_carburanti.sensor as sensor_module
+
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: fixed_now)
+
+        change_type, change_time = sensor._compute_next_change()
+
+        assert change_type == "closes_at"
+        assert change_time == datetime(2025, 3, 18, 0, 0)
+
+    def test_all_week_h24_is_always_open(self, monkeypatch):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        opening_hours = [{"giornoSettimanaId": weekday, "flagH24": True} for weekday in range(1, 8)]
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": opening_hours})
+        fixed_now = datetime(2025, 3, 17, 12, 0)
+
+        import custom_components.osservaprezzi_carburanti.sensor as sensor_module
+
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: fixed_now)
+
+        change_type, change_time = sensor._compute_next_change()
+
+        assert change_type == "always_open"
+        assert change_time is None
+
+
+class TestNextChangeSensor:
+    def _sensor(self, opening_hours):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        sensor.coordinator = SimpleNamespace(data={"opening_hours": opening_hours})
+        sensor._next_change = ("no_schedule", None)
+        sensor._next_change_now = None
+        return sensor
+
+    def test_no_schedule(self):
+        sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+        sensor.coordinator = SimpleNamespace(data={})
+
+        sensor._next_change = ("no_schedule", None)
+        sensor._next_change_now = None
+        assert sensor._compute_next_change() == ("no_schedule", None)
+        assert sensor.native_value == "no_schedule"
+        assert sensor.extra_state_attributes == {
+            "change_type": "no_schedule",
+            "next_change_time": None,
+        }
+
+    def test_currently_open_continuous_closes_today(self, monkeypatch):
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                    "oraChiusuraOrarioContinuato": "20:00",
+                }
+            ]
+        )
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 12, 0))
+        sensor._refresh_next_change()
+
+        assert sensor._compute_next_change() == ("closes_at", datetime(2025, 3, 17, 20, 0))
+        assert sensor.native_value == "20:00"
+        assert sensor.extra_state_attributes["minutes_until_change"] == 480
+        assert sensor.available is True
+
+    def test_cached_next_change_is_computed_once_for_property_reads(self, monkeypatch):
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                    "oraChiusuraOrarioContinuato": "20:00",
+                }
+            ]
+        )
+        now = datetime(2025, 3, 17, 12, 0)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+        calls = 0
+        compute = sensor._compute_next_change
+
+        def counted_compute(value=None):
+            nonlocal calls
+            calls += 1
+            return compute(value)
+
+        sensor._compute_next_change = counted_compute
+        sensor._refresh_next_change()
+        assert sensor.native_value == "20:00"
+        assert sensor.extra_state_attributes["change_type"] == "closes_at"
+        assert calls == 1
+
+        sensor.async_write_ha_state = lambda: None
+        sensor._handle_time_tick(now + timedelta(minutes=1))
+        assert calls == 2
+
+    def test_currently_open_split_closes_next_period(self, monkeypatch):
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "oraAperturaMattina": "08:00",
+                    "oraChiusuraMattina": "12:00",
+                    "oraAperturaPomeriggio": "15:00",
+                    "oraChiusuraPomeriggio": "19:00",
+                }
+            ]
+        )
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 16, 0))
+
+        assert sensor._compute_next_change() == ("closes_at", datetime(2025, 3, 17, 19, 0))
+
+    def test_closed_now_opens_later_today(self, monkeypatch):
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "oraAperturaMattina": "08:00",
+                    "oraChiusuraMattina": "12:00",
+                    "oraAperturaPomeriggio": "15:00",
+                    "oraChiusuraPomeriggio": "19:00",
+                }
+            ]
+        )
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
+
+        assert sensor._compute_next_change() == ("opens_at", datetime(2025, 3, 17, 15, 0))
+
+    def test_closed_today_opens_tomorrow_and_formats_date(self, monkeypatch):
+        sensor = self._sensor(
+            [
+                {"giornoSettimanaId": 1, "flagChiusura": True},
+                {
+                    "giornoSettimanaId": 2,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                    "oraChiusuraOrarioContinuato": "20:00",
+                },
+            ]
+        )
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
+        sensor._refresh_next_change()
+
+        assert sensor.native_value == "08:00 (18/03)"
+
+    def test_no_opening_found(self, monkeypatch):
+        sensor = self._sensor(
+            [{"giornoSettimanaId": weekday, "flagChiusura": True} for weekday in range(1, 8)]
+        )
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
+
+        assert sensor._compute_next_change() == ("no_opening", None)
+
+    def test_overnight_today_closes_tomorrow(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "22:00",
+                    "oraChiusuraOrarioContinuato": "02:00",
+                }
+            ]
+        )
+        now = datetime(2025, 3, 17, 23, 0, tzinfo=timezone)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "closes_at",
+            datetime(2025, 3, 18, 2, 0, tzinfo=timezone),
+        )
+
+    def test_overnight_yesterday_closes_today(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "22:00",
+                    "oraChiusuraOrarioContinuato": "02:00",
+                }
+            ]
+        )
+        now = datetime(2025, 3, 18, 1, 0, tzinfo=timezone)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "closes_at",
+            datetime(2025, 3, 18, 2, 0, tzinfo=timezone),
+        )
+
+    def test_finds_next_opening_exactly_seven_days_away(self, monkeypatch):
+        sensor = self._sensor(
+            [
+                {
+                    "giornoSettimanaId": 1,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "08:00",
+                    "oraChiusuraOrarioContinuato": "09:00",
+                }
+            ]
+        )
+        now = datetime(2025, 3, 17, 9, 0)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "opens_at",
+            now + timedelta(days=7, hours=-1),
+        )
+
+    def test_future_h24_opens_at_local_midnight(self, monkeypatch):
+        timezone = ZoneInfo("Europe/Rome")
+        sensor = self._sensor(
+            [
+                {"giornoSettimanaId": 1, "flagChiusura": True},
+                {"giornoSettimanaId": 2, "flagH24": True},
+            ]
+        )
+        now = datetime(2025, 3, 17, 20, 0, tzinfo=timezone)
+        monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+
+        assert sensor._compute_next_change() == (
+            "opens_at",
+            datetime(2025, 3, 18, 0, 0, tzinfo=timezone),
+        )
+
+
+def test_next_change_recomputes_on_coordinator_update(monkeypatch):
+    now = datetime(2026, 6, 1, 10, 0)
+    monkeypatch.setattr(sensor_module.dt_util, "now", lambda: now)
+    coordinator = SimpleNamespace(data={"opening_hours": []}, hass=SimpleNamespace())
+    entity = StationNextChangeSensor(coordinator, SimpleNamespace(data={CONF_STATION_ID: "1"}))
+    entity._handle_coordinator_update()
+    assert entity.native_value == "no_schedule"
+    coordinator.data["opening_hours"] = [
+        {"giornoSettimanaId": 1, "oraAperturaMattina": "08:00", "oraChiusuraMattina": "12:00"}
+    ]
+    entity._handle_coordinator_update()
+    assert entity.native_value == "12:00"
+    assert entity.extra_state_attributes["change_type"] == "closes_at"
+
+
+def test_schedule_tick_converts_utc_to_station_local_time(monkeypatch):
+    rome = ZoneInfo("Europe/Rome")
+    monkeypatch.setattr(sensor_module.dt_util, "as_local", lambda value: value.astimezone(rome))
+    coordinator = SimpleNamespace(
+        data={
+            "opening_hours": [
+                {
+                    "giornoSettimanaId": 1,
+                    "oraAperturaMattina": "08:00",
+                    "oraChiusuraMattina": "12:00",
+                }
+            ]
+        },
+        hass=SimpleNamespace(),
+    )
+    entity = StationNextChangeSensor(coordinator, SimpleNamespace(data={CONF_STATION_ID: "1"}))
+    entity.async_write_ha_state = lambda: None
+    entity._handle_time_tick(datetime(2026, 6, 1, 10, 30, tzinfo=UTC))
+    assert entity._next_change_now.hour == 12
+    assert entity.native_value != "12:00"
+    assert entity.extra_state_attributes["change_type"] == "opens_at"
+
+
+def test_parse_time_supports_24_00_single_digit_and_rejects_bad_colons():
+    assert _parse_time("8:00") == time(8, 0)
+    assert _parse_time("24:00") == time(0, 0)
+    assert _parse_time("24:00:00") == time(0, 0)
+    assert _parse_time("1:2:3:4") is None
+
+
+def test_next_change_reports_closing_on_day_plus_7():
+    sensor = StationNextChangeSensor.__new__(StationNextChangeSensor)
+    sensor.coordinator = SimpleNamespace(
+        data={
+            "opening_hours": [{"giornoSettimanaId": day, "flagH24": True} for day in range(1, 8)]
+            + [
+                {
+                    "giornoSettimanaId": 8,
+                    "flagOrarioContinuato": True,
+                    "oraAperturaOrarioContinuato": "00:00",
+                    "oraChiusuraOrarioContinuato": "12:00",
+                }
+            ]
+        }
+    )
+    # 2025-05-26 08:00 -> 2025-06-02 (day +7) is Republic Day (Italian holiday) closing at 12:00
+    now = datetime(2025, 5, 26, 8, 0)
+    change_type, change_time = sensor._compute_next_change(now)
+    assert change_type == "closes_at"
+    assert change_time == datetime(2025, 6, 2, 12, 0)
+
+
+def test_fuel_sensor_availability_and_unrecorded_attributes():
+    coordinator = SimpleNamespace(
+        data=_sample_station_data(),
+        hass=SimpleNamespace(),
+        last_update_success=True,
+    )
+    entry = SimpleNamespace(data={CONF_STATION_ID: "12345"}, options={})
+    sensor = OsservaprezziStationSensor(coordinator, entry, "gasolio_self")
+
+    assert sensor.available is True
+    assert "price_age_minutes" in OsservaprezziStationSensor._unrecorded_attributes
+    assert "minutes_until_change" in StationNextChangeSensor._unrecorded_attributes
+
+    # Discontinued fuel becomes unavailable.
+    coordinator.data["fuels"].pop("gasolio_self")
+    assert sensor.available is False
+
+    # Failed coordinator marks sensor unavailable even if fuel returns.
+    coordinator.data["fuels"]["gasolio_self"] = {"price": 1.85}
+    coordinator.last_update_success = False
+    assert sensor.available is False
+
+
+def test_fuel_sensor_stale_timer_lifecycle_and_info_disabled_default(monkeypatch):
+    scheduled = []
+    unsubs = []
+    writes = []
+
+    def fake_track_point(hass, cb, point):
+        scheduled.append((cb, point))
+        return lambda: unsubs.append(point)
+
+    monkeypatch.setattr(sensor_module, "async_track_point_in_utc_time", fake_track_point)
+    monkeypatch.setattr(
+        sensor_module.dt_util,
+        "parse_datetime",
+        lambda val: datetime.fromisoformat(val) if isinstance(val, str) else None,
+    )
+    monkeypatch.setattr(sensor_module.dt_util, "as_utc", lambda dt: dt.astimezone(UTC))
+    now_utc = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr(sensor_module.dt_util, "utcnow", lambda: now_utc)
+
+    coordinator = SimpleNamespace(
+        data=_sample_station_data(), hass="hass", last_update_success=True
+    )
+    entry = SimpleNamespace(data={CONF_STATION_ID: "12345"}, options={"price_stale_hours": 24})
+    sensor = OsservaprezziStationSensor(coordinator, entry, "gasolio_self")
+    sensor.async_write_ha_state = lambda: writes.append("written")
+
+    assert StationInfoSensor._attr_entity_registry_enabled_default is False
+
+    # Add arms a one-shot timer at last_update + 24h.
+    asyncio.run(sensor.async_added_to_hass())
+    assert len(scheduled) == 1
+    assert scheduled[0][1] == datetime(2026, 6, 2, 6, 0, tzinfo=UTC)
+
+    # Coordinator update cancels previous timer and schedules a fresh one.
+    sensor._handle_coordinator_update()
+    assert len(unsubs) == 1
+    assert len(scheduled) == 2
+
+    # Firing the timer clears the listener and writes HA state.
+    sensor._stale_tick(scheduled[1][1])
+    assert sensor._stale_listener is None
+    assert writes == ["written"]
+
+    # Removing with no active listener is safe; removing with an active listener unsubscribes it.
+    asyncio.run(sensor.async_will_remove_from_hass())
+    sensor._schedule_stale()
+    assert sensor._stale_listener is not None
+    asyncio.run(sensor.async_will_remove_from_hass())
+    assert sensor._stale_listener is None
+    assert len(unsubs) == 2
+
+    # Already-stale or missing last_update does not schedule a timer.
+    now_utc = datetime(2026, 6, 5, 10, 0, tzinfo=UTC)
+    sensor._schedule_stale()
+    assert sensor._stale_listener is None
+    coordinator.data["fuels"]["gasolio_self"]["last_update"] = None
+    assert sensor._stale_at() is None
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        ({}, {"gasolio_self", "benzina_servito", "GPL_E5_self"}),
+        ({"tracked_fuels": ["GASOLIO", "gpl e5"]}, {"gasolio_self", "GPL_E5_self"}),
+        ({"tracked_service_modes": ["SERVITO"]}, {"benzina_servito"}),
+        ({"tracked_fuels": ["benzina"], "tracked_service_modes": ["self"]}, set()),
+        ({"tracked_fuels": ["benzina"], "tracked_service_modes": ["servito"]}, {"benzina_servito"}),
+    ],
+)
+def test_setup_filters_fuel_sensors(options, expected):
+    data = _sample_station_data()
+    data["fuels"]["GPL_E5_self"] = {"price": 1.0}
+    coordinator = SimpleNamespace(
+        data=data, hass=SimpleNamespace(), async_add_listener=lambda listener: lambda: None
+    )
+    entry = SimpleNamespace(
+        entry_id="entry_1",
+        data={CONF_STATION_ID: "12345"},
+        options=options,
+        async_on_unload=lambda unsubscribe: None,
+    )
+    entry.runtime_data = OsservaprezziRuntimeData(coordinator)
+    hass = SimpleNamespace(data={})
+    entities = []
+    asyncio.run(async_setup_entry(hass, entry, lambda added, **kwargs: entities.extend(added)))
+    assert {
+        entity._fuel_key for entity in entities if isinstance(entity, OsservaprezziStationSensor)
+    } == expected

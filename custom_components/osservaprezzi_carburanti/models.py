@@ -1,10 +1,10 @@
 """Typed payload models used by the Osservaprezzi integration."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, NotRequired, Required, TypedDict
-
 
 _MISSING: Any = object()
 _STATION_FIELD_NAMES: tuple[str, ...] = (

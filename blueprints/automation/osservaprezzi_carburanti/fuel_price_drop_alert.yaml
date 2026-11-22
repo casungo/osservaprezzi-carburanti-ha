@@ -1,6 +1,6 @@
 blueprint:
   name: Fuel price drop alert
-  description: Notify when a fuel price drops below a target or by a minimum amount. Requires the price changed event from Phase 1.
+  description: Notify when a fuel price drops below a target or by a minimum amount.
   domain: automation
   input:
     notify_action:

@@ -1,139 +1,86 @@
 # Testing and Validation
 
-This project ships two test lanes, optional validators, and a Docker smoke regression. The GitHub
-Actions workflow runs the same commands on every push and pull request.
+All routine checks are wired into the repository `Makefile` (`make help` lists every target) and
+run automatically in GitHub Actions on every push and pull request.
+
+## Local setup
+
+The repository uses two virtual environments:
+
+- `.venv` (Python 3.14): unit tests, coverage, Ruff lint/format.
+- `.venv-ha` (Python 3.14): `mypy` against real Home Assistant types and `tests/ha/` contract
+  tests (including static JSON/YAML validation).
+
+Install Python 3.14, then bootstrap both environments in one step:
+
+```bash
+make setup
+```
+
+Then run the full local validation suite:
+
+```bash
+make check
+```
+
+Individual targets: `make lint`, `make format`, `make format-check`, `make typecheck`,
+`make test`, and `make test-ha`. Setup finds Python 3.14 on PATH or through `uv python find 3.14`. Override `BASE_PYTHON` to select another Python 3.14 executable, or `PYTHON` and `HA_PYTHON` when using custom environments. The environments remain separate to isolate the unit tests from Home Assistant pytest plugins.
+
+If you use [`pre-commit`](https://pre-commit.com/), enable the hooks in `.pre-commit-config.yaml`
+with `pre-commit install`.
 
 ## Test lanes
 
-### Lightweight unit tests (default lane)
+### Lightweight unit tests (`tests/unit/`)
 
-Fast unit tests with hand-rolled mocks. They do not import Home Assistant.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-test.txt
-
-python -m pytest -q
-```
-
-CI enforces 100% coverage of the integration package:
+Fast unit tests with hand-rolled Home Assistant mocks in `tests/unit/conftest.py` (they do not
+import Home Assistant). When adding a new `homeassistant.*` import in the integration, expose the
+matching module or attribute in `tests/unit/conftest.py` as well.
 
 ```bash
-python -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
-python -m coverage report --fail-under=100
+make test
 ```
 
-### Real Home Assistant contract tests
+Enforces **100% statement and branch coverage** across `custom_components/osservaprezzi_carburanti`
+(configured in `pyproject.toml`), including architecture invariants
+(`tests/unit/test_architecture_invariants.py`) and translation/service parity
+(`tests/unit/test_translations_parity.py`).
 
-Contract tests that run inside a real Home Assistant test harness via
-[`pytest-homeassistant-custom-component`](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component).
-They live in `tests_ha/` and are excluded from the default lane by `tests_ha/conftest.py` unless
-the `pytest-ha.ini` config is loaded.
+### Real Home Assistant contract tests (`tests/ha/`)
+
+Runs inside a real Home Assistant test harness via `pytest-homeassistant-custom-component`,
+including repository JSON/YAML static validation (`tests/ha/test_static_files.py`):
 
 ```bash
-python -m pip install -r requirements-ha-test.txt
-python -m pytest -c pytest-ha.ini -q
+make test-ha
 ```
 
-`requirements-ha-test.txt` pulls in the default lane dependencies plus `cronsim` and a pinned
-version of `pytest-homeassistant-custom-component`.
+### Live MIMIT API contract (optional, network required)
 
-### Live API contract test (optional, network required)
-
-A small contract test against the real MIMIT/Osservaprezzi endpoints. It is gated behind an
-environment variable so it never runs by accident:
+Gated behind an environment variable so it never runs by accident:
 
 ```bash
-OSSERVAPREZZI_LIVE_API=1 python -m pytest tests/test_live_api_contract.py -q
+OSSERVAPREZZI_LIVE_API=1 .venv/bin/python -m pytest tests/unit/test_live_api_contract.py -q
 ```
 
-## Validators
+## Docker validators and smoke regression
 
-`hassfest` and HACS validation run in CI. Locally, the `Makefile` wraps both in Docker:
+With Docker available locally:
 
 ```bash
 make hassfest
-make hacs
+make hacs                                       # validates the pushed GitHub branch
+.venv/bin/python scripts/ha_docker_regression.py --timeout 240
 ```
 
-The `hacs` target validates the current branch as pushed to GitHub, so unpushed changes are not
-visible to it. If the tools are installed locally, the direct equivalents are:
+`ha_docker_regression.py` runs `fresh`, `lived` (4 boots + 14 synthetic days of Recorder history),
+`upgrade` (from the previous baseline), `outage`, and `recovery` profiles against the official
+Home Assistant container without touching any live instance.
 
-```bash
-hassfest --action validate --path .
-hacs validate integration custom_components/osservaprezzi_carburanti
-```
-
-## Docker state regression
-
-With Docker running locally, you can run a two-profile regression against the official Home
-Assistant container:
-
-```bash
-python scripts/ha_docker_regression.py --timeout 240
-```
-
-The runner first starts a separate builder profile four times in the official Home Assistant
-container. On its first boot, the builder creates stations through the real config-flow manager.
-On every boot it writes 14 days of synthetic state changes through Home Assistant's real state
-machine. Recorder commits those changes to the real SQLite database. After the last shutdown, the
-runner checkpoints SQLite, exports the complete profile to a tar archive, and extracts it into a
-new `lived` profile.
-
-`fresh` is a separate empty profile. `lived` starts from the exported builder profile, with config
-entries, entity registry, station cache, Recorder database, and four previous HA boots already
-present. The dates are synthetic by design; the Docker boots, state writes, Recorder persistence,
-export, and restore are real.
-
-The runner also builds the same aged profile with the previous tagged integration (`v2.6.0-beta.1`),
-replaces only its integration code with the current checkout, and runs the probe as `upgrade`. This
-keeps upgrade compatibility separate from the normal `fresh` and `lived` checks.
-
-Finally, it runs the exported lived profile twice with only the MIMIT hostnames mapped to localhost:
-`outage` checks that cached registry data and the last successful station payload keep entities
-available, while `recovery` restores the network on the same profile and verifies real refresh and
-service calls.
-
-Inside Home Assistant, the test-only probe checks the four setup paths, multi-station selection,
-custom radius and result limits, duplicate skipping, real entity states, service responses, stable
-entity IDs after reload, and persisted entries. The station and registry requests are real MIMIT
-requests. The probe writes only its result file inside the temporary profile.
-
-The runner also checks container startup logs, imports the integration against the container's HA
-runtime, verifies entity-registry counts, and checks nearby discovery. It does not alter the user's
-Home Assistant instance. The same regression runs in GitHub Actions on pushes, pull requests, the
-1st and 15th of every month, and manual workflow dispatch. Pre-release validation steps are described in
+For pre-release guardrails and KPI comparisons (`make kpi`), see
 [release-validation.md](./release-validation.md).
 
-## Local checks
-
-With the two environments above installed, `make check` runs Ruff, mypy, the unit suite under
-coverage, and the real Home Assistant contract suite. The unit suite runs once and enforces the
-same 100% coverage threshold as CI. Individual targets are `make lint`, `make typecheck`,
-`make test`, and `make test-ha`. Override `PYTHON` or `HA_PYTHON` to use another environment.
-
-Registry serialization benchmark, using 20,000 synthetic stations, 30 warmed samples, alternating
-operation order, medians, and observed ranges:
-
-```bash
-PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_registry.py --stations 20000 --repeats 30
-```
-
-This benchmark compares the previous formatted JSON encoding with compact JSON and checks that
-both decode to the same data. It does not measure upstream latency or Home Assistant startup.
-The next-change benchmark uses the same warmed, alternating 30-sample method:
-
-```bash
-PYTHONPATH=. .venv-ha/bin/python scripts/benchmark_schedule.py --read-pairs 1000 --repeats 30
-```
-
-Both are synthetic microbenchmarks, not end-to-end performance tests.
-
-## Release KPI comparison
-
-Run `make kpi` after integration changes and before releases. It compares the preceding
-stable release with the current integration inside identical Home Assistant containers,
-using one captured real MIMIT snapshot. CI saves the measurements on pushes and PRs.
-See [KPI monitoring](kpi-monitoring.md) for definitions, thresholds, reproduction,
-report locations, and the distinction between replay measurements and live behavior.
+The Docker regression runs two independent profile branches by default. Use `--workers 1`
+for sequential execution; `--keep` also forces sequential execution. In pull requests, CI
+runs it only for integration, Docker regression/probe, or HACS changes, or with the
+`run-docker` label, after unit and static checks pass.

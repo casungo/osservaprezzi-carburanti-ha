@@ -2,16 +2,51 @@ name: Validate
 
 on:
   push:
+    branches: [master]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   schedule:
     - cron: "17 2 * * *" # daily: live-api-contract
     - cron: "13 3 1,15 * *" # twice monthly (1st & 15th): home-assistant-docker
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.schedule || 'normal' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_regression: ${{ steps.paths.outputs.docker_regression }}
+      release_kpis: ${{ steps.paths.outputs.release_kpis }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_DOCKER: ${{ contains(github.event.pull_request.labels.*.name, 'run-docker') }}
+          RUN_KPI: ${{ contains(github.event.pull_request.labels.*.name, 'run-kpi') || contains(github.event.pull_request.labels.*.name, 'full-kpi') }}
+        run: |
+          docker=true
+          kpi=true
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed-files"
+            docker=false
+            kpi=false
+            if [ "$RUN_DOCKER" = true ] || grep -Eq '^(custom_components/|scripts/ha_docker_(regression|probe)\.py$|hacs\.json$)' "$RUNNER_TEMP/changed-files"; then docker=true; fi
+            if [ "$RUN_KPI" = true ] || grep -Eq '^(custom_components/|scripts/(benchmark_release|ha_kpi_probe)\.py$)' "$RUNNER_TEMP/changed-files"; then kpi=true; fi
+          fi
+          echo "docker_regression=$docker" >> "$GITHUB_OUTPUT"
+          echo "release_kpis=$kpi" >> "$GITHUB_OUTPUT"
+
   ha-contract:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -25,7 +60,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: |
             requirements-test.txt
@@ -34,8 +69,11 @@ jobs:
       - name: Install Home Assistant test dependencies
         run: python -m pip install -r requirements-ha-test.txt
 
+      - name: Run mypy with Home Assistant types
+        run: python -m mypy
+
       - name: Run Home Assistant contract tests
-        run: python -m pytest -c pytest-ha.ini -q
+        run: python -m pytest tests/ha -o asyncio_mode=auto -q
 
   tests:
     if: github.event_name != 'schedule'
@@ -50,7 +88,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: requirements-test.txt
 
@@ -61,7 +99,7 @@ jobs:
         run: python -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
 
       - name: Enforce 100% statement and branch coverage
-        run: python -m coverage report --fail-under=100
+        run: python -m coverage report --fail-under=100 --show-missing
 
   static:
     if: github.event_name != 'schedule'
@@ -75,18 +113,27 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: requirements-test.txt
 
       - name: Install test dependencies
         run: python -m pip install -r requirements-test.txt
 
-      - name: Run Ruff
+      - name: Run Ruff lint
         run: python -m ruff check .
 
-      - name: Run mypy
-        run: python -m mypy
+      - name: Run Ruff format check
+        run: python -m ruff format --check .
+
+      - name: Install static analysis tools
+        run: python -m pip install codespell actionlint-py
+
+      - name: Run codespell
+        run: codespell
+
+      - name: Run actionlint
+        run: actionlint
 
   hassfest:
     if: github.event_name != 'schedule'
@@ -115,7 +162,11 @@ jobs:
           category: integration
 
   home-assistant-docker:
+    needs: [changes, tests, static]
     if: >-
+      always() && needs.changes.result == 'success' && needs.changes.outputs.docker_regression == 'true' &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.tests.result) &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.static.result) &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event_name != 'schedule' || github.event.schedule == '13 3 1,15 * *')
     runs-on: [self-hosted, linux, x64, casungo-server]
@@ -127,8 +178,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+
       - name: Run real Home Assistant Docker regression
-        run: python3 scripts/ha_docker_regression.py
+        run: uv run --no-project --python "$(cat .python-version)" scripts/ha_docker_regression.py
 
       - name: Diagnose upstream connectivity after failure
         if: failure()
@@ -147,7 +203,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: requirements-test.txt
 
@@ -157,10 +213,14 @@ jobs:
       - name: Run live upstream contract
         env:
           OSSERVAPREZZI_LIVE_API: "1"
-        run: python -m pytest tests/test_live_api_contract.py -q
+        run: python -m pytest tests/unit/test_live_api_contract.py -q
 
   release-kpis:
+    needs: [changes, tests, static]
     if: >-
+      always() && needs.changes.result == 'success' && needs.changes.outputs.release_kpis == 'true' &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.tests.result) &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.static.result) &&
       github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, linux, x64, casungo-server]
@@ -172,6 +232,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+
       - name: Pull Home Assistant measurement image
         run: docker pull ghcr.io/home-assistant/home-assistant:stable
 
@@ -179,7 +244,12 @@ jobs:
         run: rm -rf artifacts/kpi/ci
 
       - name: Compare release KPIs against preceding stable release
-        run: python3 scripts/benchmark_release.py --output artifacts/kpi/ci
+        env:
+          FAST_KPI: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-kpi') }}
+        run: |
+          args=()
+          if [ "$FAST_KPI" = true ]; then args=(--rounds 1 --repeats 5 --reloads 3 --idle-seconds 15); fi
+          uv run --no-project --python "$(cat .python-version)" scripts/benchmark_release.py --output artifacts/kpi/ci "${args[@]}"
 
       - name: Diagnose upstream connectivity after failure
         if: failure()

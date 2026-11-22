@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
-from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.typing import StateType
@@ -25,31 +29,72 @@ from .const import (
     ATTR_STATION_BRAND,
     ATTR_STATION_NAME,
     ATTR_VALIDITY_DATE,
+    CONF_PRICE_STALE_HOURS,
     CONF_STATION_ID,
     CONF_TRACKED_FUELS,
     CONF_TRACKED_SERVICE_MODES,
-    CONF_PRICE_STALE_HOURS,
     DEFAULT_PRICE_STALE_HOURS,
-    DOMAIN,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
 from .data_helpers import fuel_display_name, station_display_name
-from .price_metadata import price_history_metadata, price_metadata as _price_metadata
 from .entity import (
     OsservaprezziBaseEntity,
     ScheduleAwareEntity,
     _has_valid_opening_hours,
 )
+from .price_metadata import price_history_metadata
+from .price_metadata import price_metadata as _price_metadata
+from .runtime import OsservaprezziConfigEntry
 
 INFO_SENSOR_DESCRIPTORS: tuple[SensorEntityDescription, ...] = (
-    SensorEntityDescription(key="name", translation_key="station_name", icon="mdi:gas-station", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="nomeImpianto", translation_key="station_display_name", icon="mdi:gas-station", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="id", translation_key="station_id", icon="mdi:identifier", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="brand", translation_key="station_brand", icon="mdi:tag", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="company", translation_key="station_company", icon="mdi:office-building", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="phoneNumber", translation_key="station_phone", icon="mdi:phone", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="email", translation_key="station_email", icon="mdi:email", entity_category=EntityCategory.DIAGNOSTIC),
-    SensorEntityDescription(key="website", translation_key="station_website", icon="mdi:web", entity_category=EntityCategory.DIAGNOSTIC),
+    SensorEntityDescription(
+        key="name",
+        translation_key="station_name",
+        icon="mdi:gas-station",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="nomeImpianto",
+        translation_key="station_display_name",
+        icon="mdi:gas-station",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="id",
+        translation_key="station_id",
+        icon="mdi:identifier",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="brand",
+        translation_key="station_brand",
+        icon="mdi:tag",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="company",
+        translation_key="station_company",
+        icon="mdi:office-building",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="phoneNumber",
+        translation_key="station_phone",
+        icon="mdi:phone",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="email",
+        translation_key="station_email",
+        icon="mdi:email",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="website",
+        translation_key="station_website",
+        icon="mdi:web",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
 )
 
 
@@ -67,19 +112,19 @@ def _get_fuel_icon(fuel_name: str) -> str:
     return "mdi:currency-eur"
 
 
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: OsservaprezziConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensor entities for a station."""
-    coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: CarburantiDataUpdateCoordinator = entry.runtime_data.coordinator
     station_id = entry.data[CONF_STATION_ID]
     known_unique_ids: set[str] = set()
     tracked_fuels = {fuel.lower() for fuel in entry.options.get(CONF_TRACKED_FUELS, [])}
-    tracked_service_modes = {mode.lower() for mode in entry.options.get(CONF_TRACKED_SERVICE_MODES, [])}
+    tracked_service_modes = {
+        mode.lower() for mode in entry.options.get(CONF_TRACKED_SERVICE_MODES, [])
+    }
 
     @callback
     def _async_discover_entities() -> None:
@@ -93,7 +138,11 @@ async def async_setup_entry(
                 if f"{station_id}_{fuel_key}" in known_unique_ids:
                     continue
                 fuel_name, service_mode = fuel_key.rsplit("_", 1)
-                if tracked_fuels and fuel_name.lower() not in tracked_fuels and fuel_display_name(fuel_name).lower() not in tracked_fuels:
+                if (
+                    tracked_fuels
+                    and fuel_name.lower() not in tracked_fuels
+                    and fuel_display_name(fuel_name).lower() not in tracked_fuels
+                ):
                     continue
                 if tracked_service_modes and service_mode.lower() not in tracked_service_modes:
                     continue
@@ -106,19 +155,14 @@ async def async_setup_entry(
                     station_info.get(info_key)
                     and f"{station_id}_{info_key}" not in known_unique_ids
                 ):
-                    entities.append(
-                        StationInfoSensor(coordinator, entry, description)
-                    )
+                    entities.append(StationInfoSensor(coordinator, entry, description))
         if f"{station_id}_location" not in known_unique_ids:
             entities.append(StationLocationSensor(coordinator, entry))
-        if (
-            _has_valid_opening_hours(data)
-            and f"{station_id}_next_change" not in known_unique_ids
-        ):
+        if _has_valid_opening_hours(data) and f"{station_id}_next_change" not in known_unique_ids:
             entities.append(StationNextChangeSensor(coordinator, entry))
         if not entities:
             return
-        known_unique_ids.update(entity._attr_unique_id for entity in entities)
+        known_unique_ids.update(cast(str, entity._attr_unique_id) for entity in entities)
         async_add_entities(entities, update_before_add=False)
 
     _async_discover_entities()
@@ -129,7 +173,21 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
     """Representation of a single fuel price for a specific station."""
 
     _attr_has_entity_name = True
-    _unrecorded_attributes = frozenset({"min_30d", "max_30d", "avg_30d", "vs_avg_30d_pct", "is_30d_low", "price_age_minutes", ATTR_FUEL_TYPE_NAME, ATTR_IS_SELF, ATTR_STATION_NAME, ATTR_STATION_ADDRESS, ATTR_STATION_BRAND})
+    _unrecorded_attributes = frozenset(
+        {
+            "min_30d",
+            "max_30d",
+            "avg_30d",
+            "vs_avg_30d_pct",
+            "is_30d_low",
+            "price_age_minutes",
+            ATTR_FUEL_TYPE_NAME,
+            ATTR_IS_SELF,
+            ATTR_STATION_NAME,
+            ATTR_STATION_ADDRESS,
+            ATTR_STATION_BRAND,
+        }
+    )
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "€/L"
 
@@ -154,12 +212,19 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
 
     def _stale_at(self) -> datetime | None:
         """Return the staleness deadline for the current price."""
-        fuel = (self.coordinator.data or {}).get("fuels", {}).get(self._fuel_key, {})
+        fuels: Mapping[str, Mapping[str, Any]] = (
+            self.coordinator.data.get("fuels", {}) if self.coordinator.data else {}
+        )
+        fuel = fuels.get(self._fuel_key, {})
         value = fuel.get("last_update")
         parsed = dt_util.parse_datetime(value) if isinstance(value, str) else None
         if not isinstance(parsed, datetime) or parsed.tzinfo is None:
             return None
-        hours = int(getattr(self._entry, "options", {}).get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS))
+        hours = int(
+            getattr(self._entry, "options", {}).get(
+                CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS
+            )
+        )
         return parsed + timedelta(hours=hours)
 
     @callback
@@ -169,7 +234,9 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
             self._stale_listener = None
         deadline = self._stale_at()
         if deadline is not None and deadline > dt_util.utcnow():
-            self._stale_listener = async_track_point_in_utc_time(self.hass, self._stale_tick, dt_util.as_utc(deadline))
+            self._stale_listener = async_track_point_in_utc_time(
+                self.hass, self._stale_tick, dt_util.as_utc(deadline)
+            )
 
     @callback
     def _stale_tick(self, now: datetime) -> None:
@@ -196,7 +263,8 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
         """Return the sensor state."""
         if not self.coordinator.data:
             return None
-        return self.coordinator.data.get("fuels", {}).get(self._fuel_key, {}).get("price")
+        fuels: Mapping[str, Mapping[str, Any]] = self.coordinator.data.get("fuels", {})
+        return cast(StateType, fuels.get(self._fuel_key, {}).get("price"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -232,13 +300,19 @@ class OsservaprezziStationSensor(OsservaprezziBaseEntity, SensorEntity):
                 ),
             )
         )
-        attributes.update(price_history_metadata(fuel_info.get("price"), fuel_info.get("price_history")))
+        attributes.update(
+            price_history_metadata(fuel_info.get("price"), fuel_info.get("price_history"))
+        )
         return attributes
 
     @property
     def available(self) -> bool:
         """Return whether this fuel is available from the coordinator."""
-        return bool(super().available and self.coordinator.data and self._fuel_key in self.coordinator.data.get("fuels", {}))
+        return bool(
+            super().available
+            and self.coordinator.data
+            and self._fuel_key in self.coordinator.data.get("fuels", {})
+        )
 
 
 class StationInfoSensor(OsservaprezziBaseEntity, SensorEntity):

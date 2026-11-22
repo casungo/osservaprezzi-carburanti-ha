@@ -1,187 +1,232 @@
 # Osservaprezzi Carburanti for Home Assistant
 
-[🇮🇹 Read this in Italian / Leggi in Italiano](./README.it.md)
+[🇮🇹 Leggi in Italiano](./README.it.md)
 
-Integration for Home Assistant that retrieves fuel prices from the Osservaprezzi service provided by the Italian Ministry of Enterprises and Made in Italy (MIMIT).
+Home Assistant custom integration that tracks Italian fuel station prices, schedules, and services from the official [MIMIT Osservaprezzi](https://carburanti.mise.gov.it/) data sources.
 
 ## Preview
 
-Fuel prices from two public stations, displayed with Home Assistant's built-in dashboard cards.
+Fuel prices from two public stations rendered with Home Assistant's built-in dashboard cards:
 
 ![Home Assistant dashboard showing petrol and diesel prices for two stations](docs/images/fuel-dashboard.png)
 
 <details>
 <summary>Station discovery and multi-station setup</summary>
 
-Choose Home location, manual coordinates, registry search, or a station ID.
+Choose from Home location, manual coordinates, a Home Assistant zone, municipality/registry search, or a station ID:
 
-![Station setup dialog with the four discovery methods](docs/images/setup-methods.png)
+![Station setup dialog showing discovery methods](docs/images/setup-methods.png)
 
-Select several stations from the search results in one setup flow.
+Select one or more stations from the search results in a single setup flow:
 
 ![Nearby station search results with two stations selected](docs/images/station-selection.png)
 
 </details>
 
-Captured on 3 October 2026 with Home Assistant 2026.9.4 and integration 2.6.0 in an isolated demo
-profile. The location used for discovery is central Rome, not a user's home. Station metadata and
-prices come from MIMIT; the prices shown are a snapshot, not a current price quote.
+<sub>Captured on 3 October 2026 in an isolated demo profile using central Rome for discovery. Station metadata and prices come from MIMIT and are illustrative snapshots, not live quotes.</sub>
 
-## ✨ Features
+---
 
-📊 **Automatic Fuel Sensors**: Automatically creates a sensor for each fuel type available at the selected station.
+## Features
 
-⏰ **Scheduled Updates**: Data is updated daily at a user-configurable time using cron expressions (default is daily at 08:30).
+- **Fuel price sensors** — automatic `€/L` sensors (3-decimal precision) for each available fuel and service mode (Self / Servito), with price delta, direction (`up`/`down`/`unchanged`/`new`), staleness tracking, and rolling 30-day stats (`min_30d`, `max_30d`, `avg_30d`, `vs_avg_30d_pct`, `is_30d_low`).
+- **5 station setup & discovery methods** — search locally over the cached official MIMIT registry near Home, manual coordinates, a Home Assistant zone, or by municipality/province, or enter a station ID directly. Supports multi-station selection and in-place **Reconfigure**.
+- **Privacy-first local search** — coordinates and zones are used only in memory inside Home Assistant to compute distances; they are never persisted by the integration or sent to MIMIT.
+- **Flexible refresh & filtering** — preset schedules or custom 5-field cron expressions (Home Assistant time zone), configurable staleness threshold (6–168 h), optional fuel and service-mode filters, plus a per-station **Refresh prices** button.
+- **Schedules, services & metadata** — open/closed binary sensor, next opening/closing change sensor (with Italian national holidays), station info & GPS location sensors, and diagnostic binary sensors for 11 station services.
+- **Actions, events & blueprints** — ranked price comparison (with cost/savings for a refuel volume and distance sorting), targeted refresh, local registry search, `osservaprezzi_carburanti_price_changed` event, and ready-to-use automation blueprints.
+- **Resilience & Repairs** — persists the last known payload across restarts and temporary upstream outages, exposes fixable Repairs issues when a station disappears (404), and warns if the shared CSV registry becomes stale.
 
-🏷️ **Complete Station Information**: Sensors include detailed attributes such as station name, brand, address, and last update time.
+---
 
-📍 **Location Sensor**: Creates a diagnostic location sensor for the station with GPS coordinates.
+## Installation
 
-🕐 **Opening Hours Sensors**: Provides sensors for open/closed status and next opening/closing time when available.
+### Marketplace (Home Assistant 2026.11 and newer)
 
-🛠️ **Service Binary Sensors**: Automatically creates binary sensors for services when available.
+1. Open **Settings → Marketplace** and accept the notice if prompted.
+2. Search for **Osservaprezzi Carburanti** and select **Install**.
+3. Restart Home Assistant if prompted.
 
-📞 **Contact Information Sensors**: Creates sensors for phone, email, and website when available.
+Marketplace replaces HACS starting in Home Assistant 2026.11; existing HACS installs migrate automatically. See the [Marketplace documentation](https://www.home-assistant.io/integrations/marketplace/).
 
-🏠 **Flexible Station Setup**: Finds stations near Home or manual coordinates, searches by municipality, or accepts a station ID.
-
-## 🚀 Installation and Configuration
-
-### Installation with Marketplace, Home Assistant 2026.11 and newer
-
-1. Open **Settings > Marketplace** and accept the warning if prompted.
-2. Search for "Osservaprezzi Carburanti" and select **Install**.
-3. Restart Home Assistant if prompted, then follow the configuration instructions below.
-
-Marketplace replaces HACS starting with Home Assistant 2026.11. Existing HACS installations
-migrate automatically, including installed repositories and update entities. See the
-[Marketplace documentation](https://www.home-assistant.io/integrations/marketplace/).
-
-### Installation with HACS, Home Assistant 2026.10 and older
+### HACS (Home Assistant 2026.10 and older)
 
 1. Install [HACS](https://hacs.xyz/docs/installation/installation/) if needed.
-2. Search for "Osservaprezzi Carburanti" in HACS and download it.
+2. Search for **Osservaprezzi Carburanti** in HACS and download it.
 3. Restart Home Assistant.
 
-### Testing pre-releases
+<details>
+<summary>Testing pre-releases</summary>
 
-Available pre-releases are listed on the
-[Releases page](https://github.com/casungo/osservaprezzi-carburanti-ha/releases).
+Available pre-releases are listed on the [Releases page](https://github.com/casungo/osservaprezzi-carburanti-ha/releases).
 
-1. Go to **Settings > Devices & services > Marketplace** on Home Assistant 2026.11 or newer,
-   or **Settings > Devices & services > HACS** on older versions.
-2. Open the device page for the Osservaprezzi Carburanti repository.
-3. Show disabled entities and enable the **Pre-release** switch entity, then turn it on.
-4. Install the pre-release from the repository page or its update entity.
+1. Go to **Settings → Devices & services → Marketplace** (HA 2026.11+) or **HACS** (older versions).
+2. Open the **Osservaprezzi Carburanti** repository device page.
+3. Show disabled entities, enable the **Pre-release** switch, and turn it on.
+4. Install the pre-release from the repository page or update entity.
 
-The entity ID can vary; find the switch on the repository's device page.
-Turn it off to receive only stable releases in future. This does not downgrade an installed
-pre-release. To undo an update, restore a backup made before that update.
+Turn the switch off to return to stable releases for future updates. To revert an installed pre-release, restore a backup created before updating.
 
-### Configuration
+</details>
 
-To configure the integration, go to: "Settings" -> "Devices & Services" -> "+ Add Integration", search for "Osservaprezzi Carburanti" and follow the instructions.
+---
 
-During setup you can:
+## Configuration
 
-- find nearby stations using Home Assistant's configured Home location and a custom radius from 0.1 to 200 km;
-- search near manually entered coordinates without storing them;
-- search the official registry by municipality and optional province;
-- enter an Osservaprezzi station ID manually.
-
-Registry searches support free-text and station-type filters plus a custom limit from 1 to 100 results.
-Matching is case- and accent-insensitive. Nearby searches use the locally cached official MIMIT
-station registry. Coordinates are used only in memory to calculate distances and are not stored by
-the integration or sent to MIMIT.
-
-After setup, use the integration's **Reconfigure** action to change the monitored station without
-removing and recreating the config entry.
-
-You can also use the following My Home Assistant link (requires the integration to be already installed):
+Go to **Settings → Devices & services → + Add integration**, search for **Osservaprezzi Carburanti**, or click:
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=osservaprezzi_carburanti)
 
-## 📊 Created Sensors
+### Setup methods
 
-When you configure a station, the integration automatically creates the following sensors:
+- **Find stations near Home** — uses Home Assistant's Home location with a custom radius (0.1–200 km).
+- **Find stations near coordinates** — enter latitude/longitude manually (used only in memory).
+- **Find stations near a zone** — pick any Home Assistant `zone.*` entity.
+- **Search the station registry** — filter by municipality, province, free text, and station type (case- and accent-insensitive, 1–100 results).
+- **Enter a station ID** — direct entry using the ID from `https://carburanti.mise.gov.it/ospzSearch/dettaglio/<ID>`.
 
-### Fuel Price Sensors
+Use **Reconfigure** on an existing station entry at any time to switch to another station without recreating the entry.
 
-- One sensor for each fuel type available at the station (both self-service and served)
-- Shows current price in €/L
-- Includes attributes for fuel name, service type, last update time, and validity date
-- Reports price delta, `up`/`down`/`unchanged` direction, age in minutes, and whether the price is stale
+### Options
 
-### Manual refresh
+Each configured station supports:
 
-Each device has a **Refresh prices** button that refreshes only that station.
-The button also lets you retry after a connection error.
+- **Refresh schedule** — presets: daily at 08:30 (default, `30 8 * * *`), twice daily at 07:30 & 19:30 (`30 7,19 * * *`), every 6 hours (`0 */6 * * *`), weekdays at 08:00 (`0 8 * * 1-5`), or **Custom** 5-field cron (see [Crontab Guru](https://crontab.guru/)). Displays the next scheduled run time in Home Assistant's time zone.
+- **Price staleness threshold** — mark prices stale after `6`, `12`, `24` (default), `48`, `72`, or `168` hours.
+- **Tracked fuels & service modes** — optionally limit created price sensors to selected fuel types and/or Self vs. Servito modes (leave empty to track all).
 
-### Station Information Sensors
+---
 
-- **Station Name**: The name of the fuel station
-- **Station ID**: The Osservaprezzi identifier
-- **Brand**: Fuel station brand (e.g., Eni, Shell, TotalEnergies)
-- **Company**: Operating company name
-- **Phone**: Contact phone number (if available)
-- **Email**: Contact email (if available)
-- **Website**: Official website (if available)
-- **Location**: Map marker with GPS coordinates
+## Entities
 
-### Operating Hours Sensors (when data is available)
+| Platform | Entities | Notes |
+| --- | --- | --- |
+| **Sensor** | Fuel prices (one per fuel & Self/Servito mode) | State in `€/L` (3 decimals). Attributes: `fuel_type_name`, `is_self_service`, `last_update`, `validity_date`, `previous_price`, `price_changed_at`, `price_delta`, `price_direction`, `price_age_minutes`, `price_is_stale`, `min_30d`, `max_30d`, `avg_30d`, `vs_avg_30d_pct`, `is_30d_low`, plus station metadata. |
+| **Sensor** | Station info (`Name`, `Station Name`, `Osservaprezzi ID`, `Brand`, `Company`, `Phone`, `Email`, `Website`, `Location`) | Diagnostic metadata; `Location` exposes GPS coordinates for map cards. |
+| **Sensor** | `Next Schedule Change` | Next opening/closing time (`opens_at`, `closes_at`, `always_open`, `no_schedule`, `no_opening`), accounting for Italian holidays. |
+| **Binary sensor** | `Open` | Current open/closed status with `today_schedule`, `self_service_available`, and `served_available` attributes. |
+| **Binary sensor** | Station services (disabled by default, diagnostic) | Food & Beverage, Workshop, Camper/Truck Parking, Camper Dump Station, Children's Area, ATM, Disabled Services, Wi-Fi, Tire Service, Car Wash, EV Charging. |
+| **Button** | `Refresh prices` | Manually refreshes that station only; also usable to retry after transient errors. |
 
-- **Open/Closed Status**: Binary sensor indicating if the station is currently open
-- **Next Change**: Shows when the station will next open or close with time
+---
 
-### Service Binary Sensors (when data is available)
+## Actions (Services)
 
-Binary sensors are created for each available service at the station:
+All actions are registered globally under `osservaprezzi_carburanti`. Shared CSV operations execute once and synchronize all loaded stations.
 
-- 🍽️ **Food&Beverage**: Bar, restaurant or catering service
-- 🔧 **Workshop**: Car repair and maintenance services
-- 🚛 **RV/Truck Parking Area**: Designated parking area for campers and trucks
-- 💧 **Camper Waste Disposal**: Black/grey water discharge point
-- 🧒 **Children's Area**: Playground for children
-- 💳 **ATM/Bancomat**: Cash machine availability
-- ♿ **Disabled Access**: Accessibility services
-- 📶 **Wi-Fi**: Internet connection availability
-- 🛞 **Tire Service**: Tire fitting and repair services
-- 🚗 **Car Wash**: Vehicle washing services
-- 🔌 **Electric Charging**: Electric vehicle charging stations
+| Action | Response | Description |
+| --- | --- | --- |
+| `compare_stations` | Required (`stations`, `ranking`) | Compares loaded stations and returns a sorted ranking. Supports `fuel_type`, `service_mode` (`any`/`self`/`served`), `exclude_stale`, `only_open`, `liters` (computes `estimated_total_eur` and `savings_eur`), `sort_by` (`price`/`distance`), and origin (`latitude`/`longitude` or `zone`). |
+| `refresh_prices` | Optional (`refreshed_station_ids`, `refreshed_count`) | Refreshes all active stations, or only those targeted by `device_id`, `entity_id`, or `station_ids`. Fails explicitly if a refresh cannot fetch fresh data. |
+| `search_registry` | Required (`results`, `result_count`, `registry_updated`, `registry_is_stale`) | Searches the local cached registry by area (`municipality`, `province`, `query`, `station_type`) or proximity (`latitude`/`longitude` or `zone`, `radius_km`), up to `limit` (1–50), flagging already configured stations. |
+| `force_csv_update` | None | Downloads the official MIMIT station registry CSV immediately and refreshes all loaded stations. |
+| `clear_cache` | None | Clears the shared CSV cache, downloads a fresh copy, and refreshes all loaded stations. |
 
-### Refresh schedule
+<details>
+<summary>Action YAML examples</summary>
 
-In the options, choose daily at 08:30, twice daily at 07:30 and 19:30, every 6 hours,
-or weekdays at 08:00. Choose **Custom** to enter a five-field cron expression. Existing cron
-expressions are preserved. Times use the Home Assistant time zone. The options also preview
-the next refresh for the current configuration.
-The same screen lets you choose when prices are marked stale: 6, 12, 24, 48, 72, or 168 hours.
+```yaml
+# Compare self-service diesel prices across open stations for a 50L refuel
+action: osservaprezzi_carburanti.compare_stations
+data:
+  fuel_type: gasolio
+  service_mode: self
+  only_open: true
+  exclude_stale: true
+  liters: 50
+  sort_by: price
+response_variable: station_comparison
+```
 
-**Default value**: `30 8 * * *` (daily at 8:30 AM)
+```yaml
+# Refresh specific stations by ID (or use device_id / entity_id)
+action: osservaprezzi_carburanti.refresh_prices
+data:
+  station_ids:
+    - "54233"
+response_variable: refresh_result
+```
 
-With the Custom schedule, you can edit this expression. You can use [Crontab Guru](https://crontab.guru) to help build and validate your cron expressions. This tool provides a helpful interface to understand when your scheduled updates will run.
+```yaml
+# Search the local registry near a zone or by municipality
+action: osservaprezzi_carburanti.search_registry
+data:
+  municipality: Roma
+  query: Eni
+  limit: 10
+response_variable: registry_results
+```
 
-Common examples:
+</details>
 
-- `0 8 * * *` - Daily at 8:00 AM
-- `30 7,19 * * *` - Daily at 7:30 AM and 7:30 PM
-- `0 */6 * * *` - Every 6 hours
-- `0 8 * * 1-5` - Weekdays at 8:00 AM
+---
 
-### How to Find the Station ID
+## Events & Automation Blueprints
 
-Manual ID entry remains available during configuration. To find a **Station ID**:
+### Price-changed event
 
-1. Go to https://carburanti.mise.gov.it/ospzSearch/zona
-2. Search for your favorite station
-3. Click on the station
-4. In the URL (e.g: https://carburanti.mise.gov.it/ospzSearch/dettaglio/1111) copy the ID (1111)
+Whenever a fuel price changes during a refresh, the integration fires `osservaprezzi_carburanti_price_changed` with:
 
-## 🧩 Dashboard Examples
+`station_id`, `station_name`, `fuel`, `fuel_key`, `is_self`, `old_price`, `new_price`, `delta`, and `direction` (`up` / `down`).
 
-### Battery State Card
+### Blueprints
 
-You can display fuel prices with the custom [Battery State Card](https://github.com/maxwroc/battery-state-card). The following example shows diesel prices from all `osservaprezzi_carburanti` entities, sorted from the cheapest to the most expensive:
+Ready-to-use automation blueprints are provided in [`blueprints/automation/osservaprezzi_carburanti/`](./blueprints/automation/osservaprezzi_carburanti/):
+
+- **`fuel_price_drop_alert.yaml`** — notifies when a price drops below a target or by a minimum delta using `osservaprezzi_carburanti_price_changed`.
+- **`cheapest_station_digest.yaml`** — sends a scheduled ranking digest using `osservaprezzi_carburanti.compare_stations`.
+
+Copy the files into `<config>/blueprints/automation/osservaprezzi_carburanti/` in Home Assistant, create automations from them, and use `{{ message }}` in your notification action.
+
+---
+
+## Dashboard Examples
+
+<details>
+<summary>Built-in Lovelace cards (Map, Markdown ranking, Entities)</summary>
+
+Replace the example entity IDs with your own (enable the `Location` sensor in the entity registry to use it on a map):
+
+```yaml
+type: map
+entities:
+  - entity: sensor.station_location
+```
+
+```yaml
+type: markdown
+content: >-
+  | Station | Diesel (€/L) |
+  |:--|--:|
+  {% set ns = namespace(prices=[]) %}
+  {% for price in [states.sensor.station_one_diesel, states.sensor.station_two_diesel] if price is defined and is_number(price.state) %}
+  {% set ns.prices = ns.prices + [(price.state | float, price.attributes.station_name)] %}
+  {% endfor %}
+  {% for price, station in ns.prices | sort %}
+  | {{ station }} | {{ price }} |
+  {% endfor %}
+```
+
+```yaml
+type: entities
+entities:
+  - entity: sensor.station_one_diesel
+  - type: attribute
+    entity: sensor.station_one_diesel
+    attribute: price_direction
+    name: Price direction
+  - type: attribute
+    entity: sensor.station_one_diesel
+    attribute: price_is_stale
+    name: Price is stale
+```
+
+</details>
+
+<details>
+<summary>Custom Battery State Card (sorted price list)</summary>
+
+Using [Battery State Card](https://github.com/maxwroc/battery-state-card):
 
 ```yaml
 grid_options:
@@ -223,165 +268,26 @@ tap_action:
   navigation_path: /config/devices/device/{entity.device_id}
 ```
 
-To show all fuel types and group them by fuel name, replace the `filter` section and add `group`:
+To display all fuel types grouped by name, replace `filter` with a wildcard (`value: "*"`) and add `group: [{ by: attributes.fuel_type_name }]`.
 
-```yaml
-filter:
-  include:
-    - and:
-        - or:
-            - name: attributes.fuel_type_name
-              value: "*"
-        - name: entity.platform
-          value: osservaprezzi_carburanti
-group:
-  - by: attributes.fuel_type_name
-```
+</details>
 
-## Global Services
+---
 
-The integration registers these services globally. Shared CSV cache operations run once and then
-synchronize and refresh every loaded station entry that can use the updated cache.
+## Diagnostics & Troubleshooting
 
-### Force CSV update
+- **Privacy-safe diagnostics**: Home Assistant's diagnostics download includes options, coordinator status/counts, and shared registry health; station IDs, names, addresses, and coordinates are redacted or omitted.
+- **Prices look stale**: verify the cron expression and staleness threshold in the integration options, then run `osservaprezzi_carburanti.refresh_prices` (or press the device's **Refresh prices** button).
+- **Registry search finds nothing**: the local registry copy may be outdated — run `osservaprezzi_carburanti.force_csv_update` (or `clear_cache`) and try again.
+- **Station not found (404)**: open **Settings → System → Repairs** to replace the station ID or remove the entry.
 
-`osservaprezzi_carburanti.force_csv_update` immediately downloads the station registry CSV,
-synchronizes it across loaded entries, and refreshes their station data. It does not return response
-data.
+---
 
-```yaml
-action: osservaprezzi_carburanti.force_csv_update
-```
+## Development & Support
 
-### Clear CSV cache
+- **Docs**: [Testing & local checks](./docs/testing.md) · [Release validation](./docs/release-validation.md) · [MIMIT API notes](./docs/api-notes.md)
+- **Issues & requests**: open a [GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new) including the integration version, setup method, and the Home Assistant diagnostics download.
 
-`osservaprezzi_carburanti.clear_cache` clears the shared station registry cache, downloads and
-initializes a fresh copy, synchronizes it across loaded entries, and refreshes their station data. It
-does not return response data.
+## License
 
-```yaml
-action: osservaprezzi_carburanti.clear_cache
-```
-
-### Compare station prices
-
-`osservaprezzi_carburanti.compare_stations` reads, without changing it, the current coordinator data
-for each loaded station that has data. This response-only service returns a `stations` mapping keyed
-by config entry ID. Each station contains its name, ID, brand, address, and a `fuels` mapping with
-price, previous price, price-change time, service mode, and last-update time.
-
-```yaml
-action: osservaprezzi_carburanti.compare_stations
-response_variable: station_comparison
-```
-
-### Refresh fuel prices
-
-`osservaprezzi_carburanti.refresh_prices` refreshes every active station or an optional list of
-station IDs and returns the refreshed IDs.
-
-```yaml
-action: osservaprezzi_carburanti.refresh_prices
-data:
-  station_ids:
-    - "54233"
-response_variable: refresh_result
-```
-
-### Search the station registry
-
-`osservaprezzi_carburanti.search_registry` searches the local official registry by text,
-municipality, province, or station type. It returns public station metadata and flags stations
-already configured in Home Assistant.
-
-```yaml
-action: osservaprezzi_carburanti.search_registry
-data:
-  municipality: Roma
-  query: Eni
-  limit: 10
-response_variable: registry_results
-```
-
-## Diagnostics
-
-Home Assistant's diagnostics download includes configuration options, coordinator counts, and
-shared-registry health. Station ID, identity, address, and coordinates are not included.
-
-Comparison responses also include `price_delta`, `price_direction`, `price_age_minutes`, and
-`price_is_stale`, using each station's configured threshold. A price refresh that fails or only
-uses cached data is reported as an error by the action and the device button.
-
-## Development
-
-The project has two test lanes (lightweight unit tests and real Home Assistant contract tests)
-plus hassfest/HACS validators and a Docker smoke regression. Setup and commands are documented in
-[docs/testing.md](./docs/testing.md).
-
-## Troubleshooting
-
-- **Prices look stale**: check the cron expression and the staleness threshold in the integration
-  options, then run `osservaprezzi_carburanti.refresh_prices`.
-- **Registry search finds nothing**: the local registry copy may be outdated. Run
-  `osservaprezzi_carburanti.force_csv_update` and try again.
-- **Thread-safety errors in the logs** (e.g. `Future exception was never retrieved` or
-  `async_write_ha_state` warnings): fixed in v2.2.0 and later. Update the integration to the
-  latest release.
-
-## 📞 Support
-
-For common problems, see [Troubleshooting](#troubleshooting). For issues or suggestions, open a
-[GitHub issue](https://github.com/casungo/osservaprezzi-carburanti-ha/issues/new).
-When reporting an issue, include the setup method used and the integration version, and attach the
-Home Assistant diagnostics download: it excludes station IDs, identity, addresses, and coordinates.
-If you are asked to test a fix, follow [Testing Pre-releases](#testing-pre-releases).
-
-## 📄 License
-
-This project is released under the MIT License.
-
-## Built-in Lovelace Dashboard Examples
-
-Replace the example entity IDs with your station sensors. The location sensor may need to be enabled in the entity registry.
-
-```yaml
-type: map
-entities:
-  - entity: sensor.station_location
-```
-
-A Markdown card can compare configured price sensors without an additional card:
-
-```yaml
-type: markdown
-content: >-
-  | Station | Diesel (€/L) |
-  |:--|--:|
-  {% set ns = namespace(prices=[]) %}
-  {% for price in [states.sensor.station_one_diesel, states.sensor.station_two_diesel] if price is defined and is_number(price.state) %}
-  {% set ns.prices = ns.prices + [(price.state | float, price.attributes.station_name)] %}
-  {% endfor %}
-  {% for price, station in ns.prices | sort %}
-  | {{ station }} | {{ price }} |
-  {% endfor %}
-```
-
-Use an entities card to show price and metadata (replace the IDs):
-
-```yaml
-type: entities
-entities:
-  - entity: sensor.station_one_diesel
-  - type: attribute
-    entity: sensor.station_one_diesel
-    attribute: price_direction
-    name: Price direction
-  - type: attribute
-    entity: sensor.station_one_diesel
-    attribute: price_is_stale
-    name: Price is stale
-```
-
-## Automation blueprints
-
-The blueprints in `blueprints/automation/osservaprezzi_carburanti/` provide a price-drop alert and a scheduled cheapest-station digest. Copy them into the matching `blueprints/automation` directory in your Home Assistant configuration, then create automations from the blueprints. Configure the notification action using `{{ message }}` for its message. These blueprints require the Phase 1 price-change event and comparison ranking contract; they do not work with the current `stations`-only comparison response.
+Released under the [MIT License](./LICENSE).

@@ -10,7 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 MANIFEST_PATH = Path("custom_components/osservaprezzi_carburanti/manifest.json")
 _NUMBER = r"(?:0|[1-9][0-9]*)"
 _STABLE_VERSION = re.compile(rf"^{_NUMBER}\.{_NUMBER}\.{_NUMBER}$")
@@ -148,6 +147,38 @@ def ensure_tag_available(repo: Path, tag: str, remote: str) -> None:
         raise ReleaseGuardError(f"could not verify tags on {remote}: {detail}")
 
 
+def ensure_tag_points_to_commit(repo: Path, tag: str, remote: str, commit: str) -> None:
+    """Verify an existing release tag resolves to the exact target commit."""
+    local_commit = _git(repo, "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
+    if local_commit != commit:
+        raise ReleaseGuardError(f"local tag {tag} points to {local_commit}, expected {commit}")
+
+    _git(repo, "remote", "get-url", remote)
+    result = subprocess.run(
+        ["git", "ls-remote", "--exit-code", remote, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 2:
+        raise ReleaseGuardError(f"remote tag does not exist on {remote}: {tag}")
+    if result.returncode:
+        detail = result.stderr.strip() or "remote tag lookup failed"
+        raise ReleaseGuardError(f"could not verify tags on {remote}: {detail}")
+
+    remote_refs = dict(
+        line.split("\t", maxsplit=1)[::-1]
+        for line in result.stdout.strip().splitlines()
+        if "\t" in line
+    )
+    remote_commit = remote_refs.get(f"refs/tags/{tag}^{{}}") or remote_refs.get(f"refs/tags/{tag}")
+    if remote_commit != commit:
+        raise ReleaseGuardError(
+            f"remote tag {tag} on {remote} points to {remote_commit}, expected {commit}"
+        )
+
+
 def validate_release(
     repo: Path,
     version: str,
@@ -156,8 +187,10 @@ def validate_release(
     channel: str,
     branch: str,
     remote: str,
+    *,
+    allow_existing_tag: bool = False,
 ) -> None:
-    """Run every pre-tag release guard."""
+    """Run every release guard."""
     validate_version(version, channel)
     validate_tag(tag, version)
     verify_target_commit(repo, commit)
@@ -168,7 +201,10 @@ def validate_release(
         raise ReleaseGuardError(
             f"manifest version in {commit} is {target_version!r}, expected {version!r}"
         )
-    ensure_tag_available(repo, tag, remote)
+    if allow_existing_tag:
+        ensure_tag_points_to_commit(repo, tag, remote, commit)
+    else:
+        ensure_tag_available(repo, tag, remote)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -177,8 +213,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", required=True, help="manifest version without the v prefix")
     parser.add_argument("--tag", required=True, help="exact Git tag, normally v<version>")
     parser.add_argument("--commit", required=True, help="full 40-character target commit SHA")
-    parser.add_argument("--branch", required=True, help="remote branch whose head must equal --commit")
+    parser.add_argument(
+        "--branch", required=True, help="remote branch whose head must equal --commit"
+    )
     parser.add_argument("--remote", default="origin", help="remote checked for an existing tag")
+    parser.add_argument(
+        "--allow-existing-tag",
+        action="store_true",
+        help="allow an already-pushed tag if it points to --commit (for CI tag workflows)",
+    )
     return parser
 
 
@@ -194,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             args.channel,
             args.branch,
             args.remote,
+            allow_existing_tag=args.allow_existing_tag,
         )
     except ReleaseGuardError as exc:
         print(f"release guard failed: {exc}", file=sys.stderr)

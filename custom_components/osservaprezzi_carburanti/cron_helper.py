@@ -22,7 +22,7 @@ def validate_cron_expression(cron_expr: str) -> bool:
     try:
         CronSim(cron_expr, dt_util.now())
         return True
-    except (CronSimError, TypeError, ValueError):
+    except CronSimError, TypeError, ValueError:
         return False
 
 

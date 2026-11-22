@@ -28,68 +28,68 @@ ADDITIONAL_SERVICES = {
         "name": "Food&Beverage",
         "icon": "mdi:food",
         "description": "Bar, restaurant or refreshment point",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/1.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/1.gif",
     },
     "2": {
         "name": "Officina",
         "icon": "mdi:car-wrench",
         "description": "Repair and maintenance service",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/2.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/2.gif",
     },
     "3": {
         "name": "Sosta Camper/Tir",
         "icon": "mdi:truck",
         "description": "Parking area for campers and trucks",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/3.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/3.gif",
     },
     "4": {
         "name": "Scarico per camper",
         "icon": "mdi:water-pump",
         "description": "Black/gray water dump point",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/4.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/4.gif",
     },
     "5": {
         "name": "Area bambini",
         "icon": "mdi:human-child",
         "description": "Playground for children",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/5.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/5.gif",
     },
     "6": {
         "name": "Bancomat",
         "icon": "mdi:cash-multiple",
         "description": "Automatic teller machine",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/6.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/6.gif",
     },
     "7": {
         "name": "Servizi per disabili",
         "icon": "mdi:wheelchair-accessibility",
         "description": "Services accessible for disabled people",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/7.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/7.gif",
     },
     "8": {
         "name": "Wi-Fi",
         "icon": "mdi:wifi",
         "description": "Free or paid Wi-Fi connection",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/8.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/8.gif",
     },
     "9": {
         "name": "Gommista",
         "icon": "mdi:tire",
         "description": "Tire and tire service",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/9.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/9.gif",
     },
     "10": {
         "name": "Autolavaggio",
         "icon": "mdi:car-wash",
         "description": "Car washing service",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/10.gif"
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/10.gif",
     },
     "11": {
         "name": "Ricarica elettrica",
         "icon": "mdi:ev-station",
         "description": "Charging stations for electric vehicles",
-        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/11.gif"
-    }
+        "image_url": "https://carburanti.mise.gov.it/ospzSearch/assets/servizi/11.gif",
+    },
 }
 
 # Map service IDs to translation keys for entity localization
@@ -104,7 +104,7 @@ SERVICE_ID_TO_TRANSLATION_KEY = {
     "8": "wifi",
     "9": "tire_service",
     "10": "car_wash",
-    "11": "ev_charging"
+    "11": "ev_charging",
 }
 
 # Headers for API calls

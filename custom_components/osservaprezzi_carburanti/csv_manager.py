@@ -1,4 +1,5 @@
 """CSV data manager for Osservaprezzi Carburanti station information."""
+
 from __future__ import annotations
 
 import asyncio
@@ -60,7 +61,7 @@ class RegistrySnapshot:
 
 def _load_json_file_sync(path: str) -> dict[str, Any]:
     """Read and decode a JSON document synchronously."""
-    with open(path, "r", encoding="utf-8") as file_handle:
+    with open(path, encoding="utf-8") as file_handle:
         data = json.load(file_handle)
     if not isinstance(data, dict):
         raise ValueError("Cache root must be an object")
@@ -129,9 +130,7 @@ class CSVStationManager:
             new_exists = await self.hass.async_add_executor_job(os.path.exists, self._cache_path)
             if not new_exists:
                 try:
-                    await self.hass.async_add_executor_job(
-                        os.replace, old_cache, self._cache_path
-                    )
+                    await self.hass.async_add_executor_job(os.replace, old_cache, self._cache_path)
                     _LOGGER.info("Migrated legacy JSON station cache")
                 except OSError as err:
                     _LOGGER.warning("Failed to migrate legacy JSON station cache: %s", err)
@@ -244,7 +243,7 @@ class CSVStationManager:
             _LOGGER.info("Successfully updated CSV station data")
             return True
 
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, UnicodeDecodeError) as err:
+        except (aiohttp.ClientError, TimeoutError, OSError, UnicodeDecodeError) as err:
             _LOGGER.error("Error updating CSV data: %s", str(err) or type(err).__name__)
             return False
 
@@ -292,14 +291,33 @@ class CSVStationManager:
         station_id = field("id")
         latitude_value = field("latitude")
         longitude_value = field("longitude")
-        latitude = parse_coordinate(latitude_value or "", -90, 90) if latitude_value is not _MISSING else None
-        longitude = parse_coordinate(longitude_value or "", -180, 180) if longitude_value is not _MISSING else None
-        if station_id is not _MISSING and station_id and latitude is not None and longitude is not None:
+        latitude = (
+            parse_coordinate(latitude_value or "", -90, 90)
+            if latitude_value is not _MISSING
+            else None
+        )
+        longitude = (
+            parse_coordinate(longitude_value or "", -180, 180)
+            if longitude_value is not _MISSING
+            else None
+        )
+        if (
+            station_id is not _MISSING
+            and station_id
+            and latitude is not None
+            and longitude is not None
+        ):
             return station_id, StationRecord(
-                id=station_id, operator=field("operator"), brand=field("brand"),
-                station_type=field("station_type"), name=field("name"),
-                address=field("address"), municipality=field("municipality"),
-                province=field("province"), latitude=latitude, longitude=longitude,
+                id=station_id,
+                operator=field("operator"),
+                brand=field("brand"),
+                station_type=field("station_type"),
+                name=field("name"),
+                address=field("address"),
+                municipality=field("municipality"),
+                province=field("province"),
+                latitude=latitude,
+                longitude=longitude,
             )
         return None
 
@@ -318,9 +336,7 @@ class CSVStationManager:
         header_line = header_line.rstrip("\r\n")
         separator = self._get_separator(header_line)
         col_indices = self._build_column_indices(header_line, separator)
-        missing_required = [
-            column for column in REQUIRED_CSV_COLUMNS if col_indices[column] < 0
-        ]
+        missing_required = [column for column in REQUIRED_CSV_COLUMNS if col_indices[column] < 0]
         if missing_required:
             _LOGGER.error("CSV is missing required columns: %s", ", ".join(missing_required))
             return False, separator, {}
@@ -370,17 +386,13 @@ class CSVStationManager:
         """Load cached station data while the operation lock is held."""
         try:
             _LOGGER.debug("Attempting to load cache from: %s", self._cache_path)
-            data = await self.hass.async_add_executor_job(
-                _load_json_file_sync, self._cache_path
-            )
+            data = await self.hass.async_add_executor_job(_load_json_file_sync, self._cache_path)
 
             stations = data.get("stations", {})
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 data = await self.hass.async_add_executor_job(
                     _load_json_file_sync, self._metadata_path
                 )
-            except FileNotFoundError:
-                pass
             cache_version = data.get("version", "1.0")
             last_update = data.get("last_update")
             separator = data.get("csv_separator", "|")
@@ -410,7 +422,9 @@ class CSVStationManager:
                 return False
 
             parsed_last_update = self._parse_cached_datetime(last_update)
-            self._stations_cache = {key: StationRecord.from_mapping(value) for key, value in stations.items()}
+            self._stations_cache = {
+                key: StationRecord.from_mapping(value) for key, value in stations.items()
+            }
             self._update_station_types()
             self._snapshot_cache = None
             self._snapshot_source = None
@@ -442,7 +456,7 @@ class CSVStationManager:
             parsed_dt = dt_util.parse_datetime(value)
             if parsed_dt is None:
                 parsed_dt = datetime.fromisoformat(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             _LOGGER.warning("Could not parse last_update from cache: %s", value)
             return None
 
@@ -526,9 +540,8 @@ class CSVStationManager:
     def registry_status(self) -> dict[str, Any]:
         """Return a privacy-safe summary of the registry cache."""
         last_update = self._last_update
-        is_stale = (
-            last_update is None
-            or dt_util.now() - last_update >= timedelta(hours=CSV_UPDATE_INTERVAL)
+        is_stale = last_update is None or dt_util.now() - last_update >= timedelta(
+            hours=CSV_UPDATE_INTERVAL
         )
         return {
             "initialized": self._initialized,
@@ -544,15 +557,17 @@ class CSVStationManager:
         """Initialize the registry and return an immutable snapshot."""
         initialized = await self.async_initialize()
         async with self._operation_lock:
-            if self._initialized and not self._stations_cache:
-                if not await self._async_load_cached_data():
-                    raise RegistryUnavailableError("No station registry is available")
+            if (
+                self._initialized
+                and not self._stations_cache
+                and not await self._async_load_cached_data()
+            ):
+                raise RegistryUnavailableError("No station registry is available")
             if not initialized and (not allow_stale or not self._stations_cache):
                 raise RegistryUnavailableError("No station registry is available")
             last_update = self._last_update
-            is_stale = (
-                last_update is None
-                or dt_util.now() - last_update >= timedelta(hours=CSV_UPDATE_INTERVAL)
+            is_stale = last_update is None or dt_util.now() - last_update >= timedelta(
+                hours=CSV_UPDATE_INTERVAL
             )
             if not allow_stale and is_stale:
                 raise RegistryUnavailableError("The station registry is stale")
@@ -573,10 +588,16 @@ class CSVStationManager:
         return self._station_types
 
     def _update_station_types(self) -> None:
-        self._station_types = tuple(sorted({
-            value.strip() for station in self._stations_cache.values()
-            if isinstance(value := station.get("station_type"), str) and value.strip()
-        }, key=str.casefold))
+        self._station_types = tuple(
+            sorted(
+                {
+                    value.strip()
+                    for station in self._stations_cache.values()
+                    if isinstance(value := station.get("station_type"), str) and value.strip()
+                },
+                key=str.casefold,
+            )
+        )
 
     async def async_initialize(self) -> bool:
         """Initialize the CSV manager."""
@@ -585,8 +606,7 @@ class CSVStationManager:
                 return True
             if (
                 self._last_failed_init_at is not None
-                and time.monotonic() - self._last_failed_init_at
-                < CSV_INIT_RETRY_COOLDOWN_SECONDS
+                and time.monotonic() - self._last_failed_init_at < CSV_INIT_RETRY_COOLDOWN_SECONDS
             ):
                 _LOGGER.debug("Skipping CSV initialization during failure cooldown")
                 return False
@@ -600,7 +620,9 @@ class CSVStationManager:
         await self._async_migrate_legacy_files()
 
         cache_loaded = await self._async_load_cached_data()
-        _LOGGER.info("Cache loaded: %s, Stations in cache: %d", cache_loaded, len(self._stations_cache))
+        _LOGGER.info(
+            "Cache loaded: %s, Stations in cache: %d", cache_loaded, len(self._stations_cache)
+        )
 
         if cache_loaded:
             if self._last_update:

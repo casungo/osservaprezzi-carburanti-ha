@@ -282,7 +282,45 @@
     },
     "compare_stations": {
       "name": "Compare station prices",
-      "description": "Returns a comparison of fuel prices across all configured stations."
+      "description": "Returns a comparison of fuel prices across all configured stations.",
+      "fields": {
+        "fuel_type": {
+          "name": "Fuel type",
+          "description": "Optional fuel name or key filter."
+        },
+        "service_mode": {
+          "name": "Service mode",
+          "description": "Filter by self-service or served prices."
+        },
+        "exclude_stale": {
+          "name": "Exclude stale prices",
+          "description": "Exclude prices older than the configured freshness threshold."
+        },
+        "only_open": {
+          "name": "Only open stations",
+          "description": "Include only stations currently open."
+        },
+        "liters": {
+          "name": "Liters",
+          "description": "Optional refuel volume to calculate estimated total cost and savings."
+        },
+        "sort_by": {
+          "name": "Sort by",
+          "description": "Sort results by price or distance."
+        },
+        "latitude": {
+          "name": "Latitude",
+          "description": "Latitude used to calculate distances."
+        },
+        "longitude": {
+          "name": "Longitude",
+          "description": "Longitude used to calculate distances."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone used to calculate distances."
+        }
+      }
     },
     "refresh_prices": {
       "name": "Refresh fuel prices",
@@ -291,6 +329,14 @@
         "station_ids": {
           "name": "Station IDs",
           "description": "Optional list of configured station IDs to refresh."
+        },
+        "device_id": {
+          "name": "Stations (devices)",
+          "description": "Optional station devices to refresh."
+        },
+        "entity_id": {
+          "name": "Station entities",
+          "description": "Optional station entities whose stations should be refreshed."
         }
       }
     },
@@ -317,6 +363,22 @@
         "limit": {
           "name": "Maximum results",
           "description": "Maximum number of stations to return."
+        },
+        "latitude": {
+          "name": "Latitude",
+          "description": "Latitude of the search center."
+        },
+        "longitude": {
+          "name": "Longitude",
+          "description": "Longitude of the search center."
+        },
+        "radius_km": {
+          "name": "Radius (km)",
+          "description": "Search radius in kilometers."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Zone used as the search center."
         }
       }
     }

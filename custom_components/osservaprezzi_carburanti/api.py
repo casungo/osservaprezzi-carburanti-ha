@@ -1,4 +1,5 @@
 """API helper functions for Osservaprezzi Carburanti."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import json
 import logging
 import time
 from math import isfinite
-from typing import cast
+from typing import Any, cast
 from urllib.parse import quote
 
 import aiohttp
@@ -24,9 +25,7 @@ from .const import (
 from .models import StationPayload
 
 _LOGGER = logging.getLogger(__name__)
-REQUIRED_FUEL_FIELDS = frozenset(
-    {"name", "price", "fuelId", "isSelf", "serviceAreaId"}
-)
+REQUIRED_FUEL_FIELDS = frozenset({"name", "price", "fuelId", "isSelf", "serviceAreaId"})
 
 
 class InvalidStationPayloadError(aiohttp.ClientError):
@@ -59,7 +58,7 @@ def normalize_station_data(data: object, station_id: str) -> StationPayload:
     for fuel in normalized["fuels"]:
         if (
             not isinstance(fuel, dict)
-            or not REQUIRED_FUEL_FIELDS <= fuel.keys()
+            or not fuel.keys() >= REQUIRED_FUEL_FIELDS
             or not isinstance(fuel.get("name"), str)
             or not isinstance(fuel.get("isSelf"), bool)
             or not _is_valid_fuel_price(fuel.get("price"))
@@ -82,14 +81,14 @@ def _is_valid_fuel_price(value: object) -> bool:
         return False
     try:
         return isfinite(float(value)) and value >= 0
-    except (OverflowError, TypeError, ValueError):
+    except OverflowError, TypeError, ValueError:
         return False
 
 
 async def fetch_station_data(
     hass: HomeAssistant,
     station_id: str,
-    timeout: int = 30,
+    timeout: int = 30,  # noqa: ASYNC109
 ) -> StationPayload:
     """Fetch station data from the API.
 
@@ -117,9 +116,7 @@ async def fetch_station_data(
         headers=DEFAULT_HEADERS,
         timeout=aiohttp.ClientTimeout(total=timeout),
     ) as response:
-        _LOGGER.debug(
-            "Station API response for %s: status=%s", station_id, response.status
-        )
+        _LOGGER.debug("Station API response for %s: status=%s", station_id, response.status)
 
         if response.status == 200:
             try:
@@ -184,9 +181,9 @@ def _request_limit(hass: HomeAssistant) -> _RequestLimit:
     data = getattr(hass, "data", None)
     if not isinstance(data, dict):
         data = {}
-        hass.data = data
+        cast(Any, hass).data = data
     domain_data = data.setdefault(DOMAIN, {})
-    return domain_data.setdefault("api_request_limit", _RequestLimit())
+    return cast(_RequestLimit, domain_data.setdefault("api_request_limit", _RequestLimit()))
 
 
 async def _wait_for_request_slot(hass: HomeAssistant, station_id: str) -> None:

@@ -1,4 +1,5 @@
 """Small pure helpers shared by station processing and presentation."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -20,7 +21,7 @@ def parse_coordinate(value: Any, minimum: float, maximum: float) -> float | None
         return None
     try:
         coordinate = float(value.replace(",", ".") if isinstance(value, str) else value)
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
     return as_coordinate(coordinate, minimum, maximum)
 

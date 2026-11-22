@@ -1,0 +1,54 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - requirements-test.txt
+      - requirements-ha-test.txt
+      - .github/workflows/security.yml
+  pull_request:
+    paths:
+      - requirements-test.txt
+      - requirements-ha-test.txt
+      - .github/workflows/security.yml
+  schedule:
+    - cron: "29 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
+
+      - name: Audit test dependencies
+        run: |
+          pip-audit -r requirements-test.txt
+
+      # The HA contract harness pins Home Assistant Core and its transitive
+      # dependencies. Upstream currently pins vulnerable versions that cannot
+      # be upgraded independently; audit them separately without blocking CI.
+      # The integration itself declares no runtime requirements.
+      - name: Report Home Assistant test harness vulnerabilities
+        continue-on-error: true
+        run: pip-audit -r requirements-ha-test.txt

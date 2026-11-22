@@ -1,4 +1,5 @@
 """Run Home Assistant Docker smoke regressions for the custom integration."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,8 +14,10 @@ import tarfile
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
+from threading import Lock
+from typing import cast
 
 DOMAIN = "osservaprezzi_carburanti"
 DEFAULT_IMAGE = "ghcr.io/home-assistant/home-assistant:stable"
@@ -33,6 +36,7 @@ ERROR_PATTERNS = (
 LOG_TAIL_LINE_LIMIT = 80
 LIVED_HISTORY_DAYS = 14
 LIVED_BOOT_COUNT = 4
+_CONTAINER_NAMES_LOCK = Lock()
 UPGRADE_FROM_TAG = "v2.6.0-beta.1"
 
 
@@ -163,11 +167,9 @@ def _extract_tagged_integration(repo_root: Path, destination: Path, tag: str) ->
             check=False,
         )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Could not extract {tag}: {result.stderr.decode(errors='replace')}"
-        )
+        raise RuntimeError(f"Could not extract {tag}: {result.stderr.decode(errors='replace')}")
     with tarfile.open(archive_path) as archive:
-        archive.extractall(destination)
+        archive.extractall(destination, filter="data")
     source = destination / "custom_components" / DOMAIN
     if not source.is_dir():
         raise AssertionError(f"Tagged integration was not extracted: {source}")
@@ -197,7 +199,14 @@ def _docker_logs(container_name: str, docker_env: dict[str, str]) -> str:
 def _home_assistant_logs(container_name: str, docker_env: dict[str, str]) -> str:
     """Return Home Assistant's log file content when available."""
     result = _run(
-        ["docker", "exec", container_name, "sh", "-c", "cat /config/home-assistant.log 2>/dev/null"],
+        [
+            "docker",
+            "exec",
+            container_name,
+            "sh",
+            "-c",
+            "cat /config/home-assistant.log 2>/dev/null",
+        ],
         check=False,
         env=docker_env,
     )
@@ -206,7 +215,9 @@ def _home_assistant_logs(container_name: str, docker_env: dict[str, str]) -> str
 
 def _combined_logs(container_name: str, docker_env: dict[str, str]) -> str:
     """Return all available Home Assistant logs."""
-    return _docker_logs(container_name, docker_env) + _home_assistant_logs(container_name, docker_env)
+    return _docker_logs(container_name, docker_env) + _home_assistant_logs(
+        container_name, docker_env
+    )
 
 
 def _assert_no_error_logs(
@@ -262,7 +273,7 @@ def _wait_for_startup(
         )
         if DOMAIN in last_logs:
             return last_logs
-        time.sleep(3)
+        time.sleep(1)
 
     context = _log_failure_context("startup timeout", last_logs, container_name)
     raise TimeoutError(f"Timed out waiting for Home Assistant startup.\n{context}")
@@ -355,10 +366,12 @@ print(json.dumps({{
         timeout=60,
         env=docker_env,
     )
-    return json.loads(result.stdout)
+    return cast(dict[str, int | str], json.loads(result.stdout))
 
 
-def _entity_counts(container_name: str, docker_env: dict[str, str], station_ids: list[str]) -> dict[str, int] | None:
+def _entity_counts(
+    container_name: str, docker_env: dict[str, str], station_ids: list[str]
+) -> dict[str, int] | None:
     """Return entity counts by station id from Home Assistant's entity registry."""
     script = f"""
 from __future__ import annotations
@@ -397,7 +410,7 @@ print(json.dumps(counts, sort_keys=True))
             "Failed to inspect Home Assistant entity registry:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-    return json.loads(result.stdout)
+    return cast(dict[str, int], json.loads(result.stdout))
 
 
 def _wait_for_live_entities(
@@ -422,7 +435,7 @@ def _wait_for_live_entities(
         last_counts = _entity_counts(container_name, docker_env, station_ids)
         if last_counts and all(last_counts.get(station_id, 0) > 0 for station_id in station_ids):
             return last_counts
-        time.sleep(5)
+        time.sleep(1)
 
     raise TimeoutError(
         "Timed out waiting for live station entities. "
@@ -464,8 +477,8 @@ def _wait_for_probe(
             payload = json.loads(result.stdout)
             if payload.get("status") != "passed":
                 raise AssertionError(f"Home Assistant state probe failed: {payload}")
-            return payload
-        time.sleep(3)
+            return cast(dict[str, object], payload)
+        time.sleep(1)
 
     raise TimeoutError(
         "Timed out waiting for Home Assistant state probe.\n"
@@ -504,8 +517,7 @@ def _assert_persisted_profile(config_dir: Path) -> dict[str, int]:
     entity_registry = json.loads(paths["entity_registry"].read_text(encoding="utf-8"))
     station_cache = json.loads(paths["station_cache"].read_text(encoding="utf-8"))
     entry_count = sum(
-        entry.get("domain") == DOMAIN
-        for entry in config_entries.get("data", {}).get("entries", [])
+        entry.get("domain") == DOMAIN for entry in config_entries.get("data", {}).get("entries", [])
     )
     entity_count = sum(
         entity.get("platform") == DOMAIN
@@ -655,7 +667,9 @@ def _build_lived_profile(
     persisted_summary = _assert_persisted_profile(builder_dir)
     aged_summary = _assert_aged_profile(builder_dir)
     _checkpoint_recorder_database(builder_dir)
-    archive_path = Path(shutil.make_archive(str(output_dir / "lived-profile"), "gztar", builder_dir))
+    archive_path = Path(
+        shutil.make_archive(str(output_dir / "lived-profile"), "gztar", builder_dir)
+    )
     lived_dir = output_dir / "lived"
     lived_dir.mkdir()
     shutil.unpack_archive(archive_path, lived_dir)
@@ -687,7 +701,8 @@ def _run_profile(
     if os.name == "nt":
         mount_path = mount_path.replace("\\", "/")
     container_name = f"ha-{DOMAIN}-{profile}-{uuid.uuid4().hex[:8]}"
-    container_names.append(container_name)
+    with _CONTAINER_NAMES_LOCK:
+        container_names.append(container_name)
     started = False
     try:
         command = [
@@ -757,7 +772,9 @@ def _run_profile(
             _stop_container(container_name, docker_env)
 
 
-def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str]) -> None:
+def run_regression(
+    image: str, timeout: int, keep: bool, station_ids: list[str], workers: int = 2
+) -> None:
     """Run the Docker regression workflow."""
     docker_env = os.environ.copy()
     docker_info = _run(["docker", "info"], timeout=120, check=False, env=docker_env)
@@ -784,82 +801,95 @@ def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str])
             raise AssertionError(
                 f"Upgrade profile is not testing a version change: {previous_version}"
             )
-        upgrade_output = temp_dir / "upgrade"
-        upgrade_output.mkdir()
-        upgrade_dir, upgrade_persisted, upgrade_aged = _build_lived_profile(
-            repo_root,
-            upgrade_output,
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            integration_root=previous_source,
-        )
-        _replace_integration(repo_root, upgrade_dir)
-        _copy_probe(repo_root, upgrade_dir)
-        _restore_config_ownership(str(upgrade_dir), docker_env)
-        _assert_persisted_profile(upgrade_dir)
-        _assert_aged_profile(upgrade_dir)
-        print(f"Upgrade profile: {previous_version} -> {current_version}")
-        _run_profile(
-            upgrade_dir,
-            "upgrade",
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            container_names,
-            keep,
-        )
-        lived_dir, persisted_summary, aged_summary = _build_lived_profile(
-            repo_root, temp_dir, image, timeout, station_ids, docker_env
-        )
-        fresh_dir = temp_dir / "fresh"
-        fresh_dir.mkdir()
-        _copy_integration(repo_root, fresh_dir)
-        _copy_probe(repo_root, fresh_dir)
-        _run_profile(
-            fresh_dir, "fresh", image, timeout, station_ids, docker_env, container_names, keep
-        )
-        _restore_config_ownership(str(lived_dir), docker_env)
-        _assert_persisted_profile(lived_dir)
-        _assert_aged_profile(lived_dir)
-        _run_profile(
-            lived_dir, "lived", image, timeout, station_ids, docker_env, container_names, keep
-        )
-        _restore_config_ownership(str(lived_dir), docker_env)
-        _checkpoint_recorder_database(lived_dir)
-        outage_dir = temp_dir / "outage"
-        shutil.copytree(lived_dir, outage_dir)
-        _write_ha_config(outage_dir, "outage", station_ids)
-        (outage_dir / "docker-probe-result.json").unlink(missing_ok=True)
-        _run_profile(
-            outage_dir,
-            "outage",
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            container_names,
-            keep,
-            blocked_hosts=["carburanti.mise.gov.it", "www.mimit.gov.it"],
-        )
-        _restore_config_ownership(str(outage_dir), docker_env)
-        _assert_persisted_profile(outage_dir)
-        _assert_aged_profile(outage_dir)
-        _run_profile(
-            outage_dir,
-            "recovery",
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            container_names,
-            keep,
-        )
-        print(f"Exported profile used for lived run: {lived_dir}")
-        print(f"Lived profile before run: {persisted_summary}, {aged_summary}")
-        print(f"Upgrade profile before run: {upgrade_persisted}, {upgrade_aged}")
+
+        def upgrade_and_fresh() -> None:
+            upgrade_output = temp_dir / "upgrade"
+            upgrade_output.mkdir()
+            upgrade_dir, upgrade_persisted, upgrade_aged = _build_lived_profile(
+                repo_root,
+                upgrade_output,
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                integration_root=previous_source,
+            )
+            _replace_integration(repo_root, upgrade_dir)
+            _copy_probe(repo_root, upgrade_dir)
+            _restore_config_ownership(str(upgrade_dir), docker_env)
+            _assert_persisted_profile(upgrade_dir)
+            _assert_aged_profile(upgrade_dir)
+            print(f"Upgrade profile: {previous_version} -> {current_version}")
+            _run_profile(
+                upgrade_dir,
+                "upgrade",
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                container_names,
+                keep,
+            )
+            fresh_dir = temp_dir / "fresh"
+            fresh_dir.mkdir()
+            _copy_integration(repo_root, fresh_dir)
+            _copy_probe(repo_root, fresh_dir)
+            _run_profile(
+                fresh_dir, "fresh", image, timeout, station_ids, docker_env, container_names, keep
+            )
+            print(f"Upgrade profile before run: {upgrade_persisted}, {upgrade_aged}")
+
+        def lived_and_recovery() -> None:
+            lived_dir, persisted_summary, aged_summary = _build_lived_profile(
+                repo_root, temp_dir, image, timeout, station_ids, docker_env
+            )
+            _restore_config_ownership(str(lived_dir), docker_env)
+            _assert_persisted_profile(lived_dir)
+            _assert_aged_profile(lived_dir)
+            _run_profile(
+                lived_dir, "lived", image, timeout, station_ids, docker_env, container_names, keep
+            )
+            _restore_config_ownership(str(lived_dir), docker_env)
+            _checkpoint_recorder_database(lived_dir)
+            outage_dir = temp_dir / "outage"
+            shutil.copytree(lived_dir, outage_dir)
+            _write_ha_config(outage_dir, "outage", station_ids)
+            (outage_dir / "docker-probe-result.json").unlink(missing_ok=True)
+            _run_profile(
+                outage_dir,
+                "outage",
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                container_names,
+                keep,
+                blocked_hosts=["carburanti.mise.gov.it", "www.mimit.gov.it"],
+            )
+            _restore_config_ownership(str(outage_dir), docker_env)
+            _assert_persisted_profile(outage_dir)
+            _assert_aged_profile(outage_dir)
+            _run_profile(
+                outage_dir,
+                "recovery",
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                container_names,
+                keep,
+            )
+            print(f"Exported profile used for lived run: {lived_dir}")
+            print(f"Lived profile before run: {persisted_summary}, {aged_summary}")
+
+        if keep or workers == 1:
+            upgrade_and_fresh()
+            lived_and_recovery()
+        else:
+            with ThreadPoolExecutor(max_workers=min(workers, 2)) as executor:
+                futures = [executor.submit(upgrade_and_fresh), executor.submit(lived_and_recovery)]
+                for future in futures:
+                    future.result()
     finally:
         if keep:
             if container_names:
@@ -880,18 +910,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default=DEFAULT_IMAGE, help="Home Assistant Docker image to run")
     parser.add_argument("--timeout", default=180, type=int, help="Startup timeout in seconds")
-    parser.add_argument("--keep", action="store_true", help="Keep the container running for inspection")
+    parser.add_argument(
+        "--keep", action="store_true", help="Keep the container running for inspection"
+    )
     parser.add_argument(
         "--station",
         action="append",
         dest="station_ids",
         help="Station ID to configure; repeat for multiple stations",
     )
+    parser.add_argument("--workers", type=int, default=2, help="Parallel profile branches")
     args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
     station_ids = args.station_ids or list(DEFAULT_STATION_IDS)
 
     try:
-        run_regression(args.image, args.timeout, args.keep, station_ids)
+        run_regression(args.image, args.timeout, args.keep, station_ids, args.workers)
     except Exception as err:
         print(f"Home Assistant Docker regression failed: {err}", file=sys.stderr)
         return 1

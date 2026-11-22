@@ -1,26 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
+import homeassistant.helpers.config_validation as cv
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers import device_registry as dr, entity_platform, entity_registry as er
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_platform, issue_registry
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_time_interval
-from homeassistant.helpers import issue_registry
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CRON_EXPRESSION,
     CONF_STATION_ID,
-    DEFAULT_CRON_EXPRESSION,
     CSV_UPDATE_INTERVAL,
+    DEFAULT_CRON_EXPRESSION,
     DOMAIN,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
@@ -29,7 +31,9 @@ from .csv_manager import (
     CSV_MANAGER_DATA_KEY,
     get_shared_csv_manager,
 )
-from .services import async_register_services as _async_register_services, async_unregister_services
+from .runtime import OsservaprezziConfigEntry, OsservaprezziRuntimeData
+from .services import async_register_services as _async_register_services
+from .services import async_unregister_services
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
@@ -37,9 +41,8 @@ CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 _CSV_MANAGER = CSV_MANAGER_DATA_KEY
 _CSV_UPDATE_LISTENER = "csv_update_listener"
-_INITIAL_REFRESH_TASK = "initial_refresh_task"
-_INITIAL_REFRESH_STOP_EVENT = "initial_refresh_stop_event"
-_REFRESH_RESULT_LISTENER = "refresh_result_listener"
+_ACTIVE_ENTRIES = "active_entries"
+_RESTORING_ENTRIES = "restoring_entries"
 INITIAL_REFRESH_RETRY_INTERVAL = timedelta(minutes=30)
 STATION_NOT_FOUND_ISSUE = "station_not_found"
 
@@ -126,7 +129,7 @@ def _async_create_entry_task(
     """Create a task owned by the config entry when that API is available."""
     create_task = getattr(entry, "async_create_background_task", None)
     if create_task is not None:
-        return create_task(hass, coroutine, name)
+        return cast(asyncio.Task[None], create_task(hass, coroutine, name))
     return hass.async_create_task(coroutine, name)
 
 
@@ -172,8 +175,10 @@ async def _async_initial_refresh(
             return
 
         try:
-            await asyncio.wait_for(stop_event.wait(), INITIAL_REFRESH_RETRY_INTERVAL.total_seconds())
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(
+                stop_event.wait(), INITIAL_REFRESH_RETRY_INTERVAL.total_seconds()
+            )
+        except TimeoutError:
             continue
 
 
@@ -183,10 +188,8 @@ async def _async_cancel_initial_refresh(task: asyncio.Task[None] | None) -> None
         return
 
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
 
 
 async def _async_wait_for_task(task: asyncio.Task[None]) -> None:
@@ -203,9 +206,9 @@ async def _async_wait_for_task(task: asyncio.Task[None]) -> None:
 
 async def _async_cleanup_failed_entry_setup(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: OsservaprezziConfigEntry,
     coordinator: CarburantiDataUpdateCoordinator,
-    platforms_loaded: list[Platform],
+    platforms_loaded: list[Platform | str],
 ) -> None:
     """Release resources owned by an entry whose platform setup failed."""
     try:
@@ -215,9 +218,9 @@ async def _async_cleanup_failed_entry_setup(
             _LOGGER.error("Failed to unload platforms after setup failure for %s", entry.title)
     finally:
         domain_data = hass.data.get(DOMAIN, {})
-        entry_data = domain_data.pop(entry.entry_id)
-        for key in ("listener", _REFRESH_RESULT_LISTENER):
-            listener = entry_data.get(key)
+        domain_data[_ACTIVE_ENTRIES].pop(entry.entry_id)
+        entry_data = entry.runtime_data
+        for listener in (entry_data.listener, entry_data.refresh_result_listener):
             if listener is not None:
                 listener()
 
@@ -225,7 +228,7 @@ async def _async_cleanup_failed_entry_setup(
         _async_remove_csv_owner_if_unused(hass)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntry) -> bool:
     """Set up Osservaprezzi Carburanti from a config entry."""
     _async_register_services(hass)
 
@@ -233,6 +236,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     csv_manager = get_shared_csv_manager(hass)
 
     if domain_data.get(_CSV_UPDATE_LISTENER) is None:
+
         async def _async_csv_update_callback(now: datetime) -> None:
             _LOGGER.info("Performing periodic CSV data update at %s", now)
             if not await csv_manager.async_periodic_update():
@@ -241,7 +245,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 updated = dt_util.parse_datetime(last_update) if last_update else None
                 if updated is None or dt_util.now() - updated > timedelta(days=7):
                     issue_registry.async_create_issue(
-                        hass, DOMAIN, "csv_registry_stale", is_fixable=False,
+                        hass,
+                        DOMAIN,
+                        "csv_registry_stale",
+                        is_fixable=False,
                         severity=issue_registry.IssueSeverity.WARNING,
                         translation_key="csv_registry_stale",
                     )
@@ -257,29 +264,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = CarburantiDataUpdateCoordinator(hass, entry, csv_manager)
     stop_event = asyncio.Event()
     # Reserve shared registry ownership while storage is still loading.
-    domain_data[entry.entry_id] = {
-        "coordinator": None,
-        "listener": None,
-        _INITIAL_REFRESH_TASK: None,
-        _INITIAL_REFRESH_STOP_EVENT: stop_event,
-        _REFRESH_RESULT_LISTENER: None,
-    }
-
+    entry.runtime_data = OsservaprezziRuntimeData(
+        coordinator=coordinator, initial_refresh_stop_event=stop_event
+    )
+    active_entries = domain_data.setdefault(_ACTIVE_ENTRIES, {})
+    restoring_entries = domain_data.setdefault(_RESTORING_ENTRIES, set())
+    restoring_entries.add(entry.entry_id)
     try:
         await coordinator.async_restore()
     except BaseException:
-        domain_data.pop(entry.entry_id)
+        restoring_entries.remove(entry.entry_id)
         await coordinator.async_shutdown()
         _async_remove_csv_owner_if_unused(hass)
         raise
-    domain_data[entry.entry_id]["coordinator"] = coordinator
+    restoring_entries.remove(entry.entry_id)
+    active_entries[entry.entry_id] = entry
 
     cron_expression = entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
-    _LOGGER.info("Setting up cron schedule for %s with expression: %s", entry.title, cron_expression)
+    _LOGGER.info(
+        "Setting up cron schedule for %s with expression: %s", entry.title, cron_expression
+    )
 
     def _schedule_next_refresh() -> None:
-        entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if entry_data is None or entry_data.get("coordinator") is not coordinator:
+        if (
+            active_entries.get(entry.entry_id) is not entry
+            or entry.runtime_data.coordinator is not coordinator
+        ):
             return
 
         try:
@@ -298,7 +308,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _request_refresh,
             dt_util.as_utc(next_run_time),
         )
-        entry_data["listener"] = listener
+        entry.runtime_data.listener = listener
 
     async def _request_refresh(now: datetime) -> None:
         _LOGGER.info("Executing scheduled refresh for %s at %s", entry.title, now)
@@ -311,7 +321,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _schedule_next_refresh()
     except (ImportError, TypeError, ValueError):
         await coordinator.async_shutdown()
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        active_entries.pop(entry.entry_id, None)
         _async_remove_csv_owner_if_unused(hass)
         return False
 
@@ -326,7 +336,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_delete_station_not_found_issue(hass, entry)
             stop_event.set()
 
-    domain_data[entry.entry_id][_REFRESH_RESULT_LISTENER] = coordinator.async_add_listener(
+    entry.runtime_data.refresh_result_listener = coordinator.async_add_listener(
         _async_handle_refresh_result
     )
     _async_cleanup_legacy_entity_registry(hass, entry)
@@ -340,10 +350,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await asyncio.shield(setup_task)
     except BaseException:
-        try:
+        with contextlib.suppress(BaseException):
             await _async_wait_for_task(setup_task)
-        except BaseException:
-            pass
 
         platforms_loaded = [
             platform.domain
@@ -359,7 +367,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except BaseException:
             _LOGGER.exception("Failed to roll back setup for %s", entry.title)
         raise
-    domain_data[entry.entry_id][_INITIAL_REFRESH_TASK] = _async_start_initial_refresh(
+    entry.runtime_data.initial_refresh_task = _async_start_initial_refresh(
         hass,
         coordinator,
         entry,
@@ -419,27 +427,22 @@ def _async_cleanup_legacy_entity_registry(hass: HomeAssistant, entry: ConfigEntr
             and item[1] != str(station_id)
             for item in identifiers
         ):
-            device_registry.async_update_device(
-                device.id, remove_config_entry_id=entry.entry_id
-            )
+            device_registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
 
 
 def _async_remove_csv_owner_if_unused(hass: HomeAssistant) -> bool:
     """Remove registry-wide resources when no config entries remain."""
     domain_data = hass.data.get(DOMAIN, {})
-    if any(
-        isinstance(value, dict) and "coordinator" in value
-        for value in domain_data.values()
-    ):
+    if domain_data.get(_ACTIVE_ENTRIES) or domain_data.get(_RESTORING_ENTRIES):
         return False
 
+    domain_data.pop(_ACTIVE_ENTRIES, None)
+    domain_data.pop(_RESTORING_ENTRIES, None)
     listener = domain_data.pop(_CSV_UPDATE_LISTENER, None)
     if listener is not None:
         listener()
     domain_data.pop(_CSV_MANAGER, None)
     return True
-
-
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -456,48 +459,38 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntry) -> bool:
     """Unload a config entry."""
-    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    initial_refresh_was_running = False
-    if isinstance(entry_data, dict):
-        task = entry_data.get(_INITIAL_REFRESH_TASK)
-        initial_refresh_was_running = isinstance(task, asyncio.Task) and not task.done()
-        stop_event = entry_data.get(_INITIAL_REFRESH_STOP_EVENT)
-        if initial_refresh_was_running and isinstance(stop_event, asyncio.Event):
-            stop_event.set()
-            await _async_cancel_initial_refresh(task)
+    entry_data = getattr(entry, "runtime_data", None)
+    if entry_data is None:
+        return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    task = entry_data.initial_refresh_task
+    stop_event = entry_data.initial_refresh_stop_event
+    initial_refresh_was_running = task is not None and not task.done()
+    if initial_refresh_was_running and stop_event is not None:
+        stop_event.set()
+        await _async_cancel_initial_refresh(task)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
-        if initial_refresh_was_running and isinstance(entry_data, dict):
-            stop_event = entry_data[_INITIAL_REFRESH_STOP_EVENT]
+        if initial_refresh_was_running and stop_event is not None:
             stop_event.clear()
-            entry_data[_INITIAL_REFRESH_TASK] = _async_start_initial_refresh(
-                hass,
-                entry_data["coordinator"],
-                entry,
-                stop_event,
+            entry_data.initial_refresh_task = _async_start_initial_refresh(
+                hass, entry_data.coordinator, entry, stop_event
             )
         return False
 
-    if isinstance(entry_data, dict):
-        listener = entry_data.get("listener")
-        if listener is not None:
-            listener()
-        refresh_result_listener = entry_data.get(_REFRESH_RESULT_LISTENER)
-        if refresh_result_listener is not None:
-            refresh_result_listener()
-        stop_event = entry_data.get(_INITIAL_REFRESH_STOP_EVENT)
-        if isinstance(stop_event, asyncio.Event):
-            stop_event.set()
-        await _async_cancel_initial_refresh(entry_data.get(_INITIAL_REFRESH_TASK))
-        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-        await entry_data["coordinator"].async_shutdown()
-
-        if _async_remove_csv_owner_if_unused(hass):
-            async_unregister_services(hass)
-
+    if entry_data.listener is not None:
+        entry_data.listener()
+    if entry_data.refresh_result_listener is not None:
+        entry_data.refresh_result_listener()
+    if stop_event is not None:
+        stop_event.set()
+    await _async_cancel_initial_refresh(entry_data.initial_refresh_task)
+    hass.data[DOMAIN][_ACTIVE_ENTRIES].pop(entry.entry_id)
+    await entry_data.coordinator.async_shutdown()
+    if _async_remove_csv_owner_if_unused(hass):
+        async_unregister_services(hass)
     return True
 
 

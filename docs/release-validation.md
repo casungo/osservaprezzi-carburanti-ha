@@ -1,125 +1,82 @@
-# Release validation
+# Release Validation
 
-Run these checks before publishing a HACS/Home Assistant release.
+Run these checks before tagging a HACS/Home Assistant release. For day-to-day testing and local
+setup, see [testing.md](./testing.md).
 
-## Release guard
-
-Run the guard after committing the release version and changelog, before creating or pushing a tag.
-It reads `manifest.json` from the exact target commit and checks the release naming, tag, and
-remote tag state. It also rejects a dirty worktree and requires the full target SHA to equal the
-live head of the explicitly named remote branch. The remote must be reachable.
-
-For a stable release:
+## 1. Required validation checks
 
 ```bash
-VERSION=2.6.0
+make check
+make hassfest
+make hacs
+python3 scripts/ha_docker_regression.py
+```
+
+Optional live upstream contract check:
+
+```bash
+OSSERVAPREZZI_LIVE_API=1 .venv/bin/python -m pytest tests/unit/test_live_api_contract.py -q
+```
+
+## 2. KPI comparisons (`make kpi`)
+
+Compare the current checkout against the preceding stable tag inside identical isolated Home
+Assistant containers using one captured, hash-verified MIMIT snapshot:
+
+```bash
+make kpi
+# Or compare against an explicit baseline:
+make kpi KPI_BASELINE=v2.6.0
+```
+
+- Output is written under `artifacts/kpi/<timestamp>/` (`report.json`, `report.md`, logs, inputs).
+- Correctness failures (price mismatches, entity ID drift, listener/timer/task leaks after unload,
+  missing conditional `304`) fail with exit code `1`.
+- Performance metrics are flagged provisionally when an increase exceeds **15%**, the metric's
+  absolute floor (`METRICS` in `scripts/benchmark_release.py`), and observed baseline noise. Pass
+  `KPI_ARGS='--fail-on-performance'` to return exit code `2` on flags.
+- Replay benchmarks do not measure live upstream latency, multi-day memory slope, or production
+  uptime.
+
+## 3. Release guard and tagging
+
+Run `scripts/release_guard.py` after committing the version bump (`manifest.json`) and
+`CHANGELOG.md`, and after pushing the target branch, before creating a tag. It requires a clean
+worktree and checks that `HEAD` matches the remote branch head and tag/channel naming rules
+(stable `X.Y.Z`; prerelease requires a SemVer suffix such as `X.Y.Z-beta.N`).
+
+Stable release:
+
+```bash
+VERSION=2.8.0
 TAG="v${VERSION}"
 BRANCH=master
 TARGET_COMMIT="$(git rev-parse HEAD)"
-python scripts/release_guard.py --channel stable --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
+.venv/bin/python scripts/release_guard.py --channel stable --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
 git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"
 git push origin "$TAG"
 gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG"
 ```
 
-For a prerelease, include a valid SemVer suffix. A plain `X.Y.Z` is never accepted as a
-prerelease:
+Prerelease:
 
 ```bash
-VERSION=2.6.0-beta.3
+VERSION=2.8.0-beta.4
 TAG="v${VERSION}"
 BRANCH=master
 TARGET_COMMIT="$(git rev-parse HEAD)"
-python scripts/release_guard.py --channel prerelease --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
+.venv/bin/python scripts/release_guard.py --channel prerelease --version "$VERSION" --tag "$TAG" --commit "$TARGET_COMMIT" --branch "$BRANCH"
 git tag -a "$TAG" "$TARGET_COMMIT" -m "Release $VERSION"
 git push origin "$TAG"
 gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG" --prerelease
 ```
 
-If the guard fails, do not create, move, or force-push the tag. It accepts stable versions in the
-form `X.Y.Z` and prereleases with a valid SemVer suffix, such as `X.Y.Z-beta.N` or `X.Y.Z-rc.N`.
-Push the named branch first, and do not change it between the guard and tag push.
+## 4. Manual canary checklist
 
-## Local environment
-
-On a host that provides `python3` but not `python`, create and activate a virtual environment first:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-ha-test.txt
-```
-
-`requirements-ha-test.txt` includes the lightweight suite dependencies and the
-Home Assistant contract-test dependencies used by CI.
-
-## Required for every PR
-
-```bash
-python -m pytest -c pytest-ha.ini -q
-python -m pytest -q
-python -m coverage run --source=custom_components/osservaprezzi_carburanti -m pytest -q
-python -m coverage report --fail-under=100
-python -m ruff check .
-python -m mypy
-make hassfest
-make hacs
-```
-
-Both commands use the official validator containers, so no global hassfest or HACS installation is
-required. Hassfest reads the local checkout. The HACS action validates the current branch on GitHub;
-push the branch first when validating unpublished changes.
-
-## Real Home Assistant smoke
-
-Run the Docker regression when Docker is available:
-
-```bash
-python scripts/ha_docker_regression.py
-```
-
-The runner first boots an isolated builder container four times. The builder configures stations
-through Home Assistant's real config-flow manager and writes 14 days of synthetic state changes
-through the real state machine. Recorder stores them in SQLite. The runner then checkpoints and
-exports that profile, extracts it into a new directory, and uses that exported directory for the
-`lived` run. `fresh` runs against a separate empty directory.
-
-A probe running inside Home Assistant checks actual entity states, service responses, setup-flow
-behavior, duplicate handling, and entity IDs after reload in both profiles. The runner also checks
-the exported config entries, entity registry, station cache, Recorder history, module imports,
-nearby discovery, and startup tracebacks. The dates are synthetic, but the four Docker boots,
-state writes, Recorder persistence, export, restore, and final checks use real Home Assistant.
-
-It also creates an aged profile with `v2.6.0-beta.1`, replaces that profile's integration with the
-current checkout, and runs the same probe as `upgrade`. The test fails if the previous and current
-integration versions are accidentally identical.
-
-The final outage/recovery pass reuses the exported lived profile. It blocks only the two MIMIT
-hostnames, confirms cached station entities remain available after a restart, then restores network
-access and verifies refresh plus service behavior on the same data.
-
-GitHub Actions runs this regression on pushes, pull requests, the 1st and 15th of every month, and
-manual workflow dispatch. The local command remains available for pre-release checks.
-
-## Live upstream contract
-
-Run only on demand or nightly, not as a required PR check:
-
-```bash
-OSSERVAPREZZI_LIVE_API=1 python -m pytest tests/test_live_api_contract.py -q
-```
-
-Use `OSSERVAPREZZI_LIVE_STATION_ID=<id>` to override the known station.
-
-## Manual canary
-
-- Install the integration into a clean Home Assistant profile.
-- Upgrade from the previous released version without clearing `.storage`.
-- Configure a known station through the config flow.
-- Verify fuel sensors, station info sensors, location attributes, opening-hours entities, and service entities.
-- Reload the config entry and confirm cron scheduling is recreated once.
-- Unload the config entry and confirm listeners/services are cleaned up.
-- Run `force_csv_update`, `clear_cache`, and `compare_stations` from Developer Tools; capture the
-  response from `compare_stations` and verify that it contains every loaded station with current fuel
-  data.
-- Confirm no blocking-call or thread-safety warnings are logged with Home Assistant debug mode enabled.
+- Upgrade an existing Home Assistant instance from the previous release without clearing `.storage`.
+- Configure a station through the config flow and verify fuel, info, location, opening-hours,
+  service, and refresh-button entities.
+- Reload and unload the entry and confirm no blocking-call, thread-safety, or residual-listener
+  warnings appear with debug logging enabled.
+- Run `compare_stations`, `search_registry`, `refresh_prices`, `force_csv_update`, and
+  `clear_cache` from Developer Tools.

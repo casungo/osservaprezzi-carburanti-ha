@@ -8,3 +8,11 @@ updates:
       github-actions:
         patterns:
           - "*"
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"

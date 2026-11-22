@@ -1,0 +1,42 @@
+name: Security Audit
+
+on:
+  push:
+    paths:
+      - requirements-test.txt
+      - requirements-ha-test.txt
+      - .github/workflows/security.yml
+  pull_request:
+    paths:
+      - requirements-test.txt
+      - requirements-ha-test.txt
+      - .github/workflows/security.yml
+  schedule:
+    - cron: "29 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
+
+      - name: Audit test dependencies
+        run: |
+          pip-audit -r requirements-test.txt
+          pip-audit -r requirements-ha-test.txt

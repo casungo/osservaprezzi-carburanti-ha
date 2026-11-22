@@ -1,0 +1,439 @@
+"""Tests for Osservaprezzi API helpers."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import math
+import sys
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
+
+import aiohttp
+import pytest
+
+sys.path.insert(0, ".")
+
+from custom_components.osservaprezzi_carburanti import api
+from custom_components.osservaprezzi_carburanti.api import (
+    InvalidStationPayloadError,
+    fetch_station_data,
+    normalize_station_data,
+)
+
+
+class _ResponseContext:
+    """Async context manager returning a fake aiohttp response."""
+
+    def __init__(self, response: _FakeResponse) -> None:
+        self.response = response
+
+    async def __aenter__(self) -> _FakeResponse:
+        return self.response
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        return None
+
+
+class _FakeResponse:
+    """Small response double with the attributes used by fetch_station_data."""
+
+    def __init__(
+        self,
+        status: int,
+        payload: Any = None,
+        reason: str = "reason",
+    ) -> None:
+        self.status = status
+        self._payload = payload
+        self.reason = reason
+        self.request_info = None
+        self.history = ()
+        self.headers = {"X-Test": "yes"}
+
+    async def json(self) -> Any:
+        return self._payload
+
+
+class _FakeSession:
+    """Session double returning a configured response or raising an error."""
+
+    def __init__(self, response: _FakeResponse | BaseException) -> None:
+        self.response = response
+        self.get_calls: list[dict[str, Any]] = []
+
+    def get(self, url: str, **kwargs: Any) -> _ResponseContext:
+        self.get_calls.append({"url": url, **kwargs})
+        if isinstance(self.response, BaseException):
+            raise self.response
+        return _ResponseContext(self.response)
+
+
+@pytest.fixture(autouse=True)
+def reset_request_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable inter-test sleeps from the module-level API throttle."""
+    monkeypatch.setattr(api, "API_REQUEST_INTERVAL_SECONDS", 0)
+
+
+def test_fetch_station_data_success(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    payload = {
+        "id": "123",
+        "name": "Distinctive Secret Station",
+        "address": "Private Street 987",
+        "latitude": 41.123456,
+        "longitude": 12.654321,
+        "fuels": [
+            {
+                "name": "PrivateFuel",
+                "price": 1.876,
+                "fuelId": 1,
+                "isSelf": True,
+                "serviceAreaId": 2,
+            }
+        ],
+    }
+    session = _FakeSession(_FakeResponse(200, payload))
+    monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
+
+    with caplog.at_level(logging.DEBUG, logger=api.__name__):
+        result = asyncio.run(fetch_station_data(MagicMock(), "123", timeout=7))
+
+    assert result == {
+        "id": "123",
+        "name": "Distinctive Secret Station",
+        "address": "Private Street 987",
+        "latitude": 41.123456,
+        "longitude": 12.654321,
+        "fuels": [
+            {
+                "name": "PrivateFuel",
+                "price": 1.876,
+                "fuelId": 1,
+                "isSelf": True,
+                "serviceAreaId": 2,
+            }
+        ],
+        "services": [],
+        "orariapertura": [],
+    }
+    assert "/123" in session.get_calls[0]["url"]
+    assert session.get_calls[0]["headers"] == api.DEFAULT_HEADERS
+    assert isinstance(session.get_calls[0]["timeout"], aiohttp.ClientTimeout)
+    assert session.get_calls[0]["timeout"].total == 7
+    assert "response for 123" in caplog.text
+    assert "status=200" in caplog.text
+    assert "field_count=6" in caplog.text
+    assert "collection_counts={'lists': 1, 'mappings': 0}" in caplog.text
+    for private_value in (
+        "Distinctive Secret Station",
+        "Private Street 987",
+        "41.123456",
+        "12.654321",
+        "PrivateFuel",
+        "1.876",
+    ):
+        assert private_value not in caplog.text
+
+
+def test_fetch_station_data_does_not_log_malformed_payload(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    payload = ["Distinctive malformed station data"]
+    session = _FakeSession(_FakeResponse(200, payload))
+    monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
+
+    with (
+        caplog.at_level(logging.DEBUG, logger=api.__name__),
+        pytest.raises(InvalidStationPayloadError),
+    ):
+        asyncio.run(fetch_station_data(MagicMock(), "456"))
+    assert "response for 456" in caplog.text
+    assert "payload_type=list" in caplog.text
+    assert "Distinctive malformed station data" not in caplog.text
+
+
+def test_normalize_station_data_defaults_collections_and_preserves_unknowns() -> None:
+    payload = {"id": 123, "name": "Station", "unknown": {"future": True}, "fuels": None}
+
+    result = normalize_station_data(payload, "123")
+
+    assert result == {
+        "id": 123,
+        "name": "Station",
+        "unknown": {"future": True},
+        "fuels": [],
+        "services": [],
+        "orariapertura": [],
+    }
+    assert payload["fuels"] is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        "maintenance",
+        {},
+        {"id": "other", "name": "Station"},
+        {"id": "123", "name": ""},
+        {"id": "123", "name": "Station", "fuels": {}},
+        {"id": "123", "name": "Station", "services": {}},
+        {"id": "123", "name": "Station", "orariapertura": {}},
+        {"id": "123", "name": "Station", "fuels": ["bad"]},
+        {"id": "123", "name": "Station", "fuels": [{"name": "Benzina"}]},
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [{"name": "Benzina", "fuelId": 1, "isSelf": True, "serviceAreaId": 3}],
+        },
+        {"id": "123", "name": "Station", "services": [None]},
+        {"id": "123", "name": "Station", "orariapertura": [1]},
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": True,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": -0.1,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": math.inf,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": "Benzina",
+                    "price": 1.8,
+                    "fuelId": 1,
+                    "isSelf": 1,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": 1,
+                    "price": 1.8,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+        {
+            "id": "123",
+            "name": "Station",
+            "fuels": [
+                {
+                    "name": None,
+                    "price": 1.8,
+                    "fuelId": 1,
+                    "isSelf": True,
+                    "serviceAreaId": 3,
+                }
+            ],
+        },
+    ],
+)
+def test_normalize_station_data_rejects_invalid_payloads(payload: Any) -> None:
+    with pytest.raises(InvalidStationPayloadError):
+        normalize_station_data(payload, "123")
+
+
+@pytest.mark.parametrize("service", [{"name": "bar"}, 7, "car-wash"])
+def test_normalize_station_data_accepts_supported_service_forms(service: Any) -> None:
+    result = normalize_station_data(
+        {"id": "123", "name": "Station", "services": [service]},
+        "123",
+    )
+
+    assert result["services"] == [service]
+
+
+def test_fetch_station_data_debugs_rejection_without_warning_or_bad_record(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret_record = "must-not-be-logged"
+    session = _FakeSession(_FakeResponse(200, {"record": secret_record}))
+    monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
+
+    with (
+        caplog.at_level(logging.DEBUG, logger=api.__name__),
+        pytest.raises(InvalidStationPayloadError),
+    ):
+        asyncio.run(fetch_station_data(MagicMock(), "123"))
+
+    assert "Invalid station API response structure" in caplog.text
+    assert "invalid id" in caplog.text
+    assert all(record.levelno < logging.WARNING for record in caplog.records)
+    assert secret_record not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (404, "not found"),
+        (429, "Rate limit exceeded"),
+        (500, "Service error: 500"),
+    ],
+)
+def test_fetch_station_data_raises_response_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    message: str,
+) -> None:
+    session = _FakeSession(_FakeResponse(status))
+    monkeypatch.setattr(api, "async_get_clientsession", MagicMock(return_value=session))
+
+    with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+        asyncio.run(fetch_station_data(MagicMock(), "123"))
+
+    assert exc_info.value.status == status
+    assert message in exc_info.value.message
+
+
+def test_fetch_station_data_reraises_client_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        api,
+        "async_get_clientsession",
+        MagicMock(return_value=_FakeSession(aiohttp.ClientError("boom"))),
+    )
+
+    with pytest.raises(aiohttp.ClientError, match="boom"):
+        asyncio.run(fetch_station_data(MagicMock(), "123"))
+
+
+def test_wait_for_request_slot_sleeps_when_throttled(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+    monotonic_values = iter([10.0, 20.0])
+
+    async def fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    def fake_monotonic() -> float:
+        return next(monotonic_values, 20.0)
+
+    monkeypatch.setattr(api, "time", SimpleNamespace(monotonic=fake_monotonic))
+    monkeypatch.setattr(api.asyncio, "sleep", fake_sleep)
+    hass = MagicMock()
+    limit = api._request_limit(hass)
+    limit.next_allowed = 12.5
+    monkeypatch.setattr(api, "API_REQUEST_INTERVAL_SECONDS", 4)
+
+    asyncio.run(api._wait_for_request_slot(hass, "123"))
+
+    assert slept == [2.5]
+    assert limit.next_allowed == 24.0
+
+
+def test_price_validator_rejects_overflowing_integer():
+    assert api._is_valid_fuel_price(10**1000) is False
+
+
+def test_fetch_station_data_encodes_id_and_rejects_invalid_json(monkeypatch):
+    import json
+
+    requested_urls: list[str] = []
+
+    class _BadJsonResponse:
+        status = 200
+
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Session:
+        def get(self, url, **_kwargs):
+            requested_urls.append(url)
+            return _BadJsonResponse()
+
+    monkeypatch.setattr(api, "async_get_clientsession", lambda _hass: _Session())
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(api, "_wait_for_request_slot", _noop)
+
+    with pytest.raises(api.InvalidStationPayloadError, match="Invalid JSON"):
+        asyncio.run(api.fetch_station_data(MagicMock(), "12/34"))
+
+    assert requested_urls[0].endswith("/12%2F34")
+
+
+def test_request_limits_are_isolated():
+    first = SimpleNamespace(data={})
+    second = SimpleNamespace(data={})
+    assert api._request_limit(first) is api._request_limit(first)
+    assert api._request_limit(first) is not api._request_limit(second)
+    assert api._request_limit(SimpleNamespace()) is not None
+
+
+def test_http_io_does_not_hold_request_lock(monkeypatch):
+    async def exercise():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class SlowResponse(_FakeResponse):
+            async def json(self):
+                entered.set()
+                await release.wait()
+                return self._payload
+
+        session = _FakeSession(SlowResponse(200, {"id": "123", "name": "Station"}))
+        monkeypatch.setattr(api, "async_get_clientsession", lambda _: session)
+        hass = SimpleNamespace(data={})
+        first = asyncio.create_task(fetch_station_data(hass, "123"))
+        await entered.wait()
+        second = asyncio.create_task(fetch_station_data(hass, "123"))
+        for _ in range(10):
+            if len(session.get_calls) == 2:
+                break
+            await asyncio.sleep(0)
+        assert len(session.get_calls) == 2
+        release.set()
+        await asyncio.gather(first, second)
+
+    asyncio.run(exercise())

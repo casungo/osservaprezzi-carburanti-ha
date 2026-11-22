@@ -29,7 +29,6 @@ from homeassistant.util import dt as dt_util
 
 from .api import fetch_station_data
 from .const import (
-    DOMAIN,
     CONF_CRON_EXPRESSION,
     CONF_PRICE_STALE_HOURS,
     CONF_STATION_ID,
@@ -37,6 +36,7 @@ from .const import (
     CONF_TRACKED_SERVICE_MODES,
     DEFAULT_CRON_EXPRESSION,
     DEFAULT_PRICE_STALE_HOURS,
+    DOMAIN,
     PRICE_STALE_HOUR_OPTIONS,
 )
 from .cron_helper import get_next_run_time, validate_cron_expression
@@ -92,15 +92,15 @@ async def _validate_station(hass: HomeAssistant, station_id: str) -> dict[str, A
         return {"name": data["name"]}
     except aiohttp.ClientResponseError as err:
         if err.status == 404:
-            raise InvalidStation("Station not found")
+            raise InvalidStation("Station not found") from err
         if err.status == 429:
             raise RateLimited("Service rate limit exceeded") from err
         raise CannotConnect(f"Service error: {err.status}") from err
     except (aiohttp.ClientError, TimeoutError) as err:
-        raise CannotConnect(f"Connection error: {err}")
+        raise CannotConnect(f"Connection error: {err}") from err
 
 
-class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
+class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the config flow for Osservaprezzi Carburanti."""
 
     VERSION = 2
@@ -108,7 +108,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     def __init__(self) -> None:
         """Keep search suggestions only for the lifetime of this flow."""
         super().__init__()
-        self._reconfigure_entry = None
+        self._reconfigure_entry: config_entries.ConfigEntry | None = None
         self._search_inputs: dict[str, dict[str, Any]] = {}
         self._nearby_candidates: tuple[StationCandidate, ...] = ()
         self._registry_is_stale = False
@@ -192,7 +192,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     ) -> ConfigFlowResult:
         """Set up a station from its Osservaprezzi ID."""
         if self._reconfigure_entry is not None:
-            return await self._async_reconfigure_station(user_input, "station_id")
+            return await self._async_reconfigure_station(
+                self._reconfigure_entry, user_input, "station_id"
+            )
         return await self._handle_station_input(user_input, "station_id")
 
     async def async_step_home(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -269,7 +271,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         errors: dict[str, str] = {}
         if user_input is not None:
             self._search_inputs["zone"] = dict(user_input)
-            state = self.hass.states.get(user_input.get("zone"))
+            state = self.hass.states.get(str(user_input.get("zone") or ""))
             attributes = state.attributes if state is not None else {}
             latitude = as_coordinate(attributes.get(CONF_LATITUDE), -90, 90)
             longitude = as_coordinate(attributes.get(CONF_LONGITUDE), -180, 180)
@@ -277,7 +279,10 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 errors["base"] = "invalid_location"
             else:
                 result, error = await self._async_search_nearby(
-                    latitude=latitude, longitude=longitude, user_input=user_input, source_step="zone"
+                    latitude=latitude,
+                    longitude=longitude,
+                    user_input=user_input,
+                    source_step="zone",
                 )
                 if result is not None:
                     return result
@@ -285,9 +290,11 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         return self.async_show_form(
             step_id="zone",
             data_schema=self.add_suggested_values_to_schema(
-                self._nearby_search_schema({
-                    vol.Required("zone"): EntitySelector(EntitySelectorConfig(domain="zone")),
-                }),
+                self._nearby_search_schema(
+                    {
+                        vol.Required("zone"): EntitySelector(EntitySelectorConfig(domain="zone")),
+                    }
+                ),
                 self._search_inputs.get("zone"),
             ),
             errors=errors,
@@ -315,7 +322,9 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                     )
                 )
                 if candidates:
-                    self._store_search_results(candidates[:limit], snapshot, "area", len(candidates) > limit, limit)
+                    self._store_search_results(
+                        candidates[:limit], snapshot, "area", len(candidates) > limit, limit
+                    )
                     return await self._async_step_select_station()
                 errors["base"] = "no_stations_found"
             except RegistryUnavailableError:
@@ -392,9 +401,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         """Return common optional registry search fields."""
         station_types = self._registry_station_types()
         station_type_selector: Any = (
-            SelectSelector(
-                SelectSelectorConfig(options=list(station_types), custom_value=True)
-            )
+            SelectSelector(SelectSelectorConfig(options=list(station_types), custom_value=True))
             if station_types
             else str
         )
@@ -484,7 +491,8 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         errors: dict[str, str] = {}
         description_placeholders = self._selection_placeholders()
         configured_ids = {
-            str(entry.data.get(CONF_STATION_ID, "")) for entry in self._async_current_entries()
+            str(entry.data.get(CONF_STATION_ID, ""))
+            for entry in self._async_current_entries()
             if self._reconfigure_entry is None or entry.entry_id != self._reconfigure_entry.entry_id
         }
         candidate_ids = {candidate.station_id for candidate in candidates}
@@ -502,8 +510,11 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             try:
                 selected_value = user_input.get(CONF_STATION_ID, [])
                 selected_ids = self._deduplicate_station_ids(selected_value)
-                if (not selected_ids or not set(selected_ids) <= candidate_ids
-                        or (self._reconfigure_entry is not None and len(selected_ids) != 1)):
+                if (
+                    not selected_ids
+                    or not set(selected_ids) <= candidate_ids
+                    or (self._reconfigure_entry is not None and len(selected_ids) != 1)
+                ):
                     raise InvalidStation("Station is not in the current nearby results")
 
                 new_selected_ids = [
@@ -542,11 +553,13 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                                 errors["base"] = "cannot_connect"
                             if isinstance(err, InvalidStation):
                                 self._nearby_candidates = tuple(
-                                    candidate for candidate in candidates
+                                    candidate
+                                    for candidate in candidates
                                     if candidate.station_id != station_id
                                 )
                                 available_candidates = tuple(
-                                    candidate for candidate in available_candidates
+                                    candidate
+                                    for candidate in available_candidates
                                     if candidate.station_id != station_id
                                 )
                                 available_ids.discard(station_id)
@@ -558,7 +571,8 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                         if self._reconfigure_entry is not None:
                             station_id = new_selected_ids[0]
                             return self.async_update_reload_and_abort(
-                                self._reconfigure_entry, unique_id=f"station_{station_id}",
+                                self._reconfigure_entry,
+                                unique_id=f"station_{station_id}",
                                 title=station_info[station_id]["name"],
                                 data_updates={CONF_STATION_ID: station_id},
                             )
@@ -596,11 +610,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
             )
             for candidate in available_candidates
         ]
-        step_id = (
-            "select_station_stale"
-            if self._registry_is_stale
-            else "select_station"
-        )
+        step_id = "select_station_stale" if self._registry_is_stale else "select_station"
         if self._results_limited:
             step_id += "_limited"
         description_placeholders.update(
@@ -615,16 +625,20 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 vol.Schema(
                     {
                         vol.Required(CONF_STATION_ID): SelectSelector(
-                            SelectSelectorConfig(options=options, multiple=self._reconfigure_entry is None)
+                            SelectSelectorConfig(
+                                options=options, multiple=self._reconfigure_entry is None
+                            )
                         )
                     }
                 ),
                 {
-                    CONF_STATION_ID: ([
-                        station_id
-                        for station_id in selected_ids
-                        if station_id in available_ids
-                    ] if self._reconfigure_entry is None else selected_ids[0] if selected_ids and selected_ids[0] in available_ids else None)
+                    CONF_STATION_ID: (
+                        [station_id for station_id in selected_ids if station_id in available_ids]
+                        if self._reconfigure_entry is None
+                        else selected_ids[0]
+                        if selected_ids and selected_ids[0] in available_ids
+                        else None
+                    )
                 }
                 if user_input is not None
                 else None,
@@ -727,19 +741,21 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Allow an existing entry to point at another station."""
-        self._reconfigure_entry = self._get_reconfigure_entry()
+        entry = self._get_reconfigure_entry()
+        self._reconfigure_entry = entry
         if user_input is None:
             return self.async_show_menu(
                 step_id="reconfigure",
                 menu_options=["home", "coordinates", "zone", "area", "station_id"],
             )
-        return await self._async_reconfigure_station(user_input, "reconfigure")
+        return await self._async_reconfigure_station(entry, user_input, "reconfigure")
 
     async def _async_reconfigure_station(
-        self, user_input: dict[str, Any] | None, step_id: str
+        self,
+        entry: config_entries.ConfigEntry,
+        user_input: dict[str, Any] | None,
+        step_id: str,
     ) -> ConfigFlowResult:
-        entry = self._reconfigure_entry
-        assert entry is not None
         errors: dict[str, str] = {}
         if user_input is not None:
             station_id = str(user_input.get(CONF_STATION_ID, "")).strip()
@@ -799,7 +815,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 stale_hours = int(
                     user_input.get(
                         CONF_PRICE_STALE_HOURS,
-                        self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
+                        self.config_entry.options.get(
+                            CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS
+                        ),
                     )
                 )
             except (TypeError, ValueError):
@@ -820,17 +838,30 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     return self._save_schedule(REFRESH_SCHEDULES[schedule])
                 errors[CONF_REFRESH_SCHEDULE] = "invalid_schedule"
 
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
-        coordinator = entry_data.get("coordinator")
+        runtime_data = getattr(self.config_entry, "runtime_data", None)
+        coordinator = runtime_data.coordinator if runtime_data is not None else None
         fuels = (coordinator.data or {}).get("fuels", {}) if coordinator else {}
         available_fuels = sorted({key.rsplit("_", 1)[0] for key in fuels})
         schema = vol.Schema(
             {
-                vol.Optional(CONF_TRACKED_FUELS, default=self.config_entry.options.get(CONF_TRACKED_FUELS, [])): SelectSelector(
-                    SelectSelectorConfig(options=available_fuels, multiple=True, custom_value=True, mode=SelectSelectorMode.DROPDOWN)
+                vol.Optional(
+                    CONF_TRACKED_FUELS,
+                    default=self.config_entry.options.get(CONF_TRACKED_FUELS, []),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=available_fuels,
+                        multiple=True,
+                        custom_value=True,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
                 ),
-                vol.Optional(CONF_TRACKED_SERVICE_MODES, default=self.config_entry.options.get(CONF_TRACKED_SERVICE_MODES, [])): SelectSelector(
-                    SelectSelectorConfig(options=["self", "servito"], multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                vol.Optional(
+                    CONF_TRACKED_SERVICE_MODES,
+                    default=self.config_entry.options.get(CONF_TRACKED_SERVICE_MODES, []),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=["self", "servito"], multiple=True, mode=SelectSelectorMode.DROPDOWN
+                    )
                 ),
                 vol.Required(CONF_REFRESH_SCHEDULE, default=current_schedule): SelectSelector(
                     SelectSelectorConfig(
@@ -840,11 +871,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Required(
                     CONF_PRICE_STALE_HOURS,
-                    default=str(self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS)),
-                ): SelectSelector(SelectSelectorConfig(
-                    options=[str(hours) for hours in PRICE_STALE_HOUR_OPTIONS],
-                    translation_key="price_stale_hours",
-                )),
+                    default=str(
+                        self.config_entry.options.get(
+                            CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS
+                        )
+                    ),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[str(hours) for hours in PRICE_STALE_HOUR_OPTIONS],
+                        translation_key="price_stale_hours",
+                    )
+                ),
             }
         )
         return self.async_show_form(
@@ -882,7 +919,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_PRICE_STALE_HOURS: getattr(
                     self,
                     "_stale_hours",
-                    self.config_entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS),
+                    self.config_entry.options.get(
+                        CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS
+                    ),
                 ),
             },
         )

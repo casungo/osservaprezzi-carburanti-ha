@@ -3,13 +3,76 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E9", "F"]
+select = [
+    "ASYNC",
+    "B",
+    "C4",
+    "E",
+    "F",
+    "G",
+    "I",
+    "LOG",
+    "N",
+    "PERF",
+    "PT",
+    "RUF",
+    "S",
+    "SIM",
+    "UP",
+    "W",
+]
+ignore = [
+    "E501",
+    "N818",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components"]
+required-imports = ["from __future__ import annotations"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "homeassistant",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.isort.sections]
+homeassistant = ["homeassistant"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["S101", "S108", "S603", "S607"]
+"tests/unit/**" = ["ASYNC109", "S101", "S105", "S106", "S108", "S603", "S607"]
+"tests/ha/**" = ["S101", "S105", "S106", "S108"]
+
+[tool.ruff.format]
+line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.11"
-ignore_missing_imports = true
+python_version = "3.14"
+explicit_package_bases = true
 warn_unused_configs = true
 warn_redundant_casts = true
-warn_unused_ignores = false
+warn_unused_ignores = true
+warn_return_any = true
 check_untyped_defs = true
-files = ["custom_components/osservaprezzi_carburanti"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_reexport = true
+files = ["custom_components/osservaprezzi_carburanti", "scripts"]
+
+[[tool.mypy.overrides]]
+module = ["cronsim"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+
+[tool.coverage.run]
+branch = true
+source = ["custom_components/osservaprezzi_carburanti"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true

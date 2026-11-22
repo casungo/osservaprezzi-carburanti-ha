@@ -7,7 +7,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -19,7 +19,9 @@ from .data_helpers import station_display_name
 _LOGGER = logging.getLogger(__name__)
 
 HOLIDAY_SCHEDULE_ID = 8
-FIXED_HOLIDAYS = frozenset({(1, 1), (1, 6), (4, 25), (5, 1), (6, 2), (8, 15), (11, 1), (12, 8), (12, 25), (12, 26)})
+FIXED_HOLIDAYS = frozenset(
+    {(1, 1), (1, 6), (4, 25), (5, 1), (6, 2), (8, 15), (11, 1), (12, 8), (12, 25), (12, 26)}
+)
 
 
 def _is_italian_holiday(check_date: date) -> bool:
@@ -43,10 +45,10 @@ def _compute_easter(year: int) -> date:
     h = (19 * a + b - d - g + 15) % 30
     i = c // 4
     k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
+    weekday_offset = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * weekday_offset) // 451
+    month = (h + weekday_offset - 7 * m + 114) // 31
+    day = ((h + weekday_offset - 7 * m + 114) % 31) + 1
     return date(year, month, day)
 
 
@@ -94,9 +96,7 @@ def _has_valid_opening_hours(data: Mapping[str, Any] | None) -> bool:
             if day.get("oraAperturaOrarioContinuato") and day.get("oraChiusuraOrarioContinuato"):
                 return True
             continue
-        if (
-            day.get("oraAperturaMattina") and day.get("oraChiusuraMattina")
-        ) or (
+        if (day.get("oraAperturaMattina") and day.get("oraChiusuraMattina")) or (
             day.get("oraAperturaPomeriggio") and day.get("oraChiusuraPomeriggio")
         ):
             return True
@@ -175,7 +175,7 @@ class OsservaprezziBaseEntity(CoordinatorEntity[CarburantiDataUpdateCoordinator]
         self._station_id = entry.data[CONF_STATION_ID]
 
     @property
-    def station_info(self) -> dict[str, Any]:
+    def station_info(self) -> Mapping[str, Any]:
         """Return cached station info."""
         return self.coordinator.data.get("station_info", {}) if self.coordinator.data else {}
 
@@ -190,8 +190,7 @@ class OsservaprezziBaseEntity(CoordinatorEntity[CarburantiDataUpdateCoordinator]
             manufacturer=station_info.get("brand"),
             model=station_info.get("station_type") or "Fuel Station",
             configuration_url=(
-                "https://carburanti.mise.gov.it/ospzSearch/dettaglio/"
-                f"{self._station_id}"
+                f"https://carburanti.mise.gov.it/ospzSearch/dettaglio/{self._station_id}"
             ),
         )
 
@@ -249,7 +248,9 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
 
     def _compute_next_change(self, now: datetime | None = None) -> tuple[str, datetime | None]:
         """Compute the next opening or closing time and type."""
-        opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
+        opening_hours = (
+            self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
+        )
         if not opening_hours:
             return "no_schedule", None
 
@@ -262,9 +263,7 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
                 local_date.weekday() + 1,
                 local_date,
             )
-            intervals.extend(
-                _schedule_intervals_for_date(schedule, local_date, now.tzinfo)
-            )
+            intervals.extend(_schedule_intervals_for_date(schedule, local_date, now.tzinfo))
 
         merged: list[list[datetime]] = []
         for opens_at, closes_at in sorted(intervals):
@@ -286,4 +285,3 @@ class ScheduleAwareEntity(OsservaprezziBaseEntity):
             if opens_at > now:
                 return "opens_at", opens_at
         return "no_opening", None
-

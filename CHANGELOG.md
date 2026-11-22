@@ -307,21 +307,20 @@ entity reads. Existing entity IDs and config-entry data remain compatible, with 
   guardrail. Two runs are directional evidence, not a statistical confidence interval.
 - The live MIMIT payload contract passed. The Home Assistant Docker regression passed `fresh`,
   `lived`, `upgrade`, `outage`, and `recovery`, including upgrade from `v2.6.0-beta.1`.
-- Ruff, mypy, and hassfest passed locally. The release comparison procedure and raw measurements
-  are documented in [docs/kpi-monitoring.md](docs/kpi-monitoring.md) and the
-  [v2.6.0 comparison report](docs/benchmarks/2026-10-07-v2.6.0-v2.7.0-beta.1.md); raw samples
-  accompany the beta release.
+- Ruff, mypy, and hassfest passed locally. The release comparison procedure is documented in
+  [docs/release-validation.md](docs/release-validation.md); raw samples accompanied the
+  `v2.7.0-beta.1` release.
 - Add `make soak` for a separately supervised duration comparison of the two versions. It
   records cron timing, reload behavior, controlled outage and recovery, RSS, and Recorder growth.
   An eight-minute replay with two planned HTTP 503 outages passed for both versions. Each kept
   prices valid on all four stations during the outage and recovered with four successful station
   responses in about eight seconds after service returned. Both observed eight cron callbacks,
   three reloads, and no leftover timers, listeners or named tasks. This run is too short to
-  estimate memory slope; no 24-hour result is claimed. See [docs/soak-monitoring.md](docs/soak-monitoring.md)
-  and its [raw comparison](docs/benchmarks/2026-10-08-ha-duration-v2.6.0-v2.7.0-beta.1.md).
+  estimate memory slope; no 24-hour result is claimed. See
+  [docs/release-validation.md](docs/release-validation.md).
 
 The performance numbers are synthetic microbenchmarks, not end-to-end startup or MIMIT latency
-measurements. Full Italian notes for every item are in [docs/quick-wins.md](docs/quick-wins.md).
+measurements.
 
 ## [2.6.0] - 2026-10-03
 

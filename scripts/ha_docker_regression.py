@@ -1,4 +1,5 @@
 """Run Home Assistant Docker smoke regressions for the custom integration."""
+
 from __future__ import annotations
 
 import argparse
@@ -14,7 +15,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-
+from typing import cast
 
 DOMAIN = "osservaprezzi_carburanti"
 DEFAULT_IMAGE = "ghcr.io/home-assistant/home-assistant:stable"
@@ -163,11 +164,9 @@ def _extract_tagged_integration(repo_root: Path, destination: Path, tag: str) ->
             check=False,
         )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Could not extract {tag}: {result.stderr.decode(errors='replace')}"
-        )
+        raise RuntimeError(f"Could not extract {tag}: {result.stderr.decode(errors='replace')}")
     with tarfile.open(archive_path) as archive:
-        archive.extractall(destination)
+        archive.extractall(destination, filter="data")
     source = destination / "custom_components" / DOMAIN
     if not source.is_dir():
         raise AssertionError(f"Tagged integration was not extracted: {source}")
@@ -197,7 +196,14 @@ def _docker_logs(container_name: str, docker_env: dict[str, str]) -> str:
 def _home_assistant_logs(container_name: str, docker_env: dict[str, str]) -> str:
     """Return Home Assistant's log file content when available."""
     result = _run(
-        ["docker", "exec", container_name, "sh", "-c", "cat /config/home-assistant.log 2>/dev/null"],
+        [
+            "docker",
+            "exec",
+            container_name,
+            "sh",
+            "-c",
+            "cat /config/home-assistant.log 2>/dev/null",
+        ],
         check=False,
         env=docker_env,
     )
@@ -206,7 +212,9 @@ def _home_assistant_logs(container_name: str, docker_env: dict[str, str]) -> str
 
 def _combined_logs(container_name: str, docker_env: dict[str, str]) -> str:
     """Return all available Home Assistant logs."""
-    return _docker_logs(container_name, docker_env) + _home_assistant_logs(container_name, docker_env)
+    return _docker_logs(container_name, docker_env) + _home_assistant_logs(
+        container_name, docker_env
+    )
 
 
 def _assert_no_error_logs(
@@ -355,10 +363,12 @@ print(json.dumps({{
         timeout=60,
         env=docker_env,
     )
-    return json.loads(result.stdout)
+    return cast(dict[str, int | str], json.loads(result.stdout))
 
 
-def _entity_counts(container_name: str, docker_env: dict[str, str], station_ids: list[str]) -> dict[str, int] | None:
+def _entity_counts(
+    container_name: str, docker_env: dict[str, str], station_ids: list[str]
+) -> dict[str, int] | None:
     """Return entity counts by station id from Home Assistant's entity registry."""
     script = f"""
 from __future__ import annotations
@@ -397,7 +407,7 @@ print(json.dumps(counts, sort_keys=True))
             "Failed to inspect Home Assistant entity registry:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-    return json.loads(result.stdout)
+    return cast(dict[str, int], json.loads(result.stdout))
 
 
 def _wait_for_live_entities(
@@ -464,7 +474,7 @@ def _wait_for_probe(
             payload = json.loads(result.stdout)
             if payload.get("status") != "passed":
                 raise AssertionError(f"Home Assistant state probe failed: {payload}")
-            return payload
+            return cast(dict[str, object], payload)
         time.sleep(3)
 
     raise TimeoutError(
@@ -504,8 +514,7 @@ def _assert_persisted_profile(config_dir: Path) -> dict[str, int]:
     entity_registry = json.loads(paths["entity_registry"].read_text(encoding="utf-8"))
     station_cache = json.loads(paths["station_cache"].read_text(encoding="utf-8"))
     entry_count = sum(
-        entry.get("domain") == DOMAIN
-        for entry in config_entries.get("data", {}).get("entries", [])
+        entry.get("domain") == DOMAIN for entry in config_entries.get("data", {}).get("entries", [])
     )
     entity_count = sum(
         entity.get("platform") == DOMAIN
@@ -655,7 +664,9 @@ def _build_lived_profile(
     persisted_summary = _assert_persisted_profile(builder_dir)
     aged_summary = _assert_aged_profile(builder_dir)
     _checkpoint_recorder_database(builder_dir)
-    archive_path = Path(shutil.make_archive(str(output_dir / "lived-profile"), "gztar", builder_dir))
+    archive_path = Path(
+        shutil.make_archive(str(output_dir / "lived-profile"), "gztar", builder_dir)
+    )
     lived_dir = output_dir / "lived"
     lived_dir.mkdir()
     shutil.unpack_archive(archive_path, lived_dir)
@@ -880,7 +891,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default=DEFAULT_IMAGE, help="Home Assistant Docker image to run")
     parser.add_argument("--timeout", default=180, type=int, help="Startup timeout in seconds")
-    parser.add_argument("--keep", action="store_true", help="Keep the container running for inspection")
+    parser.add_argument(
+        "--keep", action="store_true", help="Keep the container running for inspection"
+    )
     parser.add_argument(
         "--station",
         action="append",

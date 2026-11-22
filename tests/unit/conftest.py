@@ -1,0 +1,237 @@
+"""Shared test fixtures and mock helpers."""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from unittest.mock import AsyncMock, MagicMock
+
+
+class _MockEntity:
+    """Minimal Home Assistant entity test double."""
+
+    hass = None
+
+    async def async_added_to_hass(self):
+        """Mock add hook."""
+
+    async def async_will_remove_from_hass(self):
+        """Mock remove hook."""
+
+
+@dataclass
+class _MockSensorEntityDescription:
+    key: str
+    translation_key: str
+    icon: str
+    entity_category: str
+
+
+class _MockSensorEntity(_MockEntity):
+    """Minimal sensor entity test double."""
+
+
+class _MockBinarySensorEntity(_MockEntity):
+    """Minimal binary sensor entity test double."""
+
+
+class _MockCoordinatorEntity(_MockEntity):
+    """Minimal coordinator entity test double."""
+
+    @classmethod
+    def __class_getitem__(cls, item):
+        return cls
+
+    def __init__(self, coordinator=None, *args, **kwargs):
+        """Store coordinator and hass like Home Assistant's CoordinatorEntity."""
+        self.coordinator = coordinator
+        self.hass = coordinator if args or kwargs else getattr(coordinator, "hass", None)
+        self.data = None
+
+    def _handle_coordinator_update(self):
+        """Mock the base coordinator entity state-write callback."""
+
+    @property
+    def available(self) -> bool:
+        """Mirror CoordinatorEntity.available using last_update_success."""
+        return bool(getattr(self.coordinator, "last_update_success", True))
+
+    async def async_shutdown(self):
+        """Mock shutdown hook."""
+
+
+class _SentinelHomeAssistantError(Exception):
+    """Stands in for homeassistant.exceptions.HomeAssistantError."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.translation_domain = kwargs.get("translation_domain")
+        self.translation_key = kwargs.get("translation_key")
+
+
+class _SentinelUpdateFailed(_SentinelHomeAssistantError):
+    """Stands in for homeassistant.helpers.update_coordinator.UpdateFailed."""
+
+
+class _SentinelConfigEntryNotReady(_SentinelHomeAssistantError):
+    """Stands in for homeassistant.exceptions.ConfigEntryNotReady."""
+
+
+class _MockConfigFlow:
+    """Minimal config flow test double."""
+
+    def add_suggested_values_to_schema(self, schema, values):
+        """Leave schemas intact in lightweight tests."""
+        return schema
+
+    def __init_subclass__(cls, **kwargs):
+        """Accept Home Assistant's domain keyword during subclassing."""
+        super().__init_subclass__()
+
+
+class _MockOptionsFlow(_MockConfigFlow):
+    """Minimal options flow test double."""
+
+    def __init__(self, config_entry=None):
+        """Store the config entry like Home Assistant's options flow base."""
+        self.config_entry = config_entry
+        self.options = getattr(config_entry, "options", {}) if config_entry else {}
+
+
+def _mock_ha_modules():
+    ha_modules = [
+        "homeassistant",
+        "homeassistant.components",
+        "homeassistant.components.diagnostics",
+        "homeassistant.components.repairs",
+        "homeassistant.components.sensor",
+        "homeassistant.components.button",
+        "homeassistant.components.binary_sensor",
+        "homeassistant.config_entries",
+        "homeassistant.core",
+        "homeassistant.helpers",
+        "homeassistant.helpers.config_validation",
+        "homeassistant.helpers.device_registry",
+        "homeassistant.helpers.entity",
+        "homeassistant.helpers.entity_registry",
+        "homeassistant.helpers.entity_platform",
+        "homeassistant.helpers.selector",
+        "homeassistant.helpers.issue_registry",
+        "homeassistant.helpers.storage",
+        "homeassistant.helpers.update_coordinator",
+        "homeassistant.helpers.typing",
+        "homeassistant.helpers.aiohttp_client",
+        "homeassistant.helpers.event",
+        "homeassistant.util",
+        "homeassistant.util.dt",
+        "homeassistant.const",
+        "homeassistant.exceptions",
+        "homeassistant.data_entry_flow",
+        "voluptuous",
+    ]
+    for mod_name in ha_modules:
+        if mod_name not in sys.modules:
+            sys.modules[mod_name] = MagicMock()
+
+    sys.modules["homeassistant.components.repairs"].RepairsFlow = _MockConfigFlow
+    sys.modules["homeassistant.components.button"].ButtonEntity = _MockEntity
+    sys.modules[
+        "homeassistant.components.sensor"
+    ].SensorEntityDescription = _MockSensorEntityDescription
+    sys.modules["homeassistant.components.sensor"].SensorEntity = _MockSensorEntity
+    sys.modules["homeassistant.components.sensor"].SensorStateClass = MagicMock(
+        MEASUREMENT="measurement"
+    )
+    sys.modules[
+        "homeassistant.components.binary_sensor"
+    ].BinarySensorEntity = _MockBinarySensorEntity
+    sys.modules["homeassistant.components.diagnostics"].async_redact_data = lambda data, keys: {
+        key: "**REDACTED**" if key in keys else value for key, value in data.items()
+    }
+    sys.modules[
+        "homeassistant.helpers.update_coordinator"
+    ].CoordinatorEntity = _MockCoordinatorEntity
+    sys.modules[
+        "homeassistant.helpers.update_coordinator"
+    ].DataUpdateCoordinator = _MockCoordinatorEntity
+    sys.modules["homeassistant.helpers.update_coordinator"].UpdateFailed = _SentinelUpdateFailed
+    sys.modules["homeassistant.helpers.issue_registry"].IssueSeverity = MagicMock(
+        ERROR="error", WARNING="warning"
+    )
+    store_cls = MagicMock()
+    store_cls.return_value.async_remove = AsyncMock()
+    sys.modules["homeassistant.helpers.storage"].Store = store_cls
+    sys.modules["homeassistant.helpers.device_registry"].DeviceInfo = dict
+    sys.modules["homeassistant.helpers.entity"].DeviceInfo = dict
+    entity_category = MagicMock(DIAGNOSTIC="diagnostic", CONFIG="config")
+    sys.modules["homeassistant.const"].EntityCategory = entity_category
+    sys.modules["homeassistant.helpers.entity"].EntityCategory = entity_category
+    sys.modules["homeassistant.helpers.typing"].StateType = object
+    sys.modules["homeassistant.const"].Platform = MagicMock(
+        SENSOR="sensor",
+        BUTTON="button",
+        BINARY_SENSOR="binary_sensor",
+    )
+    sys.modules["homeassistant.exceptions"].HomeAssistantError = _SentinelHomeAssistantError
+    sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = _SentinelConfigEntryNotReady
+    sys.modules["homeassistant.data_entry_flow"].FlowResult = dict
+    sys.modules["homeassistant.config_entries"].ConfigEntry = _MockCoordinatorEntity
+    sys.modules["homeassistant.config_entries"].ConfigFlow = _MockConfigFlow
+    sys.modules["homeassistant.config_entries"].ConfigFlowResult = dict
+    sys.modules["homeassistant.config_entries"].OptionsFlow = _MockOptionsFlow
+    sys.modules["homeassistant.config_entries"].SOURCE_IMPORT = "import"
+    sys.modules["homeassistant.core"].callback = lambda f: f
+    sys.modules["homeassistant.helpers.selector"].SelectOptionDict = dict
+    for name in ("LocationSelector", "EntitySelector"):
+        setattr(sys.modules["homeassistant.helpers.selector"], name, MagicMock)
+    for name in ("LocationSelectorConfig", "EntitySelectorConfig"):
+        setattr(sys.modules["homeassistant.helpers.selector"], name, dict)
+    sys.modules["homeassistant.helpers.selector"].SelectSelector = MagicMock
+    sys.modules["homeassistant.helpers.selector"].SelectSelectorConfig = dict
+
+    sys.modules["homeassistant"].config_entries = sys.modules["homeassistant.config_entries"]
+    sys.modules["homeassistant"].core = sys.modules["homeassistant.core"]
+    sys.modules["homeassistant"].exceptions = sys.modules["homeassistant.exceptions"]
+    sys.modules["homeassistant"].const = sys.modules["homeassistant.const"]
+    sys.modules["homeassistant"].util = sys.modules["homeassistant.util"]
+    sys.modules["homeassistant.util"].dt = sys.modules["homeassistant.util.dt"]
+    # Explicit attributes let monkeypatch restore shared mocks between tests.
+    for name in ("now", "as_local", "as_utc", "parse_datetime", "get_default_time_zone"):
+        setattr(sys.modules["homeassistant.util.dt"], name, MagicMock())
+    sys.modules["homeassistant.helpers.device_registry"].async_get = MagicMock()
+    sys.modules["homeassistant.helpers.device_registry"].async_entries_for_config_entry = MagicMock(
+        return_value=[]
+    )
+    sys.modules["homeassistant.helpers.entity_registry"].async_get = MagicMock()
+    sys.modules["homeassistant.helpers.entity_platform"].async_get_platforms = MagicMock()
+    sys.modules["voluptuous"].Required = MagicMock()
+    sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
+    sys.modules["homeassistant.helpers"].entity_platform = sys.modules[
+        "homeassistant.helpers.entity_platform"
+    ]
+    sys.modules["homeassistant.helpers"].device_registry = sys.modules[
+        "homeassistant.helpers.device_registry"
+    ]
+    sys.modules["homeassistant.helpers"].entity_registry = sys.modules[
+        "homeassistant.helpers.entity_registry"
+    ]
+    sys.modules["homeassistant.helpers"].issue_registry = sys.modules[
+        "homeassistant.helpers.issue_registry"
+    ]
+    sys.modules["homeassistant.helpers"].storage = sys.modules["homeassistant.helpers.storage"]
+    sys.modules["homeassistant.helpers"].aiohttp_client = sys.modules[
+        "homeassistant.helpers.aiohttp_client"
+    ]
+    sys.modules["homeassistant.helpers"].config_validation = sys.modules[
+        "homeassistant.helpers.config_validation"
+    ]
+    sys.modules["homeassistant.helpers.config_validation"].empty_config_schema = lambda domain: (
+        MagicMock()
+    )
+    sys.modules["homeassistant.helpers"].event = sys.modules["homeassistant.helpers.event"]
+    sys.modules["homeassistant.helpers"].update_coordinator = sys.modules[
+        "homeassistant.helpers.update_coordinator"
+    ]
+
+
+_mock_ha_modules()

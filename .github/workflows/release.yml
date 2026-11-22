@@ -1,0 +1,68 @@
+name: Release Guard
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v2.8.0"
+        type: string
+        required: false
+      channel:
+        description: "Release channel"
+        type: choice
+        options:
+          - auto
+          - stable
+          - prerelease
+        default: auto
+      branch:
+        description: "Release branch"
+        type: string
+        default: master
+
+permissions:
+  contents: read
+
+jobs:
+  release-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Validate release
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+          CHANNEL_INPUT: ${{ inputs.channel }}
+          BRANCH_INPUT: ${{ inputs.branch }}
+        run: |
+          TAG="${TAG_INPUT:-$GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          CHANNEL="${CHANNEL_INPUT:-auto}"
+          BRANCH="${BRANCH_INPUT:-master}"
+          if [ "$CHANNEL" = auto ]; then
+            if [[ "$VERSION" == *-* ]]; then
+              CHANNEL=prerelease
+            else
+              CHANNEL=stable
+            fi
+          fi
+          EXTRA_ARGS=()
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            COMMIT="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+            EXTRA_ARGS+=(--allow-existing-tag)
+          else
+            COMMIT="$(git rev-parse HEAD)"
+          fi
+          python scripts/release_guard.py --channel "$CHANNEL" --version "$VERSION" --tag "$TAG" --commit "$COMMIT" --branch "$BRANCH" "${EXTRA_ARGS[@]}"

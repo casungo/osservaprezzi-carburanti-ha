@@ -1,4 +1,5 @@
 """Pure helpers for discovering nearby fuel stations."""
+
 from __future__ import annotations
 
 import unicodedata
@@ -40,9 +41,7 @@ def _haversine_distance_km(
 
     haversine = (
         sin(latitude_delta / 2) ** 2
-        + cos(origin_latitude)
-        * cos(destination_latitude)
-        * sin(longitude_delta / 2) ** 2
+        + cos(origin_latitude) * cos(destination_latitude) * sin(longitude_delta / 2) ** 2
     )
     return 2 * EARTH_RADIUS_KM * asin(sqrt(haversine))
 
@@ -84,10 +83,7 @@ def _station_matches_filters(
         if text_filter not in searchable:
             return False
 
-    if station_type:
-        if station_type not in _normalize_text(station.get("station_type")):
-            return False
-    return True
+    return not (station_type and station_type not in _normalize_text(station.get("station_type")))
 
 
 def _candidate_from_station(

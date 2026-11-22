@@ -1,20 +1,50 @@
-.PHONY: test test-ha lint typecheck check hassfest hacs kpi
+.PHONY: help setup test test-ha format format-check lint typecheck check hassfest hacs kpi
 
 PYTHON ?= .venv/bin/python
 HA_PYTHON ?= .venv-ha/bin/python
+BASE_PYTHON ?= python3
+HA_BASE_PYTHON ?= python3.14
 
 test:
 	$(PYTHON) -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
-	$(PYTHON) -m coverage report --fail-under=100
+	$(PYTHON) -m coverage report --fail-under=100 --show-missing
+
+help:
+	@printf '%s\n' \
+		'setup          Create test environments and install dependencies' \
+		'check          Run lint, type checking, and both test suites' \
+		'lint           Check Python code style and formatting' \
+		'format         Format Python code' \
+		'format-check   Check Python formatting' \
+		'typecheck      Run type checking against Home Assistant' \
+		'test           Run unit tests with coverage' \
+		'test-ha        Run Home Assistant contract tests' \
+		'hassfest       Run Home Assistant integration validation' \
+		'hacs           Validate the remote GitHub ref with HACS' \
+		'kpi            Compare release performance and correctness'
+
+setup:
+	@test -x .venv/bin/python || $(BASE_PYTHON) -m venv .venv
+	.venv/bin/python -m pip install -r requirements-test.txt
+	@command -v $(HA_BASE_PYTHON) >/dev/null 2>&1 || { echo 'Missing $(HA_BASE_PYTHON); install it or set HA_BASE_PYTHON to an available Python executable.' >&2; exit 1; }
+	@test -x .venv-ha/bin/python || $(HA_BASE_PYTHON) -m venv .venv-ha
+	.venv-ha/bin/python -m pip install -r requirements-ha-test.txt
 
 test-ha:
-	$(HA_PYTHON) -m pytest -c pytest-ha.ini -q
+	$(HA_PYTHON) -m pytest tests/ha -o asyncio_mode=auto -q
+
+format:
+	$(PYTHON) -m ruff format .
+
+format-check:
+	$(PYTHON) -m ruff format --check .
 
 lint:
 	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
 
 typecheck:
-	$(PYTHON) -m mypy
+	$(HA_PYTHON) -m mypy
 
 check: lint typecheck test test-ha
 
@@ -40,9 +70,3 @@ KPI_BASELINE ?= previous-stable
 KPI_ARGS ?=
 kpi:
 	$(PYTHON) scripts/benchmark_release.py --baseline $(KPI_BASELINE) $(KPI_ARGS)
-
-# Bounded real HA duration comparison; supply retained inputs and a new output path.
-SOAK_ARGS ?=
-.PHONY: soak
-soak:
-	$(PYTHON) scripts/soak_release.py $(SOAK_ARGS)

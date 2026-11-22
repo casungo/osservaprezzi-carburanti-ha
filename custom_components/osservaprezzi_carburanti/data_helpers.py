@@ -1,4 +1,5 @@
 """Small pure helpers shared by station processing and presentation."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

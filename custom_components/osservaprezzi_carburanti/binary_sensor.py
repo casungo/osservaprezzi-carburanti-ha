@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import (
     ADDITIONAL_SERVICES,
     CONF_STATION_ID,
-    DOMAIN,
     SERVICE_ID_TO_TRANSLATION_KEY,
 )
 from .coordinator import CarburantiDataUpdateCoordinator
@@ -25,14 +24,16 @@ from .entity import (
     _has_valid_opening_hours,
     _schedule_intervals_for_date,
 )
+from .runtime import OsservaprezziConfigEntry
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: OsservaprezziConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up binary sensor entities for a station."""
-    coordinator: CarburantiDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: CarburantiDataUpdateCoordinator = entry.runtime_data.coordinator
     station_id = entry.data[CONF_STATION_ID]
     known_unique_ids: set[str] = set()
 
@@ -40,10 +41,7 @@ async def async_setup_entry(
     def _async_discover_entities() -> None:
         data = coordinator.data or {}
         entities: list[BinarySensorEntity] = []
-        if (
-            _has_valid_opening_hours(data)
-            and f"{station_id}_open_closed" not in known_unique_ids
-        ):
+        if _has_valid_opening_hours(data) and f"{station_id}_open_closed" not in known_unique_ids:
             entities.append(StationOpenClosedBinarySensor(coordinator, entry))
         available_service_ids = _get_available_service_ids(data.get("services", []))
         for service_id, service_info in ADDITIONAL_SERVICES.items():
@@ -51,10 +49,12 @@ async def async_setup_entry(
                 service_id in available_service_ids
                 and f"{station_id}_service_{service_id}" not in known_unique_ids
             ):
-                entities.append(StationServiceBinarySensor(coordinator, entry, service_id, service_info))
+                entities.append(
+                    StationServiceBinarySensor(coordinator, entry, service_id, service_info)
+                )
         if not entities:
             return
-        known_unique_ids.update(entity._attr_unique_id for entity in entities)
+        known_unique_ids.update(cast(str, entity._attr_unique_id) for entity in entities)
         async_add_entities(entities, update_before_add=False)
 
     _async_discover_entities()
@@ -77,7 +77,9 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
 
     def _is_currently_open(self, now: datetime | None = None) -> bool:
         """Check if the station is currently open."""
-        opening_hours = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
+        opening_hours = (
+            self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
+        )
         if not opening_hours:
             return False
 
@@ -121,10 +123,17 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
         now = dt_util.now()
         rows = self.coordinator.data.get("opening_hours", []) if self.coordinator.data else []
         schedule = _find_schedule_for_day(rows, now.isoweekday(), now.date())
-        result: dict[str, Any] = {"self_service_available": None, "served_available": None, "today_schedule": None}
+        result: dict[str, Any] = {
+            "self_service_available": None,
+            "served_available": None,
+            "today_schedule": None,
+        }
         if schedule is None:
             return result
-        for key, field in (("self_service_available", "flagSelf"), ("served_available", "flagServito")):
+        for key, field in (
+            ("self_service_available", "flagSelf"),
+            ("served_available", "flagServito"),
+        ):
             if schedule.get(field) is not None:
                 result[key] = bool(schedule[field])
         if schedule.get("flagChiusura"):
@@ -133,7 +142,9 @@ class StationOpenClosedBinarySensor(ScheduleAwareEntity, BinarySensorEntity):
             result["today_schedule"] = "24/7"
         else:
             intervals = _schedule_intervals_for_date(schedule, now.date(), now.tzinfo)
-            result["today_schedule"] = ", ".join(f"{start:%H:%M}-{end:%H:%M}" for start, end in intervals) or None
+            result["today_schedule"] = (
+                ", ".join(f"{start:%H:%M}-{end:%H:%M}" for start, end in intervals) or None
+            )
         return result
 
     @property
@@ -173,7 +184,9 @@ class StationServiceBinarySensor(OsservaprezziBaseEntity, BinarySensorEntity):
         """Return True if the service is available at the station."""
         if not self.coordinator.data:
             return False
-        return self._service_id in _get_available_service_ids(self.coordinator.data.get("services", []))
+        return self._service_id in _get_available_service_ids(
+            self.coordinator.data.get("services", [])
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

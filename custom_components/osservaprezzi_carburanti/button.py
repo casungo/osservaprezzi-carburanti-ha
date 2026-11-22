@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import CarburantiDataUpdateCoordinator
 from .entity import OsservaprezziBaseEntity
+from .runtime import OsservaprezziConfigEntry
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant, entry: OsservaprezziConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Add a refresh button for this station, including before its first refresh."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
     async_add_entities([StationRefreshButton(coordinator, entry)])
 
 
@@ -41,8 +42,5 @@ class StationRefreshButton(OsservaprezziBaseEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Request a station refresh and report an unsuccessful update."""
         await self.coordinator.async_request_manual_refresh()
-        if (
-            not self.coordinator.last_update_success
-            or self.coordinator.last_refresh_from_cache
-        ):
+        if not self.coordinator.last_update_success or self.coordinator.last_refresh_from_cache:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="refresh_failed")

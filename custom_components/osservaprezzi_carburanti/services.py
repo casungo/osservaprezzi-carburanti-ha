@@ -1,18 +1,20 @@
 """Integration-wide actions for station prices and registry maintenance."""
+
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
 from collections.abc import Callable
+from datetime import timedelta
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import voluptuous as vol
 
+import homeassistant.helpers.config_validation as cv
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -20,8 +22,8 @@ from .const import (
     CONF_STATION_ID,
     DEFAULT_PRICE_STALE_HOURS,
     DOMAIN,
-    SERVICE_COMPARE_STATIONS,
     SERVICE_CLEAR_CACHE,
+    SERVICE_COMPARE_STATIONS,
     SERVICE_FORCE_CSV_UPDATE,
     SERVICE_REFRESH_PRICES,
     SERVICE_SEARCH_REGISTRY,
@@ -63,7 +65,9 @@ _SEARCH_REGISTRY_SCHEMA = vol.Schema(
     {
         vol.Optional("latitude"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
         vol.Optional("longitude"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
-        vol.Optional("radius_km", default=5.0): vol.All(vol.Coerce(float), vol.Range(min=0, min_included=False)),
+        vol.Optional("radius_km", default=5.0): vol.All(
+            vol.Coerce(float), vol.Range(min=0, min_included=False)
+        ),
         vol.Optional("zone"): cv.entity_id,
         vol.Optional("query", default=""): str,
         vol.Optional("municipality", default=""): str,
@@ -76,6 +80,7 @@ _SEARCH_REGISTRY_SCHEMA = vol.Schema(
     }
 )
 
+
 def _is_station_open(opening_hours: list[dict[str, Any]]) -> bool:
     """Return True if a station is currently open according to its opening hours."""
     if not opening_hours:
@@ -86,7 +91,9 @@ def _is_station_open(opening_hours: list[dict[str, Any]]) -> bool:
         schedule = _find_schedule_for_day(opening_hours, local_date.weekday() + 1, local_date)
         if any(
             opens_at <= now < closes_at
-            for opens_at, closes_at in _schedule_intervals_for_date(schedule, local_date, now.tzinfo)
+            for opens_at, closes_at in _schedule_intervals_for_date(
+                schedule, local_date, now.tzinfo
+            )
         ):
             return True
     return False
@@ -119,12 +126,9 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     def _iter_coordinators() -> list[tuple[str, CarburantiDataUpdateCoordinator]]:
         coordinators: list[tuple[str, CarburantiDataUpdateCoordinator]] = []
-        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
-            if not isinstance(entry_data, dict):
-                continue
-            coordinator = entry_data.get("coordinator")
-            if isinstance(coordinator, CarburantiDataUpdateCoordinator):
-                coordinators.append((entry_id, coordinator))
+        for entry_id, entry in hass.data.get(DOMAIN, {}).get("active_entries", {}).items():
+            coordinator = entry.runtime_data.coordinator
+            coordinators.append((entry_id, coordinator))
         return coordinators
 
     async def _async_refresh_coordinators(
@@ -135,13 +139,17 @@ def async_register_services(hass: HomeAssistant) -> None:
         for entry_id, coordinator in coordinators:
             try:
                 await coordinator.async_request_manual_refresh()
-            except Exception:  # noqa: BLE001 - service must attempt every configured station
+            except Exception:  # Service must attempt every configured station
                 failed_entry_ids.append(entry_id)
                 _LOGGER.exception("Station refresh failed for entry %s after %s", entry_id, action)
             else:
                 if not coordinator.last_update_success or coordinator.last_refresh_from_cache:
                     failed_entry_ids.append(entry_id)
-                    _LOGGER.warning("Station refresh did not retrieve prices for entry %s after %s", entry_id, action)
+                    _LOGGER.warning(
+                        "Station refresh did not retrieve prices for entry %s after %s",
+                        entry_id,
+                        action,
+                    )
                 else:
                     _LOGGER.info("%s completed for entry %s", action, entry_id)
 
@@ -158,13 +166,25 @@ def async_register_services(hass: HomeAssistant) -> None:
         coordinators = _iter_coordinators()
         entry_id, primary_coordinator = coordinators[0] if coordinators else ("shared", None)
         try:
-            success = await primary_coordinator.async_force_csv_update() if primary_coordinator else await get_shared_csv_manager(hass).async_update_csv_data(force_update=True)
+            success = (
+                await primary_coordinator.async_force_csv_update()
+                if primary_coordinator
+                else await get_shared_csv_manager(hass).async_update_csv_data(force_update=True)
+            )
         except Exception as err:
             _LOGGER.exception("CSV update failed for entry %s", entry_id)
-            raise HomeAssistantError("Unable to update the station cache", translation_domain=DOMAIN, translation_key="cache_update_failed") from err
+            raise HomeAssistantError(
+                "Unable to update the station cache",
+                translation_domain=DOMAIN,
+                translation_key="cache_update_failed",
+            ) from err
         if not success:
             _LOGGER.warning("CSV update failed for entry %s", entry_id)
-            raise HomeAssistantError("Unable to update the station cache", translation_domain=DOMAIN, translation_key="cache_update_failed")
+            raise HomeAssistantError(
+                "Unable to update the station cache",
+                translation_domain=DOMAIN,
+                translation_key="cache_update_failed",
+            )
 
         await _async_refresh_coordinators(coordinators, "CSV update")
 
@@ -177,13 +197,27 @@ def async_register_services(hass: HomeAssistant) -> None:
             initialized = cleared and await manager.async_initialize()
         except Exception as err:
             _LOGGER.exception("CSV cache reset failed")
-            raise HomeAssistantError("Unable to reset the station cache", translation_domain=DOMAIN, translation_key="cache_reset_failed") from err
+            raise HomeAssistantError(
+                "Unable to reset the station cache",
+                translation_domain=DOMAIN,
+                translation_key="cache_reset_failed",
+            ) from err
         if not cleared:
             _LOGGER.warning("CSV cache clear failed; skipping station refresh")
-            raise HomeAssistantError("Unable to reset the station cache", translation_domain=DOMAIN, translation_key="cache_reset_failed")
+            raise HomeAssistantError(
+                "Unable to reset the station cache",
+                translation_domain=DOMAIN,
+                translation_key="cache_reset_failed",
+            )
         if not initialized:
-            _LOGGER.warning("Cache cleared but CSV re-initialization failed; skipping station refresh")
-            raise HomeAssistantError("Unable to reset the station cache", translation_domain=DOMAIN, translation_key="cache_reset_failed")
+            _LOGGER.warning(
+                "Cache cleared but CSV re-initialization failed; skipping station refresh"
+            )
+            raise HomeAssistantError(
+                "Unable to reset the station cache",
+                translation_domain=DOMAIN,
+                translation_key="cache_reset_failed",
+            )
 
         await _async_refresh_coordinators(coordinators, "Cache reset")
 
@@ -261,7 +295,11 @@ def async_register_services(hass: HomeAssistant) -> None:
                     continue
                 fuel_name_raw = fuel_key.rsplit("_", 1)[0]
                 display_fuel = fuel_display_name(fuel_name_raw)
-                if fuel_filter and fuel_filter not in fuel_key.lower() and fuel_filter not in display_fuel.lower():
+                if (
+                    fuel_filter
+                    and fuel_filter not in fuel_key.lower()
+                    and fuel_filter not in display_fuel.lower()
+                ):
                     continue
                 row: dict[str, Any] = {
                     "entry_id": entry_id,
@@ -296,7 +334,7 @@ def async_register_services(hass: HomeAssistant) -> None:
                 item["estimated_total_eur"] = round(item["price"] * liters, 2)
                 item["savings_eur"] = round((max_price - item["price"]) * liters, 2)
 
-        return {"stations": comparison, "ranking": ranking}
+        return cast(ServiceResponse, {"stations": comparison, "ranking": ranking})
 
     async def _handle_refresh_prices(call: ServiceCall) -> ServiceResponse:
         """Refresh all active stations or a requested station/device/entity subset."""
@@ -330,32 +368,43 @@ def async_register_services(hass: HomeAssistant) -> None:
                 or entry_id in requested_entry_ids
             ]
         if not coordinators:
-            raise HomeAssistantError("No matching active Osservaprezzi entries", translation_domain=DOMAIN, translation_key="no_matching_entries")
+            raise HomeAssistantError(
+                "No matching active Osservaprezzi entries",
+                translation_domain=DOMAIN,
+                translation_key="no_matching_entries",
+            )
 
         await _async_refresh_coordinators(coordinators, "Price refresh")
         refreshed_station_ids = [
             str(coordinator.config_entry.data.get(CONF_STATION_ID))
             for _, coordinator in coordinators
         ]
-        return {
-            "refreshed_station_ids": refreshed_station_ids,
-            "refreshed_count": len(refreshed_station_ids),
-        }
+        return cast(
+            ServiceResponse,
+            {
+                "refreshed_station_ids": refreshed_station_ids,
+                "refreshed_count": len(refreshed_station_ids),
+            },
+        )
 
     async def _handle_search_registry(call: ServiceCall) -> ServiceResponse:
         """Search the shared official station registry without location data."""
         try:
-            snapshot = await get_shared_csv_manager(hass).async_ensure_registry(
-                allow_stale=True
-            )
+            snapshot = await get_shared_csv_manager(hass).async_ensure_registry(allow_stale=True)
         except RegistryUnavailableError as err:
-            raise HomeAssistantError("The station registry is unavailable", translation_domain=DOMAIN, translation_key="registry_unavailable") from err
+            raise HomeAssistantError(
+                "The station registry is unavailable",
+                translation_domain=DOMAIN,
+                translation_key="registry_unavailable",
+            ) from err
 
         origin = _resolve_origin_coordinates(hass, call.data)
         if origin is not None:
             search = partial(
-                find_nearby_stations, snapshot.stations,
-                latitude=origin[0], longitude=origin[1],
+                find_nearby_stations,
+                snapshot.stations,
+                latitude=origin[0],
+                longitude=origin[1],
                 radius_km=call.data.get("radius_km", 5.0),
                 text_filter=str(call.data.get("query", "")),
                 station_type=str(call.data.get("station_type", "")),
@@ -363,7 +412,8 @@ def async_register_services(hass: HomeAssistant) -> None:
             )
         else:
             search = partial(
-                find_stations_by_area, snapshot.stations,
+                find_stations_by_area,
+                snapshot.stations,
                 municipality=str(call.data.get("municipality", "")),
                 province=str(call.data.get("province", "")),
                 text_filter=str(call.data.get("query", "")),
@@ -391,9 +441,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             ],
             "result_count": len(candidates),
             "registry_updated": (
-                snapshot.updated_at.isoformat()
-                if snapshot.updated_at is not None
-                else None
+                snapshot.updated_at.isoformat() if snapshot.updated_at is not None else None
             ),
             "registry_is_stale": snapshot.is_stale,
         }
@@ -401,9 +449,21 @@ def async_register_services(hass: HomeAssistant) -> None:
     registrations: tuple[tuple[str, Callable[..., Any], dict[str, Any]], ...] = (
         (SERVICE_FORCE_CSV_UPDATE, _handle_force_csv_update, {}),
         (SERVICE_CLEAR_CACHE, _handle_clear_cache, {}),
-        (SERVICE_COMPARE_STATIONS, _handle_compare_stations, {"schema": _COMPARE_STATIONS_SCHEMA, "supports_response": SupportsResponse.ONLY}),
-        (SERVICE_REFRESH_PRICES, _handle_refresh_prices, {"schema": _REFRESH_PRICES_SCHEMA, "supports_response": SupportsResponse.OPTIONAL}),
-        (SERVICE_SEARCH_REGISTRY, _handle_search_registry, {"schema": _SEARCH_REGISTRY_SCHEMA, "supports_response": SupportsResponse.ONLY}),
+        (
+            SERVICE_COMPARE_STATIONS,
+            _handle_compare_stations,
+            {"schema": _COMPARE_STATIONS_SCHEMA, "supports_response": SupportsResponse.ONLY},
+        ),
+        (
+            SERVICE_REFRESH_PRICES,
+            _handle_refresh_prices,
+            {"schema": _REFRESH_PRICES_SCHEMA, "supports_response": SupportsResponse.OPTIONAL},
+        ),
+        (
+            SERVICE_SEARCH_REGISTRY,
+            _handle_search_registry,
+            {"schema": _SEARCH_REGISTRY_SCHEMA, "supports_response": SupportsResponse.ONLY},
+        ),
     )
     for name, handler, options in registrations:
         hass.services.async_register(DOMAIN, name, handler, **options)

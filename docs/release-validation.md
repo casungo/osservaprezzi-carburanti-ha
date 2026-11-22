@@ -80,3 +80,9 @@ gh release create "$TAG" --target "$TARGET_COMMIT" --title "$TAG" --prerelease
   warnings appear with debug logging enabled.
 - Run `compare_stations`, `search_registry`, `refresh_prices`, `force_csv_update`, and
   `clear_cache` from Developer Tools.
+
+CI runs KPI comparisons on pull requests that change the integration or KPI scripts, or
+when labeled `run-kpi`. Pull requests use one round, five repeats, three reloads and a
+15-second idle period; the `full-kpi` label selects the full settings. Master pushes use
+the full settings. Docker regression uses two profile workers by default; see
+[testing.md](./testing.md) for sequential execution.

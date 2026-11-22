@@ -301,12 +301,13 @@ def measure(
             raise TimeoutError(f"No KPI result within {args.timeout}s")
         result["boot_to_report_seconds"] = time.monotonic() - boot_started
     finally:
-        logs = run(["docker", "logs", name])
         # Docker writes HA logs to stderr; capture both streams for diagnosis.
         logged = subprocess.run(
             ["docker", "logs", name], capture_output=True, text=True, check=True
         )
-        (profile.parent / f"{profile.name}.log").write_text(logs + logged.stderr, encoding="utf-8")
+        (profile.parent / f"{profile.name}.log").write_text(
+            logged.stdout + logged.stderr, encoding="utf-8"
+        )
         stopped = subprocess.run(
             ["docker", "stop", "--time", "30", name], capture_output=True, text=True, timeout=45
         )

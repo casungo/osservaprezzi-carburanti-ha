@@ -14,7 +14,9 @@ import tarfile
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Lock
 from typing import cast
 
 DOMAIN = "osservaprezzi_carburanti"
@@ -34,6 +36,7 @@ ERROR_PATTERNS = (
 LOG_TAIL_LINE_LIMIT = 80
 LIVED_HISTORY_DAYS = 14
 LIVED_BOOT_COUNT = 4
+_CONTAINER_NAMES_LOCK = Lock()
 UPGRADE_FROM_TAG = "v2.6.0-beta.1"
 
 
@@ -270,7 +273,7 @@ def _wait_for_startup(
         )
         if DOMAIN in last_logs:
             return last_logs
-        time.sleep(3)
+        time.sleep(1)
 
     context = _log_failure_context("startup timeout", last_logs, container_name)
     raise TimeoutError(f"Timed out waiting for Home Assistant startup.\n{context}")
@@ -432,7 +435,7 @@ def _wait_for_live_entities(
         last_counts = _entity_counts(container_name, docker_env, station_ids)
         if last_counts and all(last_counts.get(station_id, 0) > 0 for station_id in station_ids):
             return last_counts
-        time.sleep(5)
+        time.sleep(1)
 
     raise TimeoutError(
         "Timed out waiting for live station entities. "
@@ -475,7 +478,7 @@ def _wait_for_probe(
             if payload.get("status") != "passed":
                 raise AssertionError(f"Home Assistant state probe failed: {payload}")
             return cast(dict[str, object], payload)
-        time.sleep(3)
+        time.sleep(1)
 
     raise TimeoutError(
         "Timed out waiting for Home Assistant state probe.\n"
@@ -698,7 +701,8 @@ def _run_profile(
     if os.name == "nt":
         mount_path = mount_path.replace("\\", "/")
     container_name = f"ha-{DOMAIN}-{profile}-{uuid.uuid4().hex[:8]}"
-    container_names.append(container_name)
+    with _CONTAINER_NAMES_LOCK:
+        container_names.append(container_name)
     started = False
     try:
         command = [
@@ -768,7 +772,9 @@ def _run_profile(
             _stop_container(container_name, docker_env)
 
 
-def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str]) -> None:
+def run_regression(
+    image: str, timeout: int, keep: bool, station_ids: list[str], workers: int = 2
+) -> None:
     """Run the Docker regression workflow."""
     docker_env = os.environ.copy()
     docker_info = _run(["docker", "info"], timeout=120, check=False, env=docker_env)
@@ -795,82 +801,95 @@ def run_regression(image: str, timeout: int, keep: bool, station_ids: list[str])
             raise AssertionError(
                 f"Upgrade profile is not testing a version change: {previous_version}"
             )
-        upgrade_output = temp_dir / "upgrade"
-        upgrade_output.mkdir()
-        upgrade_dir, upgrade_persisted, upgrade_aged = _build_lived_profile(
-            repo_root,
-            upgrade_output,
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            integration_root=previous_source,
-        )
-        _replace_integration(repo_root, upgrade_dir)
-        _copy_probe(repo_root, upgrade_dir)
-        _restore_config_ownership(str(upgrade_dir), docker_env)
-        _assert_persisted_profile(upgrade_dir)
-        _assert_aged_profile(upgrade_dir)
-        print(f"Upgrade profile: {previous_version} -> {current_version}")
-        _run_profile(
-            upgrade_dir,
-            "upgrade",
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            container_names,
-            keep,
-        )
-        lived_dir, persisted_summary, aged_summary = _build_lived_profile(
-            repo_root, temp_dir, image, timeout, station_ids, docker_env
-        )
-        fresh_dir = temp_dir / "fresh"
-        fresh_dir.mkdir()
-        _copy_integration(repo_root, fresh_dir)
-        _copy_probe(repo_root, fresh_dir)
-        _run_profile(
-            fresh_dir, "fresh", image, timeout, station_ids, docker_env, container_names, keep
-        )
-        _restore_config_ownership(str(lived_dir), docker_env)
-        _assert_persisted_profile(lived_dir)
-        _assert_aged_profile(lived_dir)
-        _run_profile(
-            lived_dir, "lived", image, timeout, station_ids, docker_env, container_names, keep
-        )
-        _restore_config_ownership(str(lived_dir), docker_env)
-        _checkpoint_recorder_database(lived_dir)
-        outage_dir = temp_dir / "outage"
-        shutil.copytree(lived_dir, outage_dir)
-        _write_ha_config(outage_dir, "outage", station_ids)
-        (outage_dir / "docker-probe-result.json").unlink(missing_ok=True)
-        _run_profile(
-            outage_dir,
-            "outage",
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            container_names,
-            keep,
-            blocked_hosts=["carburanti.mise.gov.it", "www.mimit.gov.it"],
-        )
-        _restore_config_ownership(str(outage_dir), docker_env)
-        _assert_persisted_profile(outage_dir)
-        _assert_aged_profile(outage_dir)
-        _run_profile(
-            outage_dir,
-            "recovery",
-            image,
-            timeout,
-            station_ids,
-            docker_env,
-            container_names,
-            keep,
-        )
-        print(f"Exported profile used for lived run: {lived_dir}")
-        print(f"Lived profile before run: {persisted_summary}, {aged_summary}")
-        print(f"Upgrade profile before run: {upgrade_persisted}, {upgrade_aged}")
+
+        def upgrade_and_fresh() -> None:
+            upgrade_output = temp_dir / "upgrade"
+            upgrade_output.mkdir()
+            upgrade_dir, upgrade_persisted, upgrade_aged = _build_lived_profile(
+                repo_root,
+                upgrade_output,
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                integration_root=previous_source,
+            )
+            _replace_integration(repo_root, upgrade_dir)
+            _copy_probe(repo_root, upgrade_dir)
+            _restore_config_ownership(str(upgrade_dir), docker_env)
+            _assert_persisted_profile(upgrade_dir)
+            _assert_aged_profile(upgrade_dir)
+            print(f"Upgrade profile: {previous_version} -> {current_version}")
+            _run_profile(
+                upgrade_dir,
+                "upgrade",
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                container_names,
+                keep,
+            )
+            fresh_dir = temp_dir / "fresh"
+            fresh_dir.mkdir()
+            _copy_integration(repo_root, fresh_dir)
+            _copy_probe(repo_root, fresh_dir)
+            _run_profile(
+                fresh_dir, "fresh", image, timeout, station_ids, docker_env, container_names, keep
+            )
+            print(f"Upgrade profile before run: {upgrade_persisted}, {upgrade_aged}")
+
+        def lived_and_recovery() -> None:
+            lived_dir, persisted_summary, aged_summary = _build_lived_profile(
+                repo_root, temp_dir, image, timeout, station_ids, docker_env
+            )
+            _restore_config_ownership(str(lived_dir), docker_env)
+            _assert_persisted_profile(lived_dir)
+            _assert_aged_profile(lived_dir)
+            _run_profile(
+                lived_dir, "lived", image, timeout, station_ids, docker_env, container_names, keep
+            )
+            _restore_config_ownership(str(lived_dir), docker_env)
+            _checkpoint_recorder_database(lived_dir)
+            outage_dir = temp_dir / "outage"
+            shutil.copytree(lived_dir, outage_dir)
+            _write_ha_config(outage_dir, "outage", station_ids)
+            (outage_dir / "docker-probe-result.json").unlink(missing_ok=True)
+            _run_profile(
+                outage_dir,
+                "outage",
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                container_names,
+                keep,
+                blocked_hosts=["carburanti.mise.gov.it", "www.mimit.gov.it"],
+            )
+            _restore_config_ownership(str(outage_dir), docker_env)
+            _assert_persisted_profile(outage_dir)
+            _assert_aged_profile(outage_dir)
+            _run_profile(
+                outage_dir,
+                "recovery",
+                image,
+                timeout,
+                station_ids,
+                docker_env,
+                container_names,
+                keep,
+            )
+            print(f"Exported profile used for lived run: {lived_dir}")
+            print(f"Lived profile before run: {persisted_summary}, {aged_summary}")
+
+        if keep or workers == 1:
+            upgrade_and_fresh()
+            lived_and_recovery()
+        else:
+            with ThreadPoolExecutor(max_workers=min(workers, 2)) as executor:
+                futures = [executor.submit(upgrade_and_fresh), executor.submit(lived_and_recovery)]
+                for future in futures:
+                    future.result()
     finally:
         if keep:
             if container_names:
@@ -900,11 +919,14 @@ def main() -> int:
         dest="station_ids",
         help="Station ID to configure; repeat for multiple stations",
     )
+    parser.add_argument("--workers", type=int, default=2, help="Parallel profile branches")
     args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
     station_ids = args.station_ids or list(DEFAULT_STATION_IDS)
 
     try:
-        run_regression(args.image, args.timeout, args.keep, station_ids)
+        run_regression(args.image, args.timeout, args.keep, station_ids, args.workers)
     except Exception as err:
         print(f"Home Assistant Docker regression failed: {err}", file=sys.stderr)
         return 1

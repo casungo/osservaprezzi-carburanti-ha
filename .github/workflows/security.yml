@@ -2,6 +2,7 @@ name: Security Audit
 
 on:
   push:
+    branches: [master]
     paths:
       - requirements-test.txt
       - requirements-ha-test.txt
@@ -14,6 +15,10 @@ on:
   schedule:
     - cron: "29 4 * * 1"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

@@ -79,3 +79,8 @@ Home Assistant container without touching any live instance.
 
 For pre-release guardrails and KPI comparisons (`make kpi`), see
 [release-validation.md](./release-validation.md).
+
+The Docker regression runs two independent profile branches by default. Use `--workers 1`
+for sequential execution; `--keep` also forces sequential execution. In pull requests, CI
+runs it only for integration, Docker regression/probe, or HACS changes, or with the
+`run-docker` label, after unit and static checks pass.

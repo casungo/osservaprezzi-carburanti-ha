@@ -217,7 +217,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
             if retry_after:
                 try:
                     seconds = float(retry_after)
-                except (TypeError, ValueError, OverflowError):
+                except TypeError, ValueError, OverflowError:
                     seconds = None
                 if seconds is not None and isfinite(seconds):
                     parsed_delay = int(seconds)
@@ -231,7 +231,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
                     if now.tzinfo is None:
                         now = now.replace(tzinfo=UTC)
                     delay = (retry_at.astimezone(UTC) - now.astimezone(UTC)).total_seconds()
-                except (TypeError, ValueError, OverflowError, IndexError):
+                except TypeError, ValueError, OverflowError, IndexError:
                     return default_delay
                 if isfinite(delay) and delay > 0:
                     return min(ceil(delay), MAX_RETRY_AFTER_SECONDS)
@@ -299,7 +299,7 @@ class CarburantiDataUpdateCoordinator(DataUpdateCoordinator[ProcessedPayload]):
         if parsed_dt is None:
             try:
                 parsed_dt = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 _LOGGER.warning("Failed to parse datetime: %s", datetime_str)
                 return None
 

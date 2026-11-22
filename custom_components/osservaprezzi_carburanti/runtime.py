@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -24,4 +24,4 @@ class OsservaprezziRuntimeData:
     refresh_result_listener: Callable[[], None] | None = None
 
 
-OsservaprezziConfigEntry: TypeAlias = ConfigEntry[OsservaprezziRuntimeData]
+type OsservaprezziConfigEntry = ConfigEntry[OsservaprezziRuntimeData]

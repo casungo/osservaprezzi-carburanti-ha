@@ -2,8 +2,7 @@
 
 PYTHON ?= .venv/bin/python
 HA_PYTHON ?= .venv-ha/bin/python
-BASE_PYTHON ?= python3
-HA_BASE_PYTHON ?= python3.14
+BASE_PYTHON ?= python3.14
 
 test:
 	$(PYTHON) -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
@@ -24,10 +23,12 @@ help:
 		'kpi            Compare release performance and correctness'
 
 setup:
+	@if [ ! -x .venv/bin/python ] || [ ! -x .venv-ha/bin/python ]; then \
+		command -v $(BASE_PYTHON) >/dev/null 2>&1 || { echo 'Missing $(BASE_PYTHON); install it or set BASE_PYTHON to an available Python executable.' >&2; exit 1; }; \
+	fi
 	@test -x .venv/bin/python || $(BASE_PYTHON) -m venv .venv
 	.venv/bin/python -m pip install -r requirements-test.txt
-	@command -v $(HA_BASE_PYTHON) >/dev/null 2>&1 || { echo 'Missing $(HA_BASE_PYTHON); install it or set HA_BASE_PYTHON to an available Python executable.' >&2; exit 1; }
-	@test -x .venv-ha/bin/python || $(HA_BASE_PYTHON) -m venv .venv-ha
+	@test -x .venv-ha/bin/python || $(BASE_PYTHON) -m venv .venv-ha
 	.venv-ha/bin/python -m pip install -r requirements-ha-test.txt
 
 test-ha:

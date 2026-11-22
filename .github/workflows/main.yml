@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: |
             requirements-test.txt
@@ -53,7 +53,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: requirements-test.txt
 
@@ -78,7 +78,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: requirements-test.txt
 
@@ -140,8 +140,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+
       - name: Run real Home Assistant Docker regression
-        run: python3 scripts/ha_docker_regression.py
+        run: python scripts/ha_docker_regression.py
 
       - name: Diagnose upstream connectivity after failure
         if: failure()
@@ -160,7 +165,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: requirements-test.txt
 
@@ -185,6 +190,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+
       - name: Pull Home Assistant measurement image
         run: docker pull ghcr.io/home-assistant/home-assistant:stable
 
@@ -192,7 +202,7 @@ jobs:
         run: rm -rf artifacts/kpi/ci
 
       - name: Compare release KPIs against preceding stable release
-        run: python3 scripts/benchmark_release.py --output artifacts/kpi/ci
+        run: python scripts/benchmark_release.py --output artifacts/kpi/ci
 
       - name: Diagnose upstream connectivity after failure
         if: failure()

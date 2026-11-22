@@ -248,7 +248,7 @@ class OsservaprezziCarburantiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
                 if result is not None:
                     return result
                 errors["base"] = cast(str, error)
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 errors["base"] = "invalid_location"
 
         return self.async_show_form(
@@ -820,7 +820,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         ),
                     )
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 stale_hours = 0
             if stale_hours not in PRICE_STALE_HOUR_OPTIONS:
                 errors[CONF_PRICE_STALE_HOURS] = "invalid_stale_hours"
@@ -931,5 +931,5 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Return the next scheduled refresh when cron support is available."""
         try:
             return OsservaprezziCarburantiConfigFlow._format_datetime(get_next_run_time(cron))
-        except (ImportError, TypeError, ValueError):
+        except ImportError, TypeError, ValueError:
             return "—"

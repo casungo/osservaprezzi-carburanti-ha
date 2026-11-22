@@ -81,7 +81,7 @@ def _is_valid_fuel_price(value: object) -> bool:
         return False
     try:
         return isfinite(float(value)) and value >= 0
-    except (OverflowError, TypeError, ValueError):
+    except OverflowError, TypeError, ValueError:
         return False
 
 

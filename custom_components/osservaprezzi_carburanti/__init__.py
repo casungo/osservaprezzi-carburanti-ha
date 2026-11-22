@@ -319,7 +319,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OsservaprezziConfigEntry
 
     try:
         _schedule_next_refresh()
-    except (ImportError, TypeError, ValueError):
+    except ImportError, TypeError, ValueError:
         await coordinator.async_shutdown()
         active_entries.pop(entry.entry_id, None)
         _async_remove_csv_owner_if_unused(hass)

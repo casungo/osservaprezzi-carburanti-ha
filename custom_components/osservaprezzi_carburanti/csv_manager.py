@@ -456,7 +456,7 @@ class CSVStationManager:
             parsed_dt = dt_util.parse_datetime(value)
             if parsed_dt is None:
                 parsed_dt = datetime.fromisoformat(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             _LOGGER.warning("Could not parse last_update from cache: %s", value)
             return None
 

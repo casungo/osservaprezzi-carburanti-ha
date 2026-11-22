@@ -45,7 +45,7 @@ async def async_get_config_entry_diagnostics(
         next_refresh = get_next_run_time(
             entry.options.get(CONF_CRON_EXPRESSION, DEFAULT_CRON_EXPRESSION)
         ).isoformat()
-    except (ImportError, TypeError, ValueError):
+    except ImportError, TypeError, ValueError:
         next_refresh = None
     stale_hours = int(entry.options.get(CONF_PRICE_STALE_HOURS, DEFAULT_PRICE_STALE_HOURS))
     stale_count = (

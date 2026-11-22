@@ -9,7 +9,7 @@ setup, see [testing.md](./testing.md).
 make check
 make hassfest
 make hacs
-python3 scripts/ha_docker_regression.py
+.venv/bin/python scripts/ha_docker_regression.py
 ```
 
 Optional live upstream contract check:

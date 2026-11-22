@@ -145,7 +145,7 @@ def input_quality(inputs: Path, captured_at: str) -> dict[str, Any]:
                 and -90 <= latitude <= 90
                 and -180 <= longitude <= 180
             )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             valid = False
         if valid and row["idImpianto"].strip():
             usable.add(row["idImpianto"].strip())
@@ -162,7 +162,7 @@ def input_quality(inputs: Path, captured_at: str) -> dict[str, Any]:
                 published = datetime.fromisoformat(fuel["insertDate"].replace("Z", "+00:00"))
                 if published.tzinfo is None:
                     raise ValueError("Price publication timestamp has no timezone")
-            except (KeyError, AttributeError, TypeError, ValueError):
+            except KeyError, AttributeError, TypeError, ValueError:
                 unknown_timestamps += 1
                 continue
             ages[station_id].append((reference - published).total_seconds() / 3600)

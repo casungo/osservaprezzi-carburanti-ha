@@ -7,11 +7,11 @@ run automatically in GitHub Actions on every push and pull request.
 
 The repository uses two virtual environments:
 
-- `.venv` (Python 3.11+): unit tests, coverage, Ruff lint/format.
+- `.venv` (Python 3.14): unit tests, coverage, Ruff lint/format.
 - `.venv-ha` (Python 3.14): `mypy` against real Home Assistant types and `tests/ha/` contract
   tests (including static JSON/YAML validation).
 
-Bootstrap both environments in one step:
+Install Python 3.14, then bootstrap both environments in one step:
 
 ```bash
 make setup
@@ -24,7 +24,7 @@ make check
 ```
 
 Individual targets: `make lint`, `make format`, `make format-check`, `make typecheck`,
-`make test`, and `make test-ha`. Override `PYTHON` or `HA_PYTHON` when using custom environments.
+`make test`, and `make test-ha`. Override `BASE_PYTHON` to select the Python 3.14 executable used for setup, or `PYTHON` and `HA_PYTHON` when using custom environments. The environments remain separate to isolate the unit tests from Home Assistant pytest plugins.
 
 If you use [`pre-commit`](https://pre-commit.com/), enable the hooks in `.pre-commit-config.yaml`
 with `pre-commit install`.
@@ -70,7 +70,7 @@ With Docker available locally:
 ```bash
 make hassfest
 make hacs                                       # validates the pushed GitHub branch
-python3 scripts/ha_docker_regression.py --timeout 240
+.venv/bin/python scripts/ha_docker_regression.py --timeout 240
 ```
 
 `ha_docker_regression.py` runs `fresh`, `lived` (4 boots + 14 synthetic days of Recorder history),

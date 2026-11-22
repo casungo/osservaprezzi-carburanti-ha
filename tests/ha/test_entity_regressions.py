@@ -46,7 +46,7 @@ async def test_entities_keep_translation_keys_and_device_configuration_url(
 
     entity_registry = er.async_get(hass)
     for platform, unique_id, translation_key in (
-        ("sensor", f"{STATION_ID}_brand", "station_brand"),
+        ("sensor", f"{STATION_ID}_name", "station_name"),
         ("sensor", f"{STATION_ID}_location", "location"),
         ("sensor", f"{STATION_ID}_next_change", "next_change"),
         ("binary_sensor", f"{STATION_ID}_open_closed", "station_open_closed"),
@@ -72,7 +72,7 @@ async def test_entities_keep_translation_keys_and_device_configuration_url(
     await hass.async_block_till_done()
     assert next_entity._next_change_now == previous_tick
 
-    coordinator = entry.runtime_data.coordinator
+    coordinator = next(iter(entry.runtime_data.stations.values())).coordinator
     coordinator.async_set_updated_data(
         {
             **coordinator.data,
@@ -90,6 +90,9 @@ async def test_entities_keep_translation_keys_and_device_configuration_url(
     assert next_entity._time_listener is not None
     _, transition_time = next_entity._next_change
     assert transition_time is not None
+    assert next_entity.native_value == dt_util.as_utc(transition_time)
+    assert next_entity.native_value.tzinfo is not None
+    assert hass.states.get(next_id).attributes["device_class"] == "timestamp"
     async_fire_time_changed(hass, dt_util.as_utc(transition_time))
     await hass.async_block_till_done()
     assert next_entity._next_change_now >= transition_time

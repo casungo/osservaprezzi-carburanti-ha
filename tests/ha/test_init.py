@@ -67,10 +67,10 @@ async def test_station_not_found_repair_issue_is_removed_after_refresh(
     await hass.async_block_till_done()
 
     repairs = issue_registry.async_get(hass)
-    issue_id = f"station_not_found_{entry.entry_id}"
+    issue_id = f"station_not_found_{next(iter(entry.subentries))}"
     assert repairs.async_get_issue(DOMAIN, issue_id) is not None
 
-    await entry.runtime_data.coordinator.async_refresh()
+    await next(iter(entry.runtime_data.stations.values())).coordinator.async_refresh()
     assert repairs.async_get_issue(DOMAIN, issue_id) is None
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -125,9 +125,12 @@ async def test_cancelled_setup_unloads_forwarded_platforms_and_can_retry(
     setup_task = hass.async_create_task(hass.config_entries.async_setup(entry.entry_id))
 
     await asyncio.wait_for(binary_setup_started.wait(), timeout=10)
-    sensor_entity_id = f"sensor.{STATION_ID}_location"
+    sensor_entity_id = None
     for _ in range(100):
-        if hass.states.get(sensor_entity_id) is not None:
+        sensor_entity_id = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{STATION_ID}_location"
+        )
+        if sensor_entity_id and hass.states.get(sensor_entity_id) is not None:
             break
         await asyncio.sleep(0.01)
     assert hass.states.get(sensor_entity_id) is not None
@@ -153,7 +156,7 @@ async def test_cancelled_setup_unloads_forwarded_platforms_and_can_retry(
         release_binary_setup.set()
         release_platform_unload.set()
 
-    assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("active_entries", {})
+    assert entry.entry_id not in hass.data.get(DOMAIN, {})
     sensor_state = hass.states.get(sensor_entity_id)
     assert sensor_state is None or sensor_state.attributes.get("restored") is True
     owned_platforms = [
@@ -196,29 +199,44 @@ async def test_cancelled_restore_keeps_resources_owned_by_concurrent_setup(
         AsyncMock(return_value=_station_payload()),
     )
     monkeypatch.setattr(CSVStationManager, "is_data_available", lambda self: True)
-    pending = MockConfigEntry(
-        domain=DOMAIN, unique_id=STATION_ID, data={CONF_STATION_ID: STATION_ID}
-    )
-    cancelled = MockConfigEntry(domain=DOMAIN, unique_id="54234", data={CONF_STATION_ID: "54234"})
+
+    def make_entry(station_id: str) -> MockConfigEntry:
+        return MockConfigEntry(
+            domain=DOMAIN,
+            version=3,
+            unique_id=f"hub_{station_id}",
+            data={},
+            subentries_data=[
+                {
+                    "data": {CONF_STATION_ID: station_id},
+                    "subentry_type": "station",
+                    "title": station_id,
+                    "unique_id": station_id,
+                }
+            ],
+        )
+
+    pending = make_entry(STATION_ID)
+    cancelled = make_entry("54234")
     for entry in (pending, cancelled):
         entry.add_to_hass(hass)
-    started = {entry.entry_id: asyncio.Event() for entry in (pending, cancelled)}
+    started = {station_id: asyncio.Event() for station_id in (STATION_ID, "54234")}
     release_restore = asyncio.Event()
     original_restore = CarburantiDataUpdateCoordinator.async_restore
 
     async def blocked_restore(self: CarburantiDataUpdateCoordinator) -> None:
-        started[self.config_entry.entry_id].set()
+        started[self.config_entry.data[CONF_STATION_ID]].set()
         await release_restore.wait()
         await original_restore(self)
 
     monkeypatch.setattr(CarburantiDataUpdateCoordinator, "async_restore", blocked_restore)
     pending_task = hass.async_create_task(hass.config_entries.async_setup(pending.entry_id))
-    await asyncio.wait_for(started[pending.entry_id].wait(), timeout=10)
+    await asyncio.wait_for(started[STATION_ID].wait(), timeout=10)
     manager = hass.data[DOMAIN]["csv_manager"]
     timer = hass.data[DOMAIN]["csv_update_listener"]
     cancelled_task = hass.async_create_task(hass.config_entries.async_setup(cancelled.entry_id))
     try:
-        await asyncio.wait_for(started[cancelled.entry_id].wait(), timeout=10)
+        await asyncio.wait_for(started["54234"].wait(), timeout=10)
         with pytest.raises(HomeAssistantError, match="No matching active"):
             await hass.services.async_call(
                 DOMAIN, SERVICE_REFRESH_PRICES, {}, blocking=True, return_response=True
@@ -226,7 +244,7 @@ async def test_cancelled_restore_keeps_resources_owned_by_concurrent_setup(
         cancelled_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await cancelled_task
-        assert cancelled.entry_id not in hass.data[DOMAIN].get("active_entries", {})
+        assert cancelled.entry_id not in hass.data[DOMAIN]
         assert hass.data[DOMAIN]["csv_manager"] is manager
         assert hass.data[DOMAIN]["csv_update_listener"] is timer
     finally:
@@ -348,7 +366,7 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
     assert service_entry is not None
     assert service_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
 
-    coordinator = entry.runtime_data.coordinator
+    coordinator = next(iter(entry.runtime_data.stations.values())).coordinator
     refreshed_data = deepcopy(coordinator.data)
     refreshed_data["fuels"]["Gasolio_self"] = {
         "price": 1.689,
@@ -400,7 +418,7 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         DOMAIN, SERVICE_COMPARE_STATIONS, {}, blocking=True, return_response=True
     )
     assert comparison is not None
-    assert comparison["stations"][entry.entry_id]["station_id"] == int(STATION_ID)
+    assert comparison["stations"][next(iter(entry.subentries))]["station_id"] == int(STATION_ID)
     json.dumps(comparison)
     refresh = await hass.services.async_call(
         DOMAIN,
@@ -429,8 +447,8 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         for entity in registry.entities.values()
         if entity.config_entry_id == entry.entry_id
     }
-    coordinator_before_reload = entry.runtime_data.coordinator
-    listener_before_reload = entry.runtime_data.listener
+    coordinator_before_reload = next(iter(entry.runtime_data.stations.values())).coordinator
+    listener_before_reload = next(iter(entry.runtime_data.stations.values())).listener
     assert listener_before_reload is not None
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -440,35 +458,40 @@ async def test_config_entry_lifecycle_and_services(hass: HomeAssistant, monkeypa
         if entity.config_entry_id == entry.entry_id
     }
     assert entity_ids_after_reload == entity_ids_before_reload
-    assert hass.data[DOMAIN]["active_entries"] == {entry.entry_id: entry}
-    assert entry.runtime_data.coordinator is not coordinator_before_reload
-    assert entry.runtime_data.listener is not None
-    assert entry.runtime_data.listener is not listener_before_reload
+    assert (
+        sum(isinstance(value, dict) and "stations" in value for value in hass.data[DOMAIN].values())
+        == 1
+    )
+    assert (
+        next(iter(entry.runtime_data.stations.values())).coordinator
+        is not coordinator_before_reload
+    )
+    assert next(iter(entry.runtime_data.stations.values())).listener is not None
+    assert next(iter(entry.runtime_data.stations.values())).listener is not listener_before_reload
 
-    coordinator = entry.runtime_data.coordinator
-    csv_manager = coordinator.csv_manager
-    registry_listener = hass.data[DOMAIN]["csv_update_listener"]
+    from types import MappingProxyType
 
-    second_entry = MockConfigEntry(
-        domain=DOMAIN,
+    from homeassistant.config_entries import ConfigSubentry
+
+    second = ConfigSubentry(
+        data=MappingProxyType({CONF_STATION_ID: "54234"}),
+        subentry_type="station",
         title="Second station",
         unique_id="54234",
-        data={CONF_STATION_ID: "54234"},
     )
-    second_entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(second_entry.entry_id)
+    hass.config_entries.async_add_subentry(entry, second)
     await hass.async_block_till_done()
-    second_coordinator = second_entry.runtime_data.coordinator
-    assert second_coordinator.csv_manager is csv_manager
-    assert hass.data[DOMAIN]["csv_update_listener"] is registry_listener
-
+    assert len(entry.runtime_data.stations) == 2
+    assert all(
+        station.coordinator.csv_manager is hass.data[DOMAIN]["csv_manager"]
+        for station in entry.runtime_data.stations.values()
+    )
+    assert hass.data[DOMAIN]["csv_update_listener"] is not None
+    market_id = registry.async_get_entity_id("sensor", DOMAIN, "market_cheapest_benzina")
+    assert market_id is not None
+    assert hass.states.get(market_id).state == "1.798"
+    assert registry.async_get(market_id).config_entry_id == entry.entry_id
     assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.entry_id not in hass.data[DOMAIN].get("active_entries", {})
-    assert hass.data[DOMAIN]["csv_manager"] is csv_manager
-    assert hass.services.has_service(DOMAIN, SERVICE_FORCE_CSV_UPDATE)
-
-    assert await hass.config_entries.async_unload(second_entry.entry_id)
     await hass.async_block_till_done()
     assert "csv_manager" not in hass.data[DOMAIN]
     assert "csv_update_listener" not in hass.data[DOMAIN]
@@ -518,7 +541,7 @@ async def test_refresh_button_is_translated_and_targets_its_station(hass, monkey
     device = dr.async_get(hass).async_get(entity.device_id)
     assert (DOMAIN, STATION_ID) in device.identifiers
     assert hass.states.get(entity_id).attributes["friendly_name"].endswith("Refresh prices")
-    coordinator = entry.runtime_data.coordinator
+    coordinator = next(iter(entry.runtime_data.stations.values())).coordinator
     refresh = AsyncMock()
     monkeypatch.setattr(coordinator, "async_request_refresh", refresh)
     await hass.services.async_call("button", "press", {"entity_id": entity_id}, blocking=True)

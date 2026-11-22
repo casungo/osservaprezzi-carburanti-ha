@@ -1,0 +1,115 @@
+{
+  "entity": {
+    "sensor": {
+      "station_name": {
+        "default": "mdi:gas-station"
+      },
+      "station_company": {
+        "default": "mdi:office-building"
+      },
+      "station_phone": {
+        "default": "mdi:phone"
+      },
+      "station_email": {
+        "default": "mdi:email"
+      },
+      "station_website": {
+        "default": "mdi:web"
+      },
+      "location": {
+        "default": "mdi:map-marker"
+      },
+      "next_change": {
+        "default": "mdi:clock-time-eight"
+      },
+      "market_cheapest_benzina": {
+        "default": "mdi:gas-station-outline"
+      },
+      "market_average_benzina": {
+        "default": "mdi:chart-line"
+      },
+      "market_cheapest_gasolio": {
+        "default": "mdi:gas-station-outline"
+      },
+      "market_average_gasolio": {
+        "default": "mdi:chart-line"
+      },
+      "market_cheapest_gpl": {
+        "default": "mdi:gas-station-outline"
+      },
+      "market_average_gpl": {
+        "default": "mdi:chart-line"
+      },
+      "market_cheapest_metano": {
+        "default": "mdi:gas-station-outline"
+      },
+      "market_average_metano": {
+        "default": "mdi:chart-line"
+      }
+    },
+    "binary_sensor": {
+      "station_open_closed": {
+        "default": "mdi:storefront",
+        "state": {
+          "on": "mdi:storefront",
+          "off": "mdi:storefront-outline"
+        }
+      },
+      "food_beverage": {
+        "default": "mdi:food"
+      },
+      "workshop": {
+        "default": "mdi:car-wrench"
+      },
+      "parking": {
+        "default": "mdi:truck"
+      },
+      "dump_station": {
+        "default": "mdi:water-pump"
+      },
+      "playground": {
+        "default": "mdi:human-child"
+      },
+      "atm": {
+        "default": "mdi:cash-multiple"
+      },
+      "disabled_access": {
+        "default": "mdi:wheelchair-accessibility"
+      },
+      "wifi": {
+        "default": "mdi:wifi"
+      },
+      "tire_service": {
+        "default": "mdi:tire"
+      },
+      "car_wash": {
+        "default": "mdi:car-wash"
+      },
+      "ev_charging": {
+        "default": "mdi:ev-station"
+      }
+    },
+    "button": {
+      "refresh_prices": {
+        "default": "mdi:refresh"
+      }
+    }
+  },
+  "services": {
+    "force_csv_update": {
+      "service": "mdi:database-refresh"
+    },
+    "clear_cache": {
+      "service": "mdi:delete-sweep"
+    },
+    "compare_stations": {
+      "service": "mdi:compare"
+    },
+    "refresh_prices": {
+      "service": "mdi:refresh"
+    },
+    "search_registry": {
+      "service": "mdi:magnify"
+    }
+  }
+}

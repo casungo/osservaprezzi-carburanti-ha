@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0-beta.1] - 2026-11-21
+
+### Breaking Changes
+
+- Raise the minimum Home Assistant version to 2025.6.0 in `hacs.json`.
+- Consolidate station entries into a version 3 Hub with one `station` ConfigSubentry per station. Automatic v2 migration preserves device IDs, entity IDs, and Recorder history.
+- The next opening-hours change sensor now uses the timestamp device class and returns a UTC datetime or `None` instead of a formatted string.
+- Remove the duplicate station display name, ID, and brand diagnostic sensors, with automatic cleanup of their legacy entity registry entries.
+- Service input validation failures now raise translated `ServiceValidationError` exceptions instead of generic `HomeAssistantError` exceptions.
+- Clean up additional service metadata by removing external GIF URLs and mixed descriptions.
+
+### Added
+
+- A Market Summary virtual device hosted on the Hub, with `OsservaprezziCheapestFuelSensor` and `OsservaprezziAverageFuelSensor` sensors for Benzina, Gasolio, GPL, and Metano.
+- `StationSubentryFlow` for adding and reconfiguring stations.
+- Entity and service icons in `icons.json`.
+
+### Changed
+
+- Move config entry runtime state to typed `entry.runtime_data` (`OsservaprezziRuntimeData`).
+- Set `PARALLEL_UPDATES = 0` on sensor, binary sensor, and button platforms.
+- Consolidate the four station selection steps into `select_station` using description placeholders.
+- Modernize Ruff and mypy configuration for Python 3.12, enabling the E, F, I, UP, B, SIM, and ASYNC Ruff rules and mypy unused-ignore warnings.
+
 ## [2.8.0-beta.3] - 2026-11-21
 
 ### Fixed

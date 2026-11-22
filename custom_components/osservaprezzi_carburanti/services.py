@@ -11,8 +11,9 @@ from typing import Any, cast
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -109,12 +110,18 @@ def _resolve_origin_coordinates(
     if zone:
         state = hass.states.get(zone)
         if state is None:
-            raise HomeAssistantError("Zone not found")
+            raise ServiceValidationError(
+                "Zone not found", translation_domain=DOMAIN, translation_key="zone_not_found"
+            )
         latitude = state.attributes.get("latitude")
         longitude = state.attributes.get("longitude")
     if zone or latitude is not None or longitude is not None:
         if latitude is None or longitude is None:
-            raise HomeAssistantError("Both latitude and longitude are required")
+            raise ServiceValidationError(
+                "Both latitude and longitude are required",
+                translation_domain=DOMAIN,
+                translation_key="missing_coordinates",
+            )
         return float(latitude), float(longitude)
     return None
 
@@ -126,9 +133,14 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     def _iter_coordinators() -> list[tuple[str, CarburantiDataUpdateCoordinator]]:
         coordinators: list[tuple[str, CarburantiDataUpdateCoordinator]] = []
-        for entry_id, entry in hass.data.get(DOMAIN, {}).get("active_entries", {}).items():
-            coordinator = entry.runtime_data.coordinator
-            coordinators.append((entry_id, coordinator))
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if entry.state is not ConfigEntryState.LOADED:
+                continue
+            runtime = getattr(entry, "runtime_data", None)
+            if runtime is None:
+                continue
+            for subentry_id, station in runtime.stations.items():
+                coordinators.append((subentry_id, station.coordinator))
         return coordinators
 
     async def _async_refresh_coordinators(
@@ -139,7 +151,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         for entry_id, coordinator in coordinators:
             try:
                 await coordinator.async_request_manual_refresh()
-            except Exception:  # Service must attempt every configured station
+            except Exception:
                 failed_entry_ids.append(entry_id)
                 _LOGGER.exception("Station refresh failed for entry %s after %s", entry_id, action)
             else:
@@ -348,27 +360,31 @@ def async_register_services(hass: HomeAssistant) -> None:
                 for station_id in (raw_station_ids or [])
                 if str(station_id).strip()
             }
-            requested_entry_ids: set[str] = set()
+            requested_subentry_ids: set[str] = set()
             if raw_device_ids:
                 dev_reg = dr.async_get(hass)
                 for dev_id in raw_device_ids:
                     device = dev_reg.async_get(dev_id)
                     if device is not None:
-                        requested_entry_ids.update(device.config_entries)
+                        requested_station_ids.update(
+                            identifier
+                            for domain, identifier in device.identifiers
+                            if domain == DOMAIN and identifier != "market_summary"
+                        )
             if raw_entity_ids:
                 ent_reg = er.async_get(hass)
                 for ent_id in raw_entity_ids:
                     entity_entry = ent_reg.async_get(ent_id)
-                    if entity_entry is not None and entity_entry.config_entry_id:
-                        requested_entry_ids.add(entity_entry.config_entry_id)
+                    if entity_entry is not None and entity_entry.config_subentry_id:
+                        requested_subentry_ids.add(entity_entry.config_subentry_id)
             coordinators = [
                 (entry_id, coordinator)
                 for entry_id, coordinator in coordinators
                 if str(coordinator.config_entry.data.get(CONF_STATION_ID)) in requested_station_ids
-                or entry_id in requested_entry_ids
+                or entry_id in requested_subentry_ids
             ]
         if not coordinators:
-            raise HomeAssistantError(
+            raise ServiceValidationError(
                 "No matching active Osservaprezzi entries",
                 translation_domain=DOMAIN,
                 translation_key="no_matching_entries",

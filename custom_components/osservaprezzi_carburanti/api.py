@@ -88,7 +88,7 @@ def _is_valid_fuel_price(value: object) -> bool:
 async def fetch_station_data(
     hass: HomeAssistant,
     station_id: str,
-    timeout: int = 30,  # noqa: ASYNC109
+    timeout: int = 30,  # noqa: ASYNC109 - passed to the HTTP client
 ) -> StationPayload:
     """Fetch station data from the API.
 
@@ -178,10 +178,10 @@ class _RequestLimit:
 
 
 def _request_limit(hass: HomeAssistant) -> _RequestLimit:
-    data = getattr(hass, "data", None)
+    data: Any = getattr(hass, "data", None)
     if not isinstance(data, dict):
         data = {}
-        cast(Any, hass).data = data
+        hass.data = data
     domain_data = data.setdefault(DOMAIN, {})
     return cast(_RequestLimit, domain_data.setdefault("api_request_limit", _RequestLimit()))
 

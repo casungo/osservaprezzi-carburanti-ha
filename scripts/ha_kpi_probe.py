@@ -17,7 +17,7 @@ from collections import Counter
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from aiohttp import web
 
@@ -29,20 +29,10 @@ from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.util import dt as dt_util
 
 import custom_components.osservaprezzi_carburanti as integration
-from custom_components.osservaprezzi_carburanti import (
-    api as api,
-)
-from custom_components.osservaprezzi_carburanti import (
-    csv_manager as csv_manager,
-)
-from custom_components.osservaprezzi_carburanti import (
-    entity as entity,
-)
-from custom_components.osservaprezzi_carburanti.const import DOMAIN as DOMAIN
+from custom_components.osservaprezzi_carburanti import api, config_flow, csv_manager, entity
+from custom_components.osservaprezzi_carburanti.const import DOMAIN
 from custom_components.osservaprezzi_carburanti.discovery import find_nearby_stations
 from custom_components.osservaprezzi_carburanti.sensor import StationNextChangeSensor
-
-__all__ = ["DOMAIN", "api", "csv_manager", "entity", "integration"]
 
 _LOGGER = logging.getLogger(__name__)
 _ACTIVE_TIMERS: set[object] = set()
@@ -120,8 +110,8 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 18765).start()
-    cast(Any, api).BASE_URL = "http://127.0.0.1:18765"
-    cast(Any, csv_manager).CSV_URL = "http://127.0.0.1:18765/registry.csv"
+    setattr(api, "BASE_URL", "http://127.0.0.1:18765")  # noqa: B010
+    setattr(csv_manager, "CSV_URL", "http://127.0.0.1:18765/registry.csv")  # noqa: B010
     hass.async_create_task(
         _run(hass, settings, stations, requests, mode, runner), name="ha_kpi_measurements"
     )
@@ -152,23 +142,34 @@ def _identities(hass: HomeAssistant) -> dict[str, str]:
     }
 
 
-def _entry_runtime_data(hass: HomeAssistant) -> list[Any]:
-    """Return runtime state for current entries or legacy baseline versions."""
-    states = []
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        runtime_data = getattr(entry, "runtime_data", None)
-        if runtime_data is None:
-            runtime_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if runtime_data is not None:
-            states.append(runtime_data)
-    return states
+def _entries(hass: HomeAssistant) -> list[Any]:
+    return [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if not entry.data.get("_migrated_to_hub")
+    ]
+
+
+def _station_count(hass: HomeAssistant) -> int:
+    return sum(
+        sum(sub.subentry_type == "station" for sub in entry.subentries.values())
+        if entry.version >= 3
+        else bool(entry.data.get("station_id"))
+        for entry in _entries(hass)
+    )
 
 
 def _coordinators(hass: HomeAssistant) -> list[Any]:
-    return [
-        state.get("coordinator") if isinstance(state, dict) else state.coordinator
-        for state in _entry_runtime_data(hass)
-    ]
+    coordinators: list[Any] = []
+    for entry in _entries(hass):
+        runtime = getattr(entry, "runtime_data", None)
+        if runtime is not None and hasattr(runtime, "stations"):
+            coordinators.extend(station.coordinator for station in runtime.stations.values())
+        else:
+            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            if isinstance(data, dict) and "coordinator" in data:
+                coordinators.append(data["coordinator"])
+    return coordinators
 
 
 async def _ready(hass: HomeAssistant, station_count: int) -> None:
@@ -187,11 +188,16 @@ async def _ready(hass: HomeAssistant, station_count: int) -> None:
             and all(hass.states.get(eid) for eid in enabled_entity_ids)
         ):
             tasks = [
-                state.get("initial_refresh_task")
-                if isinstance(state, dict)
-                else state.initial_refresh_task
-                for state in _entry_runtime_data(hass)
+                d.get("initial_refresh_task")
+                for d in hass.data.get(DOMAIN, {}).values()
+                if isinstance(d, dict)
             ]
+            for entry in _entries(hass):
+                runtime = getattr(entry, "runtime_data", None)
+                if runtime is not None and hasattr(runtime, "stations"):
+                    tasks.extend(
+                        station.initial_refresh_task for station in runtime.stations.values()
+                    )
             pending = [task for task in tasks if isinstance(task, asyncio.Task) and not task.done()]
             if pending:
                 await asyncio.wait_for(asyncio.gather(*pending), timeout=120)
@@ -243,24 +249,22 @@ def _instrument_timers() -> None:
             ) -> Any:
                 token = object()
                 one_shot = name == "async_track_point_in_utc_time"
-                wrapped: Any
                 if inspect.iscoroutinefunction(action):
 
-                    async def _wrapped_async(*values: Any) -> Any:
+                    async def wrapped(*values: Any) -> Any:
                         if one_shot:
                             _ACTIVE_TIMERS.discard(token)
                         return await action(*values)
-
-                    wrapped = _wrapped_async
                 else:
 
                     @callback
-                    def _wrapped_sync(*values: Any) -> Any:
+                    def wrapped_sync(*values: Any) -> Any:
                         if one_shot:
                             _ACTIVE_TIMERS.discard(token)
                         return action(*values)
 
-                    wrapped = _wrapped_sync
+                    wrapped = wrapped_sync
+
                 unsubscribe = original(hass, wrapped if one_shot else action, *args, **kwargs)
                 _ACTIVE_TIMERS.add(token)
 
@@ -336,22 +340,27 @@ async def _measure(
     before = _identities(hass)
     setup_started = time.perf_counter()
     try:
-        existing = hass.config_entries.async_entries(DOMAIN)
+        existing = _entries(hass)
         if existing:
             for entry in existing:
                 if not await hass.config_entries.async_set_disabled_by(entry.entry_id, None):
                     raise AssertionError("Restored config entry could not be enabled")
         else:
+            hub_mode = config_flow.OsservaprezziCarburantiConfigFlow.VERSION >= 3
             for station_id in station_ids:
-                flow = await hass.config_entries.flow.async_init(
-                    DOMAIN, context={"source": SOURCE_USER}
-                )
-                flow = await hass.config_entries.flow.async_configure(
+                entries = _entries(hass)
+                if hub_mode and entries:
+                    manager: Any = hass.config_entries.subentries
+                    flow = await manager.async_init(
+                        (entries[0].entry_id, "station"), context={"source": SOURCE_USER}
+                    )
+                else:
+                    manager = hass.config_entries.flow
+                    flow = await manager.async_init(DOMAIN, context={"source": SOURCE_USER})
+                flow = await manager.async_configure(
                     flow["flow_id"], {"next_step_id": "station_id"}
                 )
-                flow = await hass.config_entries.flow.async_configure(
-                    flow["flow_id"], {"station_id": station_id}
-                )
+                flow = await manager.async_configure(flow["flow_id"], {"station_id": station_id})
                 if str(flow["type"]) != "create_entry":
                     raise AssertionError(f"Config flow failed: {flow}")
         await _ready(hass, len(station_ids))
@@ -406,7 +415,7 @@ async def _measure(
         nearby_result = None
         for _ in range(repeats):
             started = time.perf_counter()
-            response = await hass.services.async_call(
+            response: Any = await hass.services.async_call(
                 DOMAIN,
                 "search_registry",
                 {"municipality": "Roma", "province": "RM", "limit": 20},
@@ -414,8 +423,7 @@ async def _measure(
                 return_response=True,
             )
             search_times.append((time.perf_counter() - started) * 1000)
-            result_count = response.get("result_count") if isinstance(response, dict) else None
-            if not isinstance(result_count, int) or result_count < 1:
+            if response["result_count"] < 1:
                 raise AssertionError("Registry search returned no stations")
             started = time.perf_counter()
             nearby_result = await hass.async_add_executor_job(
@@ -437,8 +445,7 @@ async def _measure(
                 DOMAIN, "compare_stations", {}, blocking=True, return_response=True
             )
             compare_times.append((time.perf_counter() - started) * 1000)
-            stations_map = response.get("stations") if isinstance(response, dict) else None
-            if not isinstance(stations_map, dict) or len(stations_map) != len(station_ids):
+            if len(response["stations"]) != len(station_ids):
                 raise AssertionError("Comparison omitted a configured station")
         phase["value"] = "properties"
         component = hass.data[DATA_INSTANCES]["sensor"]
@@ -491,11 +498,11 @@ async def _measure(
         listener_counts = [_listeners(hass)]
         timer_counts = [_scheduled()]
         rss_reload = [await hass.async_add_executor_job(_memory)]
-        entry = hass.config_entries.async_entries(DOMAIN)[0]
         for _ in range(int(settings["reloads"])):
             started = time.perf_counter()
-            if not await hass.config_entries.async_reload(entry.entry_id):
-                raise AssertionError("Reload failed")
+            for entry in _entries(hass):
+                if not await hass.config_entries.async_reload(entry.entry_id):
+                    raise AssertionError("Reload failed")
             await _ready(hass, len(station_ids))
             # Wait for deferred initial refresh rather than racing it on beta versions.
             for coordinator in _coordinators(hass):
@@ -519,7 +526,7 @@ async def _measure(
             if uid in identities
         ) / len(expected_fuels)
         phase["value"] = "unload"
-        entries = list(hass.config_entries.async_entries(DOMAIN))
+        entries = _entries(hass)
         for entry in entries:
             if not await hass.config_entries.async_unload(entry.entry_id):
                 raise AssertionError("Unload failed")
@@ -529,10 +536,14 @@ async def _measure(
             for task in asyncio.all_tasks()
             if not task.done() and DOMAIN in task.get_name()
         ]
+        legacy_removed = frozenset(
+            str(suffix)
+            for suffix in getattr(integration, "_LEGACY_REMOVED_ENTITY_UNIQUE_ID_SUFFIXES", ())
+        )
         return {
             "status": "passed",
             "ha_version": __version__,
-            "station_count": len(station_ids),
+            "station_count": _station_count(hass),
             "entity_count": len(identities),
             "setup_to_entities_ms": setup_ms,
             "registry_station_count": registry_count,
@@ -573,8 +584,14 @@ async def _measure(
             "fuel_mismatches": fuel_errors,
             "identity_changes_after_reload": changed_ids,
             "identities": identities,
+            "legacy_removed_suffixes": sorted(legacy_removed),
             "identity_changes_from_persisted": sum(
-                identities.get(uid) != eid for uid, eid in before.items()
+                identities.get(uid) != eid
+                and not (
+                    identities.get(uid) is None
+                    and any(uid.endswith(f"_{suffix}") for suffix in legacy_removed)
+                )
+                for uid, eid in before.items()
             ),
             "fuel_availability_end_fraction": availability,
             "tasks_after_unload": remaining_tasks,

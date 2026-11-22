@@ -13,7 +13,6 @@ import pytest
 
 sys.path.insert(0, ".")
 
-from custom_components.osservaprezzi_carburanti import cron_helper
 from custom_components.osservaprezzi_carburanti.config_flow import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
@@ -25,7 +24,6 @@ from custom_components.osservaprezzi_carburanti.config_flow import (
     CONF_TEXT_FILTER,
     CannotConnect,
     InvalidStation,
-    OptionsFlowHandler,
     OsservaprezziCarburantiConfigFlow,
     RateLimited,
     _validate_station,
@@ -34,8 +32,6 @@ from custom_components.osservaprezzi_carburanti.const import (
     CONF_CRON_EXPRESSION,
     CONF_PRICE_STALE_HOURS,
     CONF_STATION_ID,
-    DEFAULT_CRON_EXPRESSION,
-    DEFAULT_PRICE_STALE_HOURS,
 )
 from custom_components.osservaprezzi_carburanti.csv_manager import (
     RegistrySnapshot,
@@ -167,6 +163,9 @@ def _make_config_flow(monkeypatch: pytest.MonkeyPatch) -> OsservaprezziCarburant
     flow.async_abort = MagicMock(side_effect=lambda **kwargs: {"type": "abort", **kwargs})
     flow._get_reconfigure_entry = MagicMock()
     flow._async_current_entries = MagicMock(return_value=[])
+    flow._configured_station_ids = lambda: {
+        str(item.data[CONF_STATION_ID]) for item in flow._async_current_entries()
+    }
     flow.async_update_reload_and_abort = MagicMock(
         side_effect=lambda entry, **kwargs: {
             "type": "abort",
@@ -190,11 +189,19 @@ def test_config_flow_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result == {
         "type": "create_entry",
-        "title": "Station",
-        "data": {CONF_STATION_ID: "123"},
+        "title": "Osservaprezzi Carburanti",
+        "data": {},
+        "subentries": [
+            {
+                "data": {CONF_STATION_ID: "123"},
+                "subentry_type": "station",
+                "title": "Station",
+                "unique_id": "123",
+            }
+        ],
     }
-    flow.async_set_unique_id.assert_awaited_once_with("station_123")
-    flow._abort_if_unique_id_configured.assert_called_once()
+    assert flow.async_set_unique_id.await_args.args == ("hub",)
+    assert flow._abort_if_unique_id_configured.call_count == 2
     validate_mock.assert_awaited_once_with(flow.hass, "123")
 
 
@@ -306,8 +313,16 @@ def test_config_flow_home_search_and_selection(monkeypatch: pytest.MonkeyPatch) 
 
     assert result == {
         "type": "create_entry",
-        "title": "Station",
-        "data": {CONF_STATION_ID: "123"},
+        "title": "Osservaprezzi Carburanti",
+        "data": {},
+        "subentries": [
+            {
+                "data": {CONF_STATION_ID: "123"},
+                "subentry_type": "station",
+                "title": "Station",
+                "unique_id": "123",
+            }
+        ],
     }
     validate_mock.assert_awaited_once_with(flow.hass, "123")
 
@@ -329,34 +344,28 @@ def test_config_flow_adds_multiple_selected_stations(
 
     assert result == {
         "type": "create_entry",
-        "title": "First",
-        "data": {CONF_STATION_ID: "123"},
+        "title": "Osservaprezzi Carburanti",
+        "data": {},
+        "subentries": [
+            {
+                "data": {CONF_STATION_ID: "123"},
+                "subentry_type": "station",
+                "title": "First",
+                "unique_id": "123",
+            },
+            {
+                "data": {CONF_STATION_ID: "456"},
+                "subentry_type": "station",
+                "title": "Second",
+                "unique_id": "456",
+            },
+        ],
     }
-    flow.hass.config_entries.flow.async_init.assert_awaited_once_with(
-        "osservaprezzi_carburanti",
-        context={"source": "import"},
-        data={CONF_STATION_ID: "456", "name": "Second"},
-    )
+    flow.hass.config_entries.flow.async_init.assert_not_awaited()
     assert validate_mock.await_args_list == [
         ((flow.hass, "123"),),
         ((flow.hass, "456"),),
     ]
-
-
-def test_config_flow_imports_validated_station(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    flow = _make_config_flow(monkeypatch)
-
-    assert asyncio.run(flow.async_step_import()) == {
-        "type": "abort",
-        "reason": "invalid_station",
-    }
-    assert asyncio.run(flow.async_step_import({CONF_STATION_ID: "123", "name": "Station"})) == {
-        "type": "create_entry",
-        "title": "Station",
-        "data": {CONF_STATION_ID: "123"},
-    }
 
 
 def test_config_flow_skips_already_configured_batch_station(
@@ -376,8 +385,16 @@ def test_config_flow_skips_already_configured_batch_station(
 
     assert result == {
         "type": "create_entry",
-        "title": "New Station",
-        "data": {CONF_STATION_ID: "123"},
+        "title": "Osservaprezzi Carburanti",
+        "data": {},
+        "subentries": [
+            {
+                "data": {CONF_STATION_ID: "123"},
+                "subentry_type": "station",
+                "title": "New Station",
+                "unique_id": "123",
+            }
+        ],
     }
     flow.hass.config_entries.flow.async_init.assert_not_awaited()
 
@@ -426,7 +443,7 @@ def test_config_flow_home_uses_stale_registry_notice(
 
     result = asyncio.run(flow.async_step_home({CONF_RADIUS_KM: 5}))
 
-    assert result["step_id"] == "select_station_stale"
+    assert result["step_id"] == "select_station"
     assert result["description_placeholders"] == {
         "registry_updated": "2026-07-27 00:00 UTC",
         "result_count": "1",
@@ -527,10 +544,10 @@ def test_config_flow_fetches_one_extra_result_to_report_limit(
 
     result = asyncio.run(flow.async_step_area({CONF_MUNICIPALITY: "Roma", CONF_RESULT_LIMIT: 1}))
 
-    assert result["step_id"] == "select_station_limited"
+    assert result["step_id"] == "select_station"
     assert flow._results_limited is True
     assert result["description_placeholders"]["result_limit"] == "1"
-    assert result["step_id"].endswith("_limited")
+    assert result["step_id"] == "select_station"
 
 
 def test_config_flow_home_formats_missing_registry_timestamp(
@@ -602,9 +619,9 @@ def test_config_flow_stale_selection_handler(monkeypatch: pytest.MonkeyPatch) ->
     flow._registry_is_stale = True
     flow._registry_updated = "2026-07-27"
 
-    result = asyncio.run(flow.async_step_select_station_stale())
+    result = asyncio.run(flow.async_step_select_station())
 
-    assert result["step_id"] == "select_station_stale"
+    assert result["step_id"] == "select_station"
 
 
 @pytest.mark.parametrize(
@@ -625,7 +642,7 @@ def test_config_flow_nearby_selection_errors(
     flow._registry_updated = "2026-07-28"
     monkeypatch.setattr(
         flow,
-        "_async_create_station_entry",
+        "_async_create_selected_stations",
         AsyncMock(side_effect=side_effect),
     )
     monkeypatch.setattr(
@@ -902,203 +919,6 @@ def test_config_flow_rejects_out_of_range_search_values(
     assert result["errors"] == {"base": "unknown"}
 
 
-def test_config_flow_reconfigure_updates_station(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    flow = _make_config_flow(monkeypatch)
-    entry = MagicMock(
-        entry_id="entry-1",
-        unique_id="station_123",
-        data={CONF_STATION_ID: "123"},
-    )
-    flow._get_reconfigure_entry.return_value = entry
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
-        AsyncMock(return_value={"name": "New Station"}),
-    )
-
-    result = asyncio.run(flow.async_step_reconfigure({CONF_STATION_ID: " 456 "}))
-
-    assert result["reason"] == "reconfigure_successful"
-    assert result["unique_id"] == "station_456"
-    assert result["title"] == "New Station"
-    assert result["data_updates"] == {CONF_STATION_ID: "456"}
-
-
-def test_config_flow_reconfigure_initial_and_duplicate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    flow = _make_config_flow(monkeypatch)
-    entry = MagicMock(
-        entry_id="entry-1",
-        unique_id="station_123",
-        data={CONF_STATION_ID: "123"},
-    )
-    flow._get_reconfigure_entry.return_value = entry
-
-    result = asyncio.run(flow.async_step_reconfigure())
-    assert result["step_id"] == "reconfigure"
-
-    flow._async_current_entries.return_value = [
-        entry,
-        MagicMock(entry_id="entry-2", unique_id="station_456"),
-    ]
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
-        AsyncMock(return_value={"name": "Duplicate"}),
-    )
-    result = asyncio.run(flow.async_step_reconfigure({CONF_STATION_ID: "456"}))
-    assert result["errors"] == {CONF_STATION_ID: "already_configured"}
-
-
-@pytest.mark.parametrize(
-    ("side_effect", "expected_error"),
-    [
-        (InvalidStation("bad"), "invalid_station"),
-        (CannotConnect("down"), "cannot_connect"),
-        (ValueError("unexpected"), "unknown"),
-    ],
-)
-def test_config_flow_reconfigure_errors(
-    monkeypatch: pytest.MonkeyPatch,
-    side_effect: Exception,
-    expected_error: str,
-) -> None:
-    flow = _make_config_flow(monkeypatch)
-    flow._get_reconfigure_entry.return_value = MagicMock(
-        entry_id="entry-1",
-        data={CONF_STATION_ID: "123"},
-    )
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
-        AsyncMock(side_effect=side_effect),
-    )
-
-    result = asyncio.run(flow.async_step_reconfigure({CONF_STATION_ID: "456"}))
-
-    assert result["errors"] == {CONF_STATION_ID: expected_error}
-
-
-def _make_options_flow(options: dict[str, Any] | None = None) -> OptionsFlowHandler:
-    handler = object.__new__(OptionsFlowHandler)
-    handler.config_entry = MagicMock(title="Station", options=options or {}, entry_id="entry")
-    handler.hass = MagicMock(data={})
-    handler.async_create_entry = MagicMock(
-        side_effect=lambda **kwargs: {"type": "create_entry", **kwargs}
-    )
-    handler.async_show_form = MagicMock(side_effect=lambda **kwargs: {"type": "form", **kwargs})
-    return handler
-
-
-def test_async_get_options_flow_returns_handler() -> None:
-    handler = OsservaprezziCarburantiConfigFlow.async_get_options_flow(MagicMock())
-
-    assert isinstance(handler, OptionsFlowHandler)
-
-
-def test_options_flow_initial_form() -> None:
-    handler = _make_options_flow({CONF_CRON_EXPRESSION: "0 6 * * *"})
-
-    result = asyncio.run(handler.async_step_init())
-
-    assert result["type"] == "form"
-    assert result["step_id"] == "init"
-    assert result["errors"] == {}
-    expected_next_run = "2026-10-19 06:00 UTC" if cron_helper.CronSim else "—"
-    assert result["description_placeholders"]["next_run"] == expected_next_run
-
-
-def test_options_flow_valid_cron(monkeypatch: pytest.MonkeyPatch) -> None:
-    handler = _make_options_flow({CONF_CRON_EXPRESSION: DEFAULT_CRON_EXPRESSION})
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.validate_cron_expression",
-        lambda cron_expr: True,
-    )
-
-    result = asyncio.run(handler.async_step_init({CONF_CRON_EXPRESSION: "0 6 * * *"}))
-
-    assert result == {
-        "type": "create_entry",
-        "title": "",
-        "data": {
-            CONF_CRON_EXPRESSION: "0 6 * * *",
-            "tracked_fuels": [],
-            "tracked_service_modes": [],
-            CONF_PRICE_STALE_HOURS: DEFAULT_PRICE_STALE_HOURS,
-        },
-    }
-
-
-def test_options_flow_invalid_cron(monkeypatch: pytest.MonkeyPatch) -> None:
-    handler = _make_options_flow()
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.validate_cron_expression",
-        lambda cron_expr: False,
-    )
-
-    result = asyncio.run(handler.async_step_init({CONF_CRON_EXPRESSION: "bad"}))
-
-    assert result["type"] == "form"
-    assert result["step_id"] == "custom"
-    assert result["errors"] == {CONF_CRON_EXPRESSION: "invalid_cron_expression"}
-
-
-@pytest.mark.parametrize("stale_hours", [3, "bad"])
-def test_options_flow_invalid_stale_threshold(stale_hours: Any) -> None:
-    handler = _make_options_flow()
-
-    result = asyncio.run(
-        handler.async_step_init(
-            {
-                CONF_CRON_EXPRESSION: DEFAULT_CRON_EXPRESSION,
-                CONF_PRICE_STALE_HOURS: stale_hours,
-            }
-        )
-    )
-
-    assert result["errors"] == {CONF_PRICE_STALE_HOURS: "invalid_stale_hours"}
-
-
-def test_options_flow_keeps_supported_stale_threshold(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    handler = _make_options_flow(
-        {
-            CONF_CRON_EXPRESSION: "0 6 * * *",
-            CONF_PRICE_STALE_HOURS: 48,
-        }
-    )
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.validate_cron_expression",
-        lambda cron_expr: True,
-    )
-
-    result = asyncio.run(
-        handler.async_step_init(
-            {
-                CONF_CRON_EXPRESSION: "0 6 * * *",
-                CONF_PRICE_STALE_HOURS: 48,
-            }
-        )
-    )
-
-    assert result["data"][CONF_PRICE_STALE_HOURS] == 48
-
-
-def test_options_flow_handles_unavailable_cron_preview(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    handler = _make_options_flow()
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.get_next_run_time",
-        MagicMock(side_effect=ValueError("bad")),
-    )
-
-    result = asyncio.run(handler.async_step_init())
-
-    assert result["description_placeholders"] == {"next_run": "—"}
-
-
 @pytest.mark.parametrize(
     ("step", "values"),
     [
@@ -1180,71 +1000,6 @@ def test_long_label_without_address_keeps_distance_and_id() -> None:
     assert label.endswith(" · ID 123")
 
 
-@pytest.mark.parametrize(
-    ("schedule", "cron"),
-    [
-        ("daily", DEFAULT_CRON_EXPRESSION),
-        ("twice_daily", "30 7,19 * * *"),
-        ("every_six_hours", "0 */6 * * *"),
-        ("weekdays", "0 8 * * 1-5"),
-    ],
-)
-def test_options_presets_keep_existing_storage_contract(schedule, cron) -> None:
-    handler = _make_options_flow()
-    result = asyncio.run(
-        handler.async_step_init({"refresh_schedule": schedule, CONF_PRICE_STALE_HOURS: 48})
-    )
-    assert result["data"] == {
-        CONF_CRON_EXPRESSION: cron,
-        CONF_PRICE_STALE_HOURS: 48,
-        "tracked_fuels": [],
-        "tracked_service_modes": [],
-    }
-
-
-def test_options_custom_keeps_existing_cron_and_retains_invalid_input(monkeypatch) -> None:
-    handler = _make_options_flow({CONF_CRON_EXPRESSION: "0 6 * * *", CONF_PRICE_STALE_HOURS: 72})
-    handler.add_suggested_values_to_schema = MagicMock(side_effect=lambda schema, values: schema)
-    result = asyncio.run(handler.async_step_init({"refresh_schedule": "custom"}))
-    assert result["step_id"] == "custom"
-    assert handler._stale_hours == 72
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.validate_cron_expression",
-        lambda cron: cron == "0 5 * * *",
-    )
-    result = asyncio.run(handler.async_step_custom({CONF_CRON_EXPRESSION: "invalid"}))
-    assert result["errors"] == {CONF_CRON_EXPRESSION: "invalid_cron_expression"}
-    assert handler.add_suggested_values_to_schema.call_args.args[1] == {
-        CONF_CRON_EXPRESSION: "invalid"
-    }
-    result = asyncio.run(handler.async_step_custom({CONF_CRON_EXPRESSION: "0 5 * * *"}))
-    assert result["data"] == {
-        CONF_CRON_EXPRESSION: "0 5 * * *",
-        CONF_PRICE_STALE_HOURS: 72,
-        "tracked_fuels": [],
-        "tracked_service_modes": [],
-    }
-
-
-def test_options_invalid_preset_retains_inputs() -> None:
-    handler = _make_options_flow()
-    handler.add_suggested_values_to_schema = MagicMock(side_effect=lambda schema, values: schema)
-    values = {"refresh_schedule": "unknown", CONF_PRICE_STALE_HOURS: 24}
-    result = asyncio.run(handler.async_step_init(values))
-    assert result["errors"] == {"refresh_schedule": "invalid_schedule"}
-    assert handler.add_suggested_values_to_schema.call_args.args[1] == values
-
-
-def test_options_initial_form_infers_custom_schedule(monkeypatch) -> None:
-    handler = _make_options_flow({CONF_CRON_EXPRESSION: "17 9 * * 2"})
-    required = MagicMock()
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.vol.Required", required
-    )
-    asyncio.run(handler.async_step_init())
-    assert required.call_args_list[0].kwargs["default"] == "custom"
-
-
 def test_stale_selection_of_only_configured_station_is_rejected(monkeypatch) -> None:
     """Handle a stale client selection while other stations remain addable."""
     flow = _make_config_flow(monkeypatch)
@@ -1270,7 +1025,7 @@ def test_selection_reports_when_result_limit_caps_candidates(monkeypatch) -> Non
     result = asyncio.run(flow.async_step_select_station())
 
     assert result["description_placeholders"]["result_limit"] == "1"
-    assert result["step_id"].endswith("_limited")
+    assert result["step_id"] == "select_station"
 
 
 def test_station_type_selector_uses_cache_suggestions_without_loading_registry(
@@ -1311,7 +1066,7 @@ def test_single_selected_station_validation_error(monkeypatch, exception, error)
     assert bool(flow._nearby_candidates) is not isinstance(exception, InvalidStation)
 
 
-@pytest.mark.parametrize("step", ["station_id", "reconfigure", "select_station"])
+@pytest.mark.parametrize("step", ["station_id", "select_station"])
 def test_station_steps_report_rate_limits(monkeypatch, step):
     flow = _make_config_flow(monkeypatch)
     if step == "reconfigure":
@@ -1325,7 +1080,11 @@ def test_station_steps_report_rate_limits(monkeypatch, step):
     else:
         flow._nearby_candidates = (_candidate(),)
         monkeypatch.setattr(
-            flow, "_async_create_station_entry", AsyncMock(side_effect=RateLimited("wait"))
+            flow,
+            "_async_create_station_entry"
+            if step == "station_id"
+            else "_async_create_selected_stations",
+            AsyncMock(side_effect=RateLimited("wait")),
         )
         monkeypatch.setattr(
             "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
@@ -1347,40 +1106,9 @@ def test_limited_selection_submits_through_same_handler(monkeypatch, stale):
         "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
         AsyncMock(return_value={"name": "Station"}),
     )
-    step = (
-        flow.async_step_select_station_stale_limited
-        if stale
-        else flow.async_step_select_station_limited
-    )
+    step = flow.async_step_select_station
     result = asyncio.run(step({CONF_STATION_ID: ["123"]}))
     assert result["type"] == "create_entry"
-
-
-def test_reconfigure_empty_id_stays_on_field_without_api(monkeypatch):
-    flow = _make_config_flow(monkeypatch)
-    flow._get_reconfigure_entry.return_value = MagicMock(
-        entry_id="entry", data={CONF_STATION_ID: "123"}
-    )
-    validate = AsyncMock()
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow._validate_station", validate
-    )
-    result = asyncio.run(flow.async_step_reconfigure({CONF_STATION_ID: "  "}))
-    assert result["errors"] == {CONF_STATION_ID: "invalid_station"}
-    validate.assert_not_awaited()
-
-
-def test_options_save_schedule_without_stale_hours_attr():
-    from types import SimpleNamespace
-
-    from custom_components.osservaprezzi_carburanti.config_flow import OptionsFlowHandler
-
-    handler = OptionsFlowHandler()
-    handler.config_entry = SimpleNamespace(options={})
-    handler.async_create_entry = lambda **kwargs: {"type": "create_entry", **kwargs}
-    result = handler._save_schedule("0 8 * * *")
-    assert result["type"] == "create_entry"
-    assert result["data"][CONF_CRON_EXPRESSION] == "0 8 * * *"
 
 
 def test_zone_search_and_invalid_zone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1401,47 +1129,137 @@ def test_zone_search_and_invalid_zone(monkeypatch: pytest.MonkeyPatch) -> None:
     assert asyncio.run(flow.async_step_zone())["step_id"] == "zone"
 
 
-def test_options_filters(monkeypatch: pytest.MonkeyPatch) -> None:
-    handler = _make_options_flow({"tracked_fuels": ["Diesel"], "tracked_service_modes": ["self"]})
-    handler.hass.data = {
-        "osservaprezzi_carburanti": {
-            "entry": {"coordinator": MagicMock(data={"fuels": {"Diesel_self": {}}})}
-        }
-    }
-    handler.add_suggested_values_to_schema = MagicMock(side_effect=lambda schema, values: schema)
-    optional = MagicMock(side_effect=lambda key, default: key)
-    monkeypatch.setattr(
-        "custom_components.osservaprezzi_carburanti.config_flow.vol.Optional", optional
+def _make_station_flow(monkeypatch):
+    from custom_components.osservaprezzi_carburanti.config_flow import StationSubentryFlow
+
+    flow = StationSubentryFlow()
+    station = MagicMock(
+        subentry_id="sub", unique_id="123", subentry_type="station", data={CONF_STATION_ID: "123"}
     )
-    asyncio.run(handler.async_step_init())
-    assert optional.call_args_list[0].kwargs["default"] == ["Diesel"]
-    assert optional.call_args_list[1].kwargs["default"] == ["self"]
+    entry = MagicMock(subentries={"sub": station})
+    flow.hass = MagicMock()
+    flow._get_entry = MagicMock(return_value=entry)
+    flow._get_reconfigure_subentry = MagicMock(return_value=station)
+    flow.async_create_entry = MagicMock(
+        side_effect=lambda **kwargs: {"type": "create_entry", **kwargs}
+    )
+    flow.async_show_menu = MagicMock(side_effect=lambda **kwargs: {"type": "menu", **kwargs})
+    flow.async_show_form = MagicMock(side_effect=lambda **kwargs: {"type": "form", **kwargs})
+    flow.async_abort = MagicMock(side_effect=lambda **kwargs: {"type": "abort", **kwargs})
+    flow.async_update_reload_and_abort = MagicMock(
+        side_effect=lambda *args, **kwargs: {"type": "abort", **kwargs}
+    )
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow.validate_cron_expression",
+        lambda cron: cron == "0 6 * * *",
+    )
+    return flow, entry, station
+
+
+def test_station_subentry_add_and_duplicate(monkeypatch):
+    flow, _, _ = _make_station_flow(monkeypatch)
+    validate = AsyncMock(return_value={"name": "Station"})
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station", validate
+    )
+    assert asyncio.run(flow.async_step_user())["type"] == "menu"
+    assert (
+        asyncio.run(flow.async_step_user({CONF_STATION_ID: "123"}))["reason"]
+        == "already_configured"
+    )
+    result = asyncio.run(flow.async_step_user({CONF_STATION_ID: "456"}))
+    assert result == {
+        "type": "create_entry",
+        "title": "Station",
+        "data": {CONF_STATION_ID: "456"},
+        "unique_id": "456",
+    }
+
+
+def test_station_subentry_reconfigure(monkeypatch):
+    flow, entry, station = _make_station_flow(monkeypatch)
+    monkeypatch.setattr(
+        "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
+        AsyncMock(return_value={"name": "New"}),
+    )
+    assert asyncio.run(flow.async_step_reconfigure())["type"] == "form"
+    values = {CONF_STATION_ID: "456", CONF_CRON_EXPRESSION: "bad", CONF_PRICE_STALE_HOURS: "5"}
+    result = asyncio.run(flow.async_step_reconfigure(values))
+    assert result["errors"] == {
+        CONF_CRON_EXPRESSION: "invalid_cron_expression",
+        CONF_PRICE_STALE_HOURS: "invalid_stale_hours",
+    }
+    values.update({CONF_CRON_EXPRESSION: "0 6 * * *", CONF_PRICE_STALE_HOURS: "48"})
+    result = asyncio.run(flow.async_step_reconfigure(values))
+    assert result["type"] == "abort"
+    assert result["data_updates"][CONF_STATION_ID] == "456"
+    assert flow.async_update_reload_and_abort.call_args.args == (entry, station)
+
+
+def test_hub_flow_reports_supported_station_type(monkeypatch):
+    from custom_components.osservaprezzi_carburanti.config_flow import StationSubentryFlow
+
+    flow = _make_config_flow(monkeypatch)
+    del flow._configured_station_ids
+    assert flow._configured_station_ids() == set()
+    assert flow.async_get_supported_subentry_types(MagicMock()) == {"station": StationSubentryFlow}
+
+
+def test_station_selection_rechecks_duplicates(monkeypatch):
+    flow, _, _ = _make_station_flow(monkeypatch)
     result = asyncio.run(
-        handler.async_step_init(
+        flow._async_create_selected_stations(["123"], {"123": {"name": "Station"}})
+    )
+    assert result == {"type": "abort", "reason": "already_configured"}
+
+
+@pytest.mark.parametrize(
+    ("station_id", "stale", "expected"),
+    [
+        (
+            "",
+            "invalid",
+            {CONF_STATION_ID: "invalid_station", CONF_PRICE_STALE_HOURS: "invalid_stale_hours"},
+        ),
+        ("456", "24", {CONF_STATION_ID: "already_configured"}),
+    ],
+)
+def test_station_reconfigure_rejects_invalid_values(monkeypatch, station_id, stale, expected):
+    flow, entry, _ = _make_station_flow(monkeypatch)
+    entry.subentries["other"] = MagicMock(subentry_id="other", unique_id="456")
+    result = asyncio.run(
+        flow.async_step_reconfigure(
             {
-                "refresh_schedule": "daily",
-                "tracked_fuels": ["Diesel"],
-                "tracked_service_modes": ["self"],
+                CONF_STATION_ID: station_id,
+                CONF_CRON_EXPRESSION: "0 6 * * *",
+                CONF_PRICE_STALE_HOURS: stale,
             }
         )
     )
-    assert result["data"]["tracked_fuels"] == ["Diesel"]
-    assert result["data"]["tracked_service_modes"] == ["self"]
+    assert result["errors"] == expected
 
 
-def test_reconfigure_manual_and_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
-    flow = _make_config_flow(monkeypatch)
-    entry = MagicMock(entry_id="entry-1", unique_id="station_123", data={CONF_STATION_ID: "123"})
-    flow._get_reconfigure_entry.return_value = entry
+@pytest.mark.parametrize(
+    ("exception", "error"),
+    [
+        (InvalidStation("missing"), "invalid_station"),
+        (RateLimited("limited"), "rate_limited"),
+        (CannotConnect("offline"), "cannot_connect"),
+    ],
+)
+def test_station_reconfigure_reports_validation_errors(monkeypatch, exception, error):
+    flow, _, _ = _make_station_flow(monkeypatch)
     monkeypatch.setattr(
         "custom_components.osservaprezzi_carburanti.config_flow._validate_station",
-        AsyncMock(return_value={"name": "New Station"}),
+        AsyncMock(side_effect=exception),
     )
-    asyncio.run(flow.async_step_reconfigure())
-    form = asyncio.run(flow.async_step_station_id())
-    assert form["step_id"] == "station_id"
-    result = asyncio.run(flow.async_step_station_id({CONF_STATION_ID: "456"}))
-    assert result["unique_id"] == "station_456"
-    flow._nearby_candidates = (_candidate("456"),)
-    result = asyncio.run(flow.async_step_select_station({CONF_STATION_ID: ["456"]}))
-    assert result["unique_id"] == "station_456"
+    result = asyncio.run(
+        flow.async_step_reconfigure(
+            {
+                CONF_STATION_ID: "123",
+                CONF_CRON_EXPRESSION: "0 6 * * *",
+                CONF_PRICE_STALE_HOURS: "24",
+            }
+        )
+    )
+    assert result["errors"] == {CONF_STATION_ID: error}

@@ -5,17 +5,15 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC
 from types import SimpleNamespace
-from typing import Any, ClassVar
 
 from custom_components.osservaprezzi_carburanti import services as services_module
 from custom_components.osservaprezzi_carburanti.const import DOMAIN, SERVICE_COMPARE_STATIONS
-from custom_components.osservaprezzi_carburanti.runtime import OsservaprezziRuntimeData
 
 
 class _Coordinator:
     """Small accepted coordinator shape for service handler tests."""
 
-    data: ClassVar[dict[str, Any]] = {
+    data = {  # noqa: RUF012
         "station_info": {"id": "123", "name": "Valid station"},
         "fuels": {},
     }
@@ -31,20 +29,36 @@ class _ServiceRegistry:
         self.handlers[(domain, service)] = handler
 
 
-def test_compare_stations_uses_active_entry_coordinator(monkeypatch) -> None:
+def _add_hub(hass):
+    stations = {
+        key: SimpleNamespace(coordinator=value["coordinator"])
+        for key, value in hass.data.get(DOMAIN, {}).items()
+        if isinstance(value, dict)
+        and "coordinator" in value
+        and (hasattr(value["coordinator"], "data") or hasattr(value["coordinator"], "config_entry"))
+    }
+    entry = SimpleNamespace(
+        state=services_module.ConfigEntryState.LOADED,
+        runtime_data=SimpleNamespace(stations=stations),
+    )
+    hass.config_entries = SimpleNamespace(async_entries=lambda domain: [entry])
+
+
+def test_compare_stations_skips_invalid_coordinator_entries(monkeypatch) -> None:
     monkeypatch.setattr(services_module, "CarburantiDataUpdateCoordinator", _Coordinator)
     service_registry = _ServiceRegistry()
     hass = SimpleNamespace(
         data={
             DOMAIN: {
-                "active_entries": {
-                    "valid": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(_Coordinator()))
-                }
+                "valid": {"coordinator": _Coordinator()},
+                "invalid": {"coordinator": object()},
+                "not_entry_data": object(),
             }
         },
         services=service_registry,
     )
 
+    _add_hub(hass)
     services_module.async_register_services(hass)
     handler = service_registry.handlers[(DOMAIN, SERVICE_COMPARE_STATIONS)]
     result = asyncio.run(handler(SimpleNamespace(data={})))
@@ -67,23 +81,22 @@ def test_refresh_prices_with_blank_station_ids_raises_error() -> None:
     hass = SimpleNamespace(
         data={
             DOMAIN: {
-                "active_entries": {
-                    "entry_1": SimpleNamespace(
-                        runtime_data=OsservaprezziRuntimeData(
-                            SimpleNamespace(
-                                config_entry=SimpleNamespace(data={"station_id": "123"})
-                            )
-                        )
+                "entry_1": {
+                    "coordinator": SimpleNamespace(
+                        config_entry=SimpleNamespace(data={"station_id": "123"})
                     )
                 }
             }
         },
         services=service_registry,
     )
+    _add_hub(hass)
     services_module.async_register_services(hass)
     handler = service_registry.handlers[(DOMAIN, services_module.SERVICE_REFRESH_PRICES)]
-    with pytest.raises(services_module.HomeAssistantError):
+    with pytest.raises(services_module.ServiceValidationError) as error:
         asyncio.run(handler(SimpleNamespace(data={"station_ids": ["  "]})))
+    assert error.value.translation_key == "no_matching_entries"
+    assert error.value.translation_domain == DOMAIN
 
 
 def test_search_registry_nearby_and_invalid_origins(monkeypatch) -> None:
@@ -107,6 +120,7 @@ def test_search_registry_nearby_and_invalid_origins(monkeypatch) -> None:
         ),
         async_add_executor_job=AsyncMock(side_effect=lambda function: function()),
     )
+    _add_hub(hass)
     services_module.async_register_services(hass)
     handler = registry.handlers[(DOMAIN, services_module.SERVICE_SEARCH_REGISTRY)]
     for data in ({"latitude": 41.9, "longitude": 12.5}, {"zone": "zone.home"}):
@@ -114,8 +128,12 @@ def test_search_registry_nearby_and_invalid_origins(monkeypatch) -> None:
     for data in ({"zone": "zone.missing"}, {"latitude": 41.9}, {"zone": "zone.empty"}):
         if data.get("zone") == "zone.empty":
             hass.states.get = lambda zone: SimpleNamespace(attributes={})
-        with pytest.raises(services_module.HomeAssistantError):
+        with pytest.raises(services_module.ServiceValidationError) as error:
             asyncio.run(handler(SimpleNamespace(data=data)))
+        assert error.value.translation_domain == DOMAIN
+        assert error.value.translation_key == (
+            "zone_not_found" if data.get("zone") == "zone.missing" else "missing_coordinates"
+        )
 
 
 def test_compare_stations_ranking_filters_open_distance_and_liters(monkeypatch) -> None:
@@ -202,16 +220,15 @@ def test_compare_stations_ranking_filters_open_distance_and_liters(monkeypatch) 
     hass = SimpleNamespace(
         data={
             DOMAIN: {
-                "active_entries": {
-                    "e1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coord_open)),
-                    "e2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coord_closed)),
-                    "e3": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(coord_no_hours)),
-                }
+                "e1": {"coordinator": coord_open},
+                "e2": {"coordinator": coord_closed},
+                "e3": {"coordinator": coord_no_hours},
             }
         },
         services=registry,
         states=SimpleNamespace(get=lambda _z: None),
     )
+    _add_hub(hass)
     services_module.async_register_services(hass)
     handler = registry.handlers[(DOMAIN, SERVICE_COMPARE_STATIONS)]
 
@@ -280,7 +297,7 @@ def test_refresh_prices_supports_device_and_entity_targets(monkeypatch) -> None:
         "async_get",
         lambda _hass: SimpleNamespace(
             async_get=lambda dev_id: (
-                SimpleNamespace(config_entries={"e1"}) if dev_id == "dev1" else None
+                SimpleNamespace(identifiers={(DOMAIN, "101")}) if dev_id == "dev1" else None
             )
         ),
     )
@@ -289,23 +306,17 @@ def test_refresh_prices_supports_device_and_entity_targets(monkeypatch) -> None:
         "async_get",
         lambda _hass: SimpleNamespace(
             async_get=lambda ent_id: (
-                SimpleNamespace(config_entry_id="e2") if ent_id == "sensor.s2" else None
+                SimpleNamespace(config_subentry_id="e2") if ent_id == "sensor.s2" else None
             )
         ),
     )
 
     registry = _ServiceRegistry()
     hass = SimpleNamespace(
-        data={
-            DOMAIN: {
-                "active_entries": {
-                    "e1": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(c1)),
-                    "e2": SimpleNamespace(runtime_data=OsservaprezziRuntimeData(c2)),
-                }
-            }
-        },
+        data={DOMAIN: {"e1": {"coordinator": c1}, "e2": {"coordinator": c2}}},
         services=registry,
     )
+    _add_hub(hass)
     services_module.async_register_services(hass)
     handler = registry.handlers[(DOMAIN, services_module.SERVICE_REFRESH_PRICES)]
 
@@ -322,3 +333,17 @@ def test_refresh_prices_supports_device_and_entity_targets(monkeypatch) -> None:
     assert set(result["refreshed_station_ids"]) == {"101", "202"}
     c1.async_request_manual_refresh.assert_awaited_once()
     c2.async_request_manual_refresh.assert_awaited_once()
+
+
+def test_services_ignore_unloaded_and_missing_runtime_entries():
+    registry = _ServiceRegistry()
+    unloaded = SimpleNamespace(state=object())
+    no_runtime = SimpleNamespace(state=services_module.ConfigEntryState.LOADED)
+    hass = SimpleNamespace(
+        data={},
+        services=registry,
+        config_entries=SimpleNamespace(async_entries=lambda domain: [unloaded, no_runtime]),
+    )
+    services_module.async_register_services(hass)
+    handler = registry.handlers[(DOMAIN, SERVICE_COMPARE_STATIONS)]
+    assert asyncio.run(handler(SimpleNamespace(data={}))) == {"stations": {}, "ranking": []}

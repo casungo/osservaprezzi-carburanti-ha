@@ -95,11 +95,14 @@ class TestEntitySetupRegression:
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
-        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-        hass = SimpleNamespace(data={})
+        coordinator.config_entry = entry
+        entry.runtime_data = OsservaprezziRuntimeData(
+            stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         added_entities = []
 
-        def _add_entities(entities, update_before_add=False):
+        def _add_entities(entities, update_before_add=False, **kwargs):
             added_entities.extend(entities)
             assert update_before_add is False
 
@@ -110,9 +113,6 @@ class TestEntitySetupRegression:
             "12345_gasolio_self",
             "12345_benzina_servito",
             "12345_name",
-            "12345_nomeImpianto",
-            "12345_id",
-            "12345_brand",
             "12345_location",
             "12345_next_change",
         } <= unique_ids
@@ -138,15 +138,18 @@ class TestEntitySetupRegression:
             data={CONF_STATION_ID: "12345"},
             async_on_unload=unload_callbacks.append,
         )
-        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-        hass = SimpleNamespace(data={})
+        coordinator.config_entry = entry
+        entry.runtime_data = OsservaprezziRuntimeData(
+            stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         batches = []
 
         asyncio.run(
             async_setup_entry(
                 hass,
                 entry,
-                lambda entities, update_before_add=False: batches.append(list(entities)),
+                lambda entities, update_before_add=False, **kwargs: batches.append(list(entities)),
             )
         )
         initial_ids = {entity._attr_unique_id for entity in batches[0]}
@@ -166,7 +169,8 @@ class TestEntitySetupRegression:
         listeners[0]()
         assert len(batches) == batch_count
         assert initial_ids.isdisjoint({"12345_gpl_self", "12345_company"})
-        unload_callbacks[0]()
+        for unsubscribe in unload_callbacks:
+            unsubscribe()
         assert listeners == []
 
     def test_setup_ignores_non_mapping_fuel_payload(self):
@@ -183,8 +187,11 @@ class TestEntitySetupRegression:
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
-        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-        hass = SimpleNamespace(data={})
+        coordinator.config_entry = entry
+        entry.runtime_data = OsservaprezziRuntimeData(
+            stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         added_entities = []
 
         asyncio.run(
@@ -210,8 +217,11 @@ class TestEntitySetupRegression:
             data={CONF_STATION_ID: "12345"},
             async_on_unload=lambda unsubscribe: None,
         )
-        entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-        hass = SimpleNamespace(data={})
+        coordinator.config_entry = entry
+        entry.runtime_data = OsservaprezziRuntimeData(
+            stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+        )
+        hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
         added_entities = []
 
         asyncio.run(
@@ -282,12 +292,12 @@ class TestEntitySetupRegression:
         coordinator = SimpleNamespace(data=_sample_station_data(), hass=SimpleNamespace())
         entry = SimpleNamespace(data={CONF_STATION_ID: "12345"})
         info = StationInfoSensor(
-            coordinator, entry, next(d for d in INFO_SENSOR_DESCRIPTORS if d.key == "brand")
+            coordinator, entry, next(d for d in INFO_SENSOR_DESCRIPTORS if d.key == "name")
         )
         location = StationLocationSensor(coordinator, entry)
 
-        assert info.entity_description.translation_key == "station_brand"
-        assert info.native_value == "Brand X"
+        assert info.entity_description.translation_key == "station_name"
+        assert info.native_value == coordinator.data["station_info"]["name"]
         assert location._attr_translation_key == "location"
         assert location.native_value == "Via Roma 1"
         assert location.available is True
@@ -328,7 +338,7 @@ class TestEntitySetupRegression:
 
     def test_schedule_entity_registers_and_removes_timer(self, monkeypatch):
         def listener():
-            calls.append("removed")
+            return calls.append("removed")
 
         calls = []
 
@@ -807,7 +817,7 @@ class TestNextChangeSensor:
         sensor._next_change = ("no_schedule", None)
         sensor._next_change_now = None
         assert sensor._compute_next_change() == ("no_schedule", None)
-        assert sensor.native_value == "no_schedule"
+        assert sensor.native_value is None
         assert sensor.extra_state_attributes == {
             "change_type": "no_schedule",
             "next_change_time": None,
@@ -828,7 +838,7 @@ class TestNextChangeSensor:
         sensor._refresh_next_change()
 
         assert sensor._compute_next_change() == ("closes_at", datetime(2025, 3, 17, 20, 0))
-        assert sensor.native_value == "20:00"
+        assert sensor.native_value == sensor_module.dt_util.as_utc(sensor._next_change[1])
         assert sensor.extra_state_attributes["minutes_until_change"] == 480
         assert sensor.available is True
 
@@ -855,7 +865,7 @@ class TestNextChangeSensor:
 
         sensor._compute_next_change = counted_compute
         sensor._refresh_next_change()
-        assert sensor.native_value == "20:00"
+        assert sensor.native_value == sensor_module.dt_util.as_utc(sensor._next_change[1])
         assert sensor.extra_state_attributes["change_type"] == "closes_at"
         assert calls == 1
 
@@ -910,7 +920,7 @@ class TestNextChangeSensor:
         monkeypatch.setattr(sensor_module.dt_util, "now", lambda: datetime(2025, 3, 17, 13, 0))
         sensor._refresh_next_change()
 
-        assert sensor.native_value == "08:00 (18/03)"
+        assert sensor.native_value == sensor_module.dt_util.as_utc(sensor._next_change[1])
 
     def test_no_opening_found(self, monkeypatch):
         sensor = self._sensor(
@@ -1002,12 +1012,12 @@ def test_next_change_recomputes_on_coordinator_update(monkeypatch):
     coordinator = SimpleNamespace(data={"opening_hours": []}, hass=SimpleNamespace())
     entity = StationNextChangeSensor(coordinator, SimpleNamespace(data={CONF_STATION_ID: "1"}))
     entity._handle_coordinator_update()
-    assert entity.native_value == "no_schedule"
+    assert entity.native_value is None
     coordinator.data["opening_hours"] = [
         {"giornoSettimanaId": 1, "oraAperturaMattina": "08:00", "oraChiusuraMattina": "12:00"}
     ]
     entity._handle_coordinator_update()
-    assert entity.native_value == "12:00"
+    assert entity.native_value == sensor_module.dt_util.as_utc(entity._next_change[1])
     assert entity.extra_state_attributes["change_type"] == "closes_at"
 
 
@@ -1167,10 +1177,84 @@ def test_setup_filters_fuel_sensors(options, expected):
         options=options,
         async_on_unload=lambda unsubscribe: None,
     )
-    entry.runtime_data = OsservaprezziRuntimeData(coordinator)
-    hass = SimpleNamespace(data={})
+    coordinator.config_entry = entry
+    entry.runtime_data = OsservaprezziRuntimeData(
+        stations={"subentry": SimpleNamespace(coordinator=coordinator)}
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"coordinator": coordinator}}})
     entities = []
     asyncio.run(async_setup_entry(hass, entry, lambda added, **kwargs: entities.extend(added)))
     assert {
         entity._fuel_key for entity in entities if isinstance(entity, OsservaprezziStationSensor)
     } == expected
+
+
+def test_market_summary_prices_across_stations():
+    hass = SimpleNamespace(data={DOMAIN: {}})
+    coordinators = [
+        SimpleNamespace(
+            data={
+                "station_info": {"id": name, "name": name, "brand": "brand"},
+                "fuels": {"benzina_self": {"price": price, "last_update": "today"}},
+            }
+        )
+        for name, price in (("one", 1.8), ("two", 1.6))
+    ]
+    state = sensor_module.MarketSummaryState(coordinators)
+    cheapest = sensor_module.OsservaprezziCheapestFuelSensor(hass, state, "Benzina", "benzina")
+    average = sensor_module.OsservaprezziAverageFuelSensor(hass, state, "Benzina", "benzina")
+    state.entities = [cheapest, average]
+    assert cheapest.native_value == 1.6
+    assert cheapest.extra_state_attributes == {
+        "station_id": "two",
+        "station_name": "two",
+        "brand": "brand",
+        "service_mode": "self",
+        "stations_compared": 2,
+        "last_update": "today",
+    }
+    assert average.native_value == 1.7
+    assert average.extra_state_attributes == {
+        "stations_compared": 2,
+        "min_price": 1.6,
+        "max_price": 1.8,
+    }
+    writes = []
+    cheapest.hass = hass
+    cheapest.async_write_ha_state = lambda: writes.append(True)
+    state.refresh()
+    assert writes
+    methane = sensor_module.OsservaprezziAverageFuelSensor(hass, state, "Metano", "metano")
+    assert methane._attr_native_unit_of_measurement == "€/kg"
+    assert methane.native_value is None
+    assert methane.extra_state_attributes == {"stations_compared": 0}
+    missing = sensor_module.OsservaprezziCheapestFuelSensor(hass, state, "Metano", "metano")
+    assert missing.native_value is None
+    assert missing.extra_state_attributes == {"stations_compared": 0}
+
+
+def test_market_summary_ignores_invalid_prices():
+    valid = SimpleNamespace(data={"fuels": {"benzina_self": {"price": 1.5}}})
+    invalid = SimpleNamespace(
+        data={
+            "fuels": {
+                "bad": {},
+                "benzina_self": {"price": None},
+                "benzina_servito": {"price": float("nan")},
+                "benzina_x": {"price": True},
+                "benzina_y": {"price": -1},
+                "gasolio_self": {"price": 1},
+                "benzina_z": "bad",
+                1: {},
+            }
+        }
+    )
+    state = sensor_module.MarketSummaryState([valid, invalid])
+    sensor = sensor_module.OsservaprezziCheapestFuelSensor(
+        SimpleNamespace(), state, "Benzina", "benzina"
+    )
+    assert sensor.native_value == 1.5
+    valid.data = {"fuels": []}
+    assert sensor.native_value is None
+    valid.data = None
+    assert sensor.native_value is None

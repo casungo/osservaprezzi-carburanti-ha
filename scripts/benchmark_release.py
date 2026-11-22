@@ -648,8 +648,19 @@ def main() -> None:
         upgraded, args.repeats, len(args.station_ids), args.reloads
     )
     baseline_identities = report["runs"][0]["result"]["identities"]
+    legacy_removed = tuple(upgraded.get("legacy_removed_suffixes", ()))
+
+    def expected_removal(uid: str) -> bool:
+        return upgraded["identities"].get(uid) is None and any(
+            uid.endswith(f"_{suffix}") for suffix in legacy_removed
+        )
+
+    report["expected_legacy_entity_removals"] = sum(
+        expected_removal(uid) for uid in baseline_identities
+    )
     report["cross_version_identity_changes"] = sum(
-        upgraded["identities"].get(uid) != eid for uid, eid in baseline_identities.items()
+        upgraded["identities"].get(uid) != eid and not expected_removal(uid)
+        for uid, eid in baseline_identities.items()
     )
     if report["cross_version_identity_changes"]:
         report["guardrail_failures"]["upgrade"].append("cross_version_identity_changes")

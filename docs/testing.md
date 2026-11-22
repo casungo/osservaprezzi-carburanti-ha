@@ -24,7 +24,7 @@ make check
 ```
 
 Individual targets: `make lint`, `make format`, `make format-check`, `make typecheck`,
-`make test`, and `make test-ha`. Override `BASE_PYTHON` to select the Python 3.14 executable used for setup, or `PYTHON` and `HA_PYTHON` when using custom environments. The environments remain separate to isolate the unit tests from Home Assistant pytest plugins.
+`make test`, and `make test-ha`. Setup finds Python 3.14 on PATH or through `uv python find 3.14`. Override `BASE_PYTHON` to select another Python 3.14 executable, or `PYTHON` and `HA_PYTHON` when using custom environments. The environments remain separate to isolate the unit tests from Home Assistant pytest plugins.
 
 If you use [`pre-commit`](https://pre-commit.com/), enable the hooks in `.pre-commit-config.yaml`
 with `pre-commit install`.

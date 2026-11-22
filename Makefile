@@ -2,7 +2,7 @@
 
 PYTHON ?= .venv/bin/python
 HA_PYTHON ?= .venv-ha/bin/python
-BASE_PYTHON ?= python3.14
+BASE_PYTHON ?= $(shell command -v python3.14 2>/dev/null || uv python find 3.14 2>/dev/null || echo python3.14)
 
 test:
 	$(PYTHON) -m coverage run --branch --source=custom_components/osservaprezzi_carburanti -m pytest -q
